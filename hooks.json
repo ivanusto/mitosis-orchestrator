@@ -1,0 +1,50 @@
+{
+  "mitosis-orchestrator": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/enforce-orchestrator.py session-start",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/enforce-orchestrator.py pre-invocation",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/enforce-orchestrator.py pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "invoke_subagent|manage_subagents|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ./scripts/enforce-orchestrator.py post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ./scripts/enforce-orchestrator.py stop",
+        "timeout": 5
+      }
+    ]
+  }
+}

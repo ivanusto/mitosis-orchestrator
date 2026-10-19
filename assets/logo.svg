@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <defs>
+    <linearGradient id="mitosisCore" x1="20" y1="14" x2="108" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7C4DFF"/>
+      <stop offset="50%" stop-color="#2979FF"/>
+      <stop offset="100%" stop-color="#00E5FF"/>
+    </linearGradient>
+    <linearGradient id="flashWorker" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFD740"/>
+      <stop offset="100%" stop-color="#FF6D00"/>
+    </linearGradient>
+    <linearGradient id="flashScout" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#69F0AE"/>
+      <stop offset="100%" stop-color="#00BFA5"/>
+    </linearGradient>
+  </defs>
+  <!-- Dividing cell membrane / mitotic cleavage furrow motif -->
+  <path d="M 64,14 C 88,14 110,26 110,48 C 110,62 100,66 104,78 C 108,90 106,114 90,114 C 78,114 70,104 64,104 C 58,104 50,114 38,114 C 22,114 20,90 24,78 C 28,66 18,62 18,48 C 18,26 40,14 64,14 Z" stroke="url(#mitosisCore)" stroke-width="3.5" fill="rgba(68, 138, 255, 0.08)"/>
+  <!-- Mitotic spindle fibers / apparatus connecting hub to daughter nodes -->
+  <path d="M 64,44 C 36,50 24,68 34,84" stroke="#FFD740" stroke-width="1.8" stroke-dasharray="3 2" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 64,44 C 54,60 44,72 34,84" stroke="#FFD740" stroke-width="1.8" opacity="0.7"/>
+  <line x1="64" y1="44" x2="34" y2="84" stroke="#FF9100" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M 64,44 C 92,50 104,68 94,84" stroke="#69F0AE" stroke-width="1.8" stroke-dasharray="3 2" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 64,44 C 74,60 84,72 94,84" stroke="#69F0AE" stroke-width="1.8" opacity="0.7"/>
+  <line x1="64" y1="44" x2="94" y2="84" stroke="#00BFA5" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Central division axis / equatorial plate -->
+  <line x1="64" y1="60" x2="64" y2="96" stroke="#00E5FF" stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.85"/>
+  <line x1="58" y1="78" x2="70" y2="78" stroke="#00E5FF" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <!-- Primary Mitosis Hub Node -->
+  <circle cx="64" cy="44" r="16" fill="url(#mitosisCore)" stroke="#FFFFFF" stroke-width="2.5"/>
+  <text x="64" y="49" text-anchor="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-weight="800" font-size="13">Mi</text>
+  <!-- Flash Worker Daughter Node (Left) -->
+  <circle cx="34" cy="84" r="11" fill="url(#flashWorker)" stroke="#FFFFFF" stroke-width="2"/>
+  <path d="M35 77 L29 85 H34 L33 91 L39 83 H34 Z" fill="#FFFFFF"/>
+  <!-- Flash-Lite Scout Daughter Node (Right) -->
+  <circle cx="94" cy="84" r="11" fill="url(#flashScout)" stroke="#FFFFFF" stroke-width="2"/>
+  <circle cx="94" cy="84" r="5" stroke="#FFFFFF" stroke-width="1.8" fill="none"/>
+  <circle cx="94" cy="84" r="2" fill="#FFFFFF"/>
+</svg>
