@@ -59,7 +59,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.3.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.3.1)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
