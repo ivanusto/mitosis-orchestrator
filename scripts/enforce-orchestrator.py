@@ -86,6 +86,13 @@ SCOUT_TYPE = "flash-lite-scout"
 WORKER_TYPE = "flash-worker"
 STATE_FILENAME = "mitosis_orchestrator_state.json"
 
+
+def is_claude_code_payload(payload: Dict[str, Any]) -> bool:
+    """Return True if payload matches Claude Code hook input schemas."""
+    if not isinstance(payload, dict):
+        return False
+    return any(k in payload for k in ("hook_event_name", "session_id", "tool_name", "tool_input"))
+
 # ---------------------------------------------------------------------------
 # Classification vocabularies
 # ---------------------------------------------------------------------------
@@ -168,39 +175,96 @@ LOG_OR_TRANSCRIPT_RE = re.compile(
     r"(?:^|[/\\])(?:transcript(?:_full)?\.jsonl|[^/\\]+\.log)$",
     re.IGNORECASE,
 )
-READ_TOOLS = {"view_file", "view_file_outline", "view_code_item"}
-MUTATION_TOOLS = {"write_to_file", "replace_file_content", "multi_replace_file_content"}
+READ_TOOLS = {"view_file", "view_file_outline", "view_code_item", "Read", "NotebookRead"}
+MUTATION_TOOLS = {
+    "write_to_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+}
 
 
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 
-def _allow(reason: str = "Mitosis Orchestrator: pass-through.", overrides: Optional[List[str]] = None) -> Dict[str, Any]:
+def _extract_tool_call(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    if is_claude_code_payload(payload):
+        name = str(payload.get("tool_name") or "").strip()
+        inp = payload.get("tool_input")
+        args = inp if isinstance(inp, dict) else {}
+        return name, args
+    tool_call = payload.get("toolCall")
+    if isinstance(tool_call, dict):
+        name = str(tool_call.get("name") or "").strip()
+        args = tool_call.get("args")
+        return name, args if isinstance(args, dict) else {}
+    return "", {}
+
+
+def _allow(
+    reason: str = "Mitosis Orchestrator: pass-through.",
+    overrides: Optional[List[str]] = None,
+    payload: Optional[Dict[str, Any]] = None,
+    updated_input: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if payload and is_claude_code_payload(payload):
+        out: Dict[str, Any] = {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": reason,
+        }
+        if updated_input is not None:
+            out["updatedInput"] = updated_input
+        return {"hookSpecificOutput": out}
     res: Dict[str, Any] = {"decision": "allow", "reason": reason}
+    if updated_input is not None:
+        res["overwrite"] = updated_input
     if overrides:
         res["permissionOverrides"] = overrides
     return res
 
 
-def _deny(reason: str) -> Dict[str, Any]:
+def _deny(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if payload and is_claude_code_payload(payload):
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
     return {"decision": "deny", "reason": reason}
 
 
-def _ask(reason: str) -> Dict[str, Any]:
+def _ask(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if payload and is_claude_code_payload(payload):
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": reason,
+            }
+        }
     return {"decision": "ask", "reason": reason}
 
 
 def is_primary_agent(payload: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> bool:
     """Return True if caller is the primary orchestrator agent (not a subagent)."""
-    if payload.get("isSubagent") is True:
+    if payload.get("isSubagent") is True or payload.get("is_subagent") is True:
         return False
-    cid = str(payload.get("conversationId") or "").strip().lower()
+    cid = str(payload.get("conversationId") or payload.get("session_id") or "").strip().lower()
     if state and cid and cid in state.get("subagents", {}):
         return False
     for wp in payload.get("workspacePaths") or []:
         if "/worktrees/" in str(wp).replace("\\", "/"):
             return False
+    cwd = str(payload.get("cwd") or "").replace("\\", "/")
+    if "/worktrees/" in cwd:
+        return False
     return True
 
 
@@ -295,7 +359,12 @@ is_argon_tier = is_frontier_tier
 
 
 def _get_env(*names: str, default: str = "") -> str:
+    expanded_names: List[str] = []
     for name in names:
+        if name.startswith("AGY_MITOSIS_"):
+            expanded_names.append("CLAUDE_MITOSIS_" + name[len("AGY_MITOSIS_"):])
+        expanded_names.append(name)
+    for name in expanded_names:
         val = os.environ.get(name)
         if val is not None and val.strip() != "":
             return val.strip()
@@ -303,17 +372,27 @@ def _get_env(*names: str, default: str = "") -> str:
 
 
 def _env_flag(*names: str) -> bool:
+    expanded_names: List[str] = []
     for name in names:
+        if name.startswith("AGY_MITOSIS_"):
+            expanded_names.append("CLAUDE_MITOSIS_" + name[len("AGY_MITOSIS_"):])
+        expanded_names.append(name)
+    for name in expanded_names:
         val = os.environ.get(name)
         if val is not None and val.strip() != "":
             return val.strip() == "1"
     return False
 
 
-def settings_path() -> str:
-    override = os.environ.get("AGY_ANTIGRAVITY_SETTINGS", "").strip()
-    if override:
-        return os.path.expanduser(override)
+def settings_path(payload: Optional[Dict[str, Any]] = None) -> str:
+    claude_override = os.environ.get("CLAUDE_SETTINGS_PATH", "").strip()
+    if claude_override:
+        return os.path.expanduser(claude_override)
+    if payload and is_claude_code_payload(payload):
+        return os.path.expanduser("~/.claude/settings.json")
+    agy_override = os.environ.get("AGY_ANTIGRAVITY_SETTINGS", "").strip()
+    if agy_override:
+        return os.path.expanduser(agy_override)
     return os.path.expanduser("~/.gemini/antigravity-cli/settings.json")
 
 
@@ -346,7 +425,7 @@ def _state_file(payload: Dict[str, Any]) -> Optional[Path]:
     if artifact_dir:
         base = Path(artifact_dir)
     else:
-        cid = str(payload.get("conversationId") or "default")
+        cid = str(payload.get("conversationId") or payload.get("session_id") or "default")
         base = Path(tempfile.gettempdir()) / "mitosis-orchestrator" / cid
     try:
         base.mkdir(parents=True, exist_ok=True)
@@ -501,16 +580,16 @@ def sync_subagents(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
 # session-start
 # ---------------------------------------------------------------------------
 
-def _read_settings() -> Tuple[Optional[Dict[str, Any]], str]:
-    path = settings_path()
-    if not os.path.exists(path):
-        return None, path
+def _read_settings(path: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str]:
+    target_path = path or settings_path()
+    if not os.path.exists(target_path):
+        return None, target_path
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(target_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return (data if isinstance(data, dict) else None), path
+        return (data if isinstance(data, dict) else None), target_path
     except (OSError, json.JSONDecodeError):
-        return None, path
+        return None, target_path
 
 
 def _write_settings_atomic(path: str, data: Dict[str, Any]) -> None:
@@ -528,19 +607,23 @@ def _write_settings_atomic(path: str, data: Dict[str, Any]) -> None:
         raise
 
 
-def check_primary_model_settings() -> Tuple[str, str]:
+def check_primary_model_settings(payload: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
     """Return (status, model) where status is one of:
     'ok' (frontier/mitosis), 'warn' (non-frontier, not changed), 'pinned' (rewritten, opt-in),
     'unknown' (settings file missing/unreadable), 'silenced'.
     """
-    preferred = _get_env("AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL")
-    target = preferred if (preferred in ALLOWED_PRIMARY_MODELS or is_frontier_tier(preferred)) else DEFAULT_PRIMARY_MODEL
-    data, path = _read_settings()
+    path = settings_path(payload)
+    is_claude = (payload and is_claude_code_payload(payload)) or "CLAUDE_SETTINGS_PATH" in os.environ
+    preferred = _get_env("CLAUDE_MITOSIS_PRIMARY_MODEL", "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL")
+    default_model = "Claude 3.7 Sonnet" if is_claude else DEFAULT_PRIMARY_MODEL
+    target = preferred if (preferred in ALLOWED_PRIMARY_MODELS or is_frontier_tier(preferred)) else default_model
+    data, path = _read_settings(path)
     if data is None:
         return "unknown", target
     current = str(data.get("model") or "").strip()
 
     if _env_flag(
+        "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_ALLOW_NON_MITOSIS_PRIMARY",
         "AGY_ALLOW_NON_ARGON_PRIMARY",
@@ -549,7 +632,7 @@ def check_primary_model_settings() -> Tuple[str, str]:
         return "silenced", current or target
     if is_frontier_tier(current) and (not preferred or current == preferred):
         return "ok", current
-    if not _env_flag("AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS"):
+    if not _env_flag("CLAUDE_MITOSIS_PIN_SETTINGS", "AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS"):
         return "warn", current
     try:
         data["model"] = target
@@ -568,23 +651,41 @@ POLICY_NOTICE = (
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
 
+CLAUDE_POLICY_NOTICE = (
+    "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
+    "location, git/log checks, single-file inspection) to `haiku` "
+    "(`subagent_type: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
+    "research and scoped code edits to `sonnet` (`subagent_type: \"flash-worker\"`). "
+    "Never use `model: \"inherit\"` on subagents. "
+    "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+)
 
-def handle_session_start(_payload: Dict[str, Any]) -> Dict[str, Any]:
-    status, model = check_primary_model_settings()
+
+def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    p = payload or {}
+    status, model = check_primary_model_settings(p)
     if status == "ok":
         note = f"Primary model is '{model}'."
     elif status == "pinned":
-        note = f"Restored primary model pin to '{model}' in settings.json (AGY_MITOSIS_PIN_SETTINGS=1)."
+        note = f"Restored primary model pin to '{model}' in settings.json (pin settings opted-in)."
     elif status == "warn":
         note = (
             f"WARNING: settings.json primary model is '{model or 'unset'}', not a frontier model. "
             "Ask the user to switch to a supported frontier model (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
-            "or set AGY_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
+            "or set AGY_MITOSIS_ALLOW_NON_PRIMARY=1 / CLAUDE_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
         )
     elif status == "silenced":
         note = f"Primary model is '{model}' (non-frontier warnings silenced)."
     else:
         note = "settings.json not found; the live model is checked on every turn instead."
+
+    if is_claude_code_payload(p):
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CLAUDE_POLICY_NOTICE}"
+            }
+        }
     return {
         "injectSteps": [
             {"systemMessage": {"systemMessage": f"[Mitosis Orchestrator Active] {note} {POLICY_NOTICE}"}}
@@ -593,7 +694,7 @@ def handle_session_start(_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# pre-invocation
+# pre-invocation / user-prompt-submit
 # ---------------------------------------------------------------------------
 
 def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -602,28 +703,45 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     state["consecutive_failures"] = 0
     save_state(payload, state)
 
-    model_name = str(payload.get("modelName") or "")
+    model_name = str(payload.get("modelName") or payload.get("model_name") or payload.get("model") or "")
+    if not model_name and is_claude_code_payload(payload):
+        data, _ = _read_settings(settings_path(payload))
+        if data and isinstance(data, dict):
+            model_name = str(data.get("model") or "")
+
     if not model_name or is_frontier_tier(model_name) or _env_flag(
+        "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_ALLOW_NON_MITOSIS_PRIMARY",
         "AGY_ALLOW_NON_ARGON_PRIMARY",
         "AGY_ARGON_ALLOW_NON_PRIMARY",
     ):
         return {}
-    key = f"{payload.get('conversationId', '')}:{payload.get('invocationNum', 0)}"
+    cid = str(payload.get("conversationId") or payload.get("session_id") or "")
+    inv_num = payload.get("invocationNum", 0)
+    key = f"{cid}:{inv_num}"
     warned: List[str] = state.setdefault("warned_invocations", [])
     if key in warned:
         return {}
     warned.append(key)
     save_state(payload, state)
+
+    warn_text = (
+        f"[Mitosis Orchestrator] The active session model is '{model_name}', which is "
+        "not a frontier model. Tell the user to switch Model Selection to "
+        "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
+    )
+    if is_claude_code_payload(payload):
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": warn_text
+            }
+        }
     return {
         "injectSteps": [
             {
-                "ephemeralMessage": (
-                    f"[Mitosis Orchestrator] The active session model is '{model_name}', which is "
-                    "not a frontier model. Tell the user to switch Model Selection to "
-                    "a supported frontier model (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
-                )
+                "ephemeralMessage": warn_text
             }
         ]
     }
@@ -649,7 +767,14 @@ def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str
      10. short prompt (<= 320 chars)            -> flash_lite
      11. otherwise                              -> flash
     """
-    type_name = str(_get(subagent, "TypeName", "typeName", default="")).strip().lower()
+    raw_type_name = str(_get(subagent, "TypeName", "typeName", "subagent_type", "subagentType", default="")).strip()
+    prefix = ""
+    bare_type = raw_type_name.lower()
+    if ":" in bare_type:
+        prefix_part, bare_type = raw_type_name.split(":", 1)
+        prefix = f"{prefix_part}:"
+        bare_type = bare_type.strip().lower()
+
     role = str(_get(subagent, "Role", "role", default="")).strip()
     prompt = str(_get(subagent, "Prompt", "prompt", default="")).strip()
     workspace = str(_get(subagent, "Workspace", "workspace", default="inherit")).strip().lower()
@@ -660,19 +785,20 @@ def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str
     heavy = HEAVY_RE.search(text)
     lite = LITE_RE.search(text)
 
-    if type_name == WORKER_TYPE:
+    if bare_type == WORKER_TYPE:
         return "flash", None, "flash-worker type"
     if mutation:
-        if type_name == SCOUT_TYPE:
-            return "flash", WORKER_TYPE, f"mutation verb '{mutation.group(0)}' on read-only scout; upgraded to flash-worker"
+        if bare_type == SCOUT_TYPE:
+            upgrade_type = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
+            return "flash", upgrade_type, f"mutation verb '{mutation.group(0)}' on read-only scout; upgraded to flash-worker"
         return "flash", None, f"mutation verb '{mutation.group(0)}'"
-    if type_name == SCOUT_TYPE:
+    if bare_type == SCOUT_TYPE:
         return "flash_lite", None, "flash-lite-scout type"
     if workspace in ("branch", "share"):
         return "flash", None, f"Workspace '{workspace}' implies writes"
     if heavy:
         return "flash", None, f"heavy signal '{heavy.group(0)}'"
-    if type_name == "self":
+    if bare_type == "self":
         return "flash", None, "self type carries the full tool set"
     if requested in ALLOWED_SUBAGENT_MODELS:
         return requested, None, "explicit model honoured"
@@ -720,7 +846,7 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
             item.pop("model", None)
             item["Model"] = target_model
             changes.append(f"{label}: {current_model} -> {target_model} ({reason})")
-        if type_override and current_type.lower() != type_override:
+        if type_override and current_type.lower() != type_override.lower():
             item.pop("typeName", None)
             item["TypeName"] = type_override
             changes.append(f"{label}: TypeName {current_type} -> {type_override}")
@@ -746,6 +872,71 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
         "decision": "allow",
         "reason": "Mitosis Orchestrator pinned subagent model(s): " + "; ".join(changes),
         "overwrite": {key: updated},
+    }
+
+
+def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return _deny(f"{tool_name} prompt cannot be empty.", payload)
+
+    subagent_type = str(args.get("subagent_type") or args.get("subagentType") or "").strip()
+    prefix = ""
+    bare_type = subagent_type
+    if ":" in bare_type:
+        prefix_part, bare_type = bare_type.split(":", 1)
+        prefix = f"{prefix_part}:"
+        bare_type = bare_type.strip()
+
+    description = str(args.get("description") or args.get("role") or "").strip()
+    isolation = str(args.get("isolation") or args.get("workspace") or "inherit").strip().lower()
+    workspace = "branch" if isolation == "worktree" else isolation
+    model_req = str(args.get("model") or "inherit").strip().lower()
+
+    # Map Claude Code model strings for classification
+    internal_model = "flash_lite" if model_req in ("haiku", "flash_lite") else ("flash" if model_req in ("sonnet", "flash") else model_req)
+
+    item = {
+        "TypeName": subagent_type,
+        "Role": description,
+        "Prompt": prompt,
+        "Workspace": workspace,
+        "Model": internal_model,
+    }
+
+    target_tier, type_override, reason = classify_subagent(item)
+    claude_model = "haiku" if target_tier == "flash_lite" else "sonnet"
+
+    updated_input = copy.deepcopy(args)
+    updated_input["model"] = claude_model
+    if type_override:
+        if prefix and not type_override.startswith(prefix):
+            type_override = f"{prefix}{type_override}"
+        if "subagentType" in updated_input and "subagent_type" not in updated_input:
+            updated_input["subagentType"] = type_override
+        else:
+            updated_input["subagent_type"] = type_override
+
+    target_type = type_override or subagent_type
+    spawns = [{
+        "role": description or target_type or tool_name.lower(),
+        "type": target_type,
+        "model": target_tier,
+        "workspace": workspace,
+        "active_branch": workspace == "branch",
+    }]
+    state = load_state(payload)
+    state.setdefault("pending_spawns", []).extend(spawns)
+    save_state(payload, state)
+
+    reason_msg = f"Mitosis Orchestrator pinned subagent model: {claude_model} ({reason})"
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": reason_msg,
+            "updatedInput": updated_input,
+        }
     }
 
 
@@ -932,6 +1123,18 @@ def allowed_roots(payload: Dict[str, Any]) -> List[Path]:
             roots.append(Path(os.path.expanduser(str(wp))).resolve())
         except OSError:
             pass
+    cwd = payload.get("cwd")
+    if cwd:
+        try:
+            roots.append(Path(os.path.expanduser(str(cwd))).resolve())
+        except OSError:
+            pass
+    proj_dir = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("project_dir")
+    if proj_dir:
+        try:
+            roots.append(Path(os.path.expanduser(str(proj_dir))).resolve())
+        except OSError:
+            pass
     artifact_dir = payload.get("artifactDirectoryPath")
     if artifact_dir:
         try:
@@ -991,29 +1194,29 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
 
 
 def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or AGY_ARGON_AUTO_ALLOW=1)
+    # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or CLAUDE_MITOSIS_AUTO_ALLOW=1)
     # to let project-scoped file and command tools skip the permission prompt.
     # When unset or for tools without path arguments, return an explicit "allow" pass-through.
-    if not _env_flag("AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
-        return _allow("Mitosis Orchestrator: pass-through.")
+    if not _env_flag("CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
+        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
     roots = allowed_roots(payload)
     if not roots:
-        return _allow("Mitosis Orchestrator: pass-through.")
+        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
 
-    if tool_name == "run_command":
-        cwd = str(_get(args, "Cwd", "cwd", default="") or "")
-        cmd = str(_get(args, "CommandLine", "commandLine", "command", default="") or "")
+    if tool_name in ("run_command", "Bash"):
+        cwd = str(_get(args, "cwd", "Cwd", default="") or payload.get("cwd") or "")
+        cmd = str(_get(args, "command", "CommandLine", "commandLine", default="") or "")
         if not cmd:
-            return _allow("Mitosis Orchestrator: pass-through.")
+            return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
         if cwd and not _within_roots(cwd, roots):
-            return _ask("Mitosis Orchestrator: Cwd is outside the workspace.")
+            return _ask("Mitosis Orchestrator: Cwd is outside the workspace.", payload=payload)
         ok, why = command_stays_in_workspace(cmd, cwd, roots)
         if ok:
-            return _allow("Mitosis Orchestrator: command stays inside the workspace.", [f"command({cmd})"])
-        return _ask(f"Mitosis Orchestrator: {why}.")
+            return _allow("Mitosis Orchestrator: command stays inside the workspace.", overrides=[f"command({cmd})"], payload=payload)
+        return _ask(f"Mitosis Orchestrator: {why}.", payload=payload)
 
     targets: List[Any] = []
-    for key in PATH_ARG_KEYS:
+    for key in ("file_path", "notebook_path") + PATH_ARG_KEYS:
         value = _get(args, key, key[0].lower() + key[1:], default=None)
         if isinstance(value, str) and value:
             targets.append(value)
@@ -1022,40 +1225,39 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
         if isinstance(value, list):
             targets.extend(v for v in value if isinstance(v, str) and v)
     if not targets:
-        return _allow("Mitosis Orchestrator: pass-through.")
+        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
     outside = [t for t in targets if not _within_roots(t, roots)]
     if outside:
-        return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.")
+        return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.", payload=payload)
     # "allow" alone does not satisfy Antigravity's permission system (headless
     # runs still auto-deny), so grant the matching read_file/write_file rule
     # for exactly these in-workspace paths.
-    action = "write_file" if WRITE_TOOL_RE.search(tool_name) else "read_file"
-    return _allow("Mitosis Orchestrator: path is inside the workspace.", [f"{action}({t})" for t in targets])
+    action = "write_file" if (WRITE_TOOL_RE.search(tool_name) or tool_name in MUTATION_TOOLS) else "read_file"
+    return _allow("Mitosis Orchestrator: path is inside the workspace.", overrides=[f"{action}({t})" for t in targets], payload=payload)
 
 
 def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
-    tool_call = payload.get("toolCall")
-    if not isinstance(tool_call, dict):
-        return _allow("Mitosis Orchestrator: pass-through.")
-    tool_name = str(tool_call.get("name") or "").strip()
-    args = tool_call.get("args")
-    if not isinstance(args, dict):
-        return _allow("Mitosis Orchestrator: pass-through.")
+    tool_name, args = _extract_tool_call(payload)
+    if not tool_name:
+        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
 
     state = load_state(payload)
 
     # Circuit breaker: if consecutive failures >= 2 and breaker is not disabled ("0"),
     # block retry loops on commands and subagents.
-    if _get_env("AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") != "0":
+    if _get_env("CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") != "0":
         fails = int(state.get("consecutive_failures") or 0)
-        if fails >= 2 and tool_name in ("run_command", "invoke_subagent"):
+        if fails >= 2 and tool_name in ("run_command", "invoke_subagent", "Bash", "Task", "Agent"):
             return _deny(
                 f"[Mitosis Orchestrator] Circuit breaker tripped after {fails} consecutive failure(s). "
-                "Stop retrying and report the blocker to the user."
+                "Stop retrying and report the blocker to the user.",
+                payload,
             )
 
     if tool_name == "invoke_subagent":
         return _handle_invoke_subagent(payload, args)
+    if tool_name in ("Task", "Agent"):
+        return _handle_claude_task_or_agent(payload, tool_name, args)
     if tool_name == "send_message":
         return _handle_send_message(payload, args)
     if tool_name == "run_workflow":
@@ -1068,9 +1270,11 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Primary agent guards (context hygiene and fast-path budget)
     if is_primary_agent(payload, state):
         # Context hygiene: block direct reads of raw logs or transcripts by primary agent
-        if not _env_flag("AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS") and tool_name in READ_TOOLS:
+        if not _env_flag("CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS") and tool_name in READ_TOOLS:
             target = str(
-                args.get("AbsolutePath")
+                args.get("file_path")
+                or args.get("notebook_path")
+                or args.get("AbsolutePath")
                 or args.get("TargetFile")
                 or args.get("FilePath")
                 or args.get("Path")
@@ -1081,13 +1285,21 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return _deny(
                     f"[Mitosis Orchestrator] Direct inspection of log/transcript file '{Path(target).name}' "
                     "by the primary agent is blocked for context hygiene. "
-                    "Delegate log slicing to `flash-lite-scout` (TypeName='flash-lite-scout')."
+                    "Delegate log slicing to `flash-lite-scout` (TypeName='flash-lite-scout').",
+                    payload,
                 )
 
         # Fast-path budget: direct workspace file mutations and test-runner loops
-        if not _env_flag("AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
+        if not _env_flag("CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
             if tool_name in MUTATION_TOOLS:
-                target = str(args.get("TargetFile") or args.get("AbsolutePath") or args.get("FilePath") or "")
+                target = str(
+                    args.get("file_path")
+                    or args.get("notebook_path")
+                    or args.get("TargetFile")
+                    or args.get("AbsolutePath")
+                    or args.get("FilePath")
+                    or ""
+                )
                 artifact_dir = payload.get("artifactDirectoryPath")
                 is_artifact = False
                 if artifact_dir and target:
@@ -1101,7 +1313,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                     except Exception:
                         norm_target = target
                     edited: List[str] = state.setdefault("turn_edited_files", [])
-                    max_edits_str = _get_env("AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
+                    max_edits_str = _get_env("CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
                     try:
                         max_edits = int(max_edits_str)
                     except ValueError:
@@ -1110,20 +1322,22 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                         return _deny(
                             f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
                             f"when editing '{Path(target).name}'. Delegate multi-file modifications to `flash-worker` "
-                            "(TypeName='flash-worker', Model='flash')."
+                            "(TypeName='flash-worker', Model='flash').",
+                            payload,
                         )
                     if norm_target not in edited:
                         edited.append(norm_target)
                         save_state(payload, state)
 
-            elif tool_name == "run_command":
-                cmd = str(_get(args, "CommandLine", "commandLine", "command", default="") or "").strip()
+            elif tool_name in ("run_command", "Bash"):
+                cmd = str(_get(args, "command", "CommandLine", "commandLine", default="") or "").strip()
                 edited = state.get("turn_edited_files", [])
                 if edited and TEST_RUNNER_RE.search(cmd):
                     return _deny(
                         "[Mitosis Orchestrator] Direct workspace edit followed by test runner execution detected "
                         f"in the primary agent ('{cmd}'). Delegate code editing and test execution loops "
-                        "to `flash-worker` (TypeName='flash-worker', Model='flash')."
+                        "to `flash-worker` (TypeName='flash-worker', Model='flash').",
+                        payload,
                     )
 
     return _handle_workspace_guard(payload, tool_name, args)
@@ -1136,7 +1350,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
     if payload.get("error"):
         return True
-    tool_result = payload.get("toolResult") or payload.get("result")
+    tool_result = payload.get("toolResult") or payload.get("tool_result") or payload.get("result")
     if isinstance(tool_result, dict):
         exit_code = tool_result.get("exitCode")
         if exit_code is None:
@@ -1145,42 +1359,47 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
             exit_code = tool_result.get("returncode")
         if exit_code is not None and exit_code != 0:
             return True
-        if tool_result.get("error"):
+        if tool_result.get("error") or tool_result.get("status") == "error":
             return True
         output = str(tool_result.get("output") or "")
         if re.search(r"\bexited with code [1-9]", output):
             return True
-        if tool_name == "invoke_subagent":
+        if tool_name in ("invoke_subagent", "Task", "Agent"):
             res_str = json.dumps(tool_result)
             if re.search(r"STATUS:\s*(?:FAILED|BLOCKED)\b", res_str):
                 return True
     elif isinstance(tool_result, str):
         if re.search(r"\bexited with code [1-9]", tool_result):
             return True
-        if tool_name == "invoke_subagent":
+        if tool_name in ("invoke_subagent", "Task", "Agent"):
             if re.search(r"STATUS:\s*(?:FAILED|BLOCKED)\b", tool_result):
                 return True
     return False
 
 
 def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
-    tool_call = payload.get("toolCall") or {}
-    tool_name = str(tool_call.get("name") or "")
+    tool_name, _ = _extract_tool_call(payload)
     state = load_state(payload)
-    if tool_name == "invoke_subagent" and payload.get("error"):
-        args = tool_call.get("args") or {}
-        n = len(_get(args, "Subagents", "subagents", default=[]) or [])
+    failed = _tool_failed(tool_name, payload)
+    if tool_name in ("invoke_subagent", "Task", "Agent") and (payload.get("error") or failed):
         pending = state.get("pending_spawns", [])
-        if n and len(pending) >= n:
-            del pending[-n:]
+        if tool_name == "invoke_subagent":
+            tool_call = payload.get("toolCall") or {}
+            args = tool_call.get("args") or {}
+            n = len(_get(args, "Subagents", "subagents", default=[]) or [])
+            if n and len(pending) >= n:
+                del pending[-n:]
+            else:
+                state["pending_spawns"] = []
         else:
-            state["pending_spawns"] = []
+            if pending:
+                pending.pop()
     else:
         sync_subagents(payload, state)
 
     # Track consecutive failures for the circuit breaker
-    if tool_name in ("run_command", "invoke_subagent"):
-        if _tool_failed(tool_name, payload):
+    if tool_name in ("run_command", "invoke_subagent", "Bash", "Task", "Agent"):
+        if failed:
             state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
         else:
             state["consecutive_failures"] = 0
@@ -1190,6 +1409,33 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if is_claude_code_payload(payload):
+        if payload.get("stop_hook_active") is True:
+            return {}
+        state = load_state(payload)
+        sync_subagents(payload, state)
+        active = [cid for cid, m in state.get("subagents", {}).items() if m.get("active_branch")]
+        active += [m.get("role", "worker") for m in state.get("pending_spawns", []) if m.get("active_branch")]
+        if not active:
+            save_state(payload, state)
+            return {}
+
+        key = ",".join(sorted(active))
+        reminded: List[str] = state.setdefault("stop_reminded_sets", [])
+        if key in reminded:
+            save_state(payload, state)
+            return {}
+        reminded.append(key)
+        save_state(payload, state)
+        return {
+            "decision": "block",
+            "reason": (
+                f"[Mitosis Orchestrator] Branch worktrees are still active ({', '.join(active)}). "
+                "Merge or discard their changes, then clean them up before finishing."
+            ),
+        }
+
+    # Antigravity handling
     if str(payload.get("terminationReason") or "") in SAFE_TERMINATION_REASONS:
         return {"decision": "allow"}
     if not payload.get("fullyIdle", True):
@@ -1222,22 +1468,48 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = load_state(payload)
+    sync_subagents(payload, state)
+    subagents = state.setdefault("subagents", {})
+    pending = state.setdefault("pending_spawns", [])
+
+    subagent_id = str(payload.get("subagent_id") or "").strip().lower()
+    cleared = False
+    if subagent_id and subagent_id in subagents:
+        subagents[subagent_id]["active_branch"] = False
+        cleared = True
+    for meta in pending:
+        if subagent_id and (meta.get("role", "").lower() == subagent_id or meta.get("type", "").lower() == subagent_id):
+            meta["active_branch"] = False
+            cleared = True
+    if not cleared:
+        for meta in pending:
+            if meta.get("active_branch"):
+                meta["active_branch"] = False
+        for meta in subagents.values():
+            if meta.get("active_branch"):
+                meta["active_branch"] = False
+    save_state(payload, state)
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
 def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> None:
-    """With AGY_MITOSIS_DEBUG=1 (or legacy AGY_ARGON_DEBUG=1), append one JSON line per hook call to the artifact directory."""
-    if not _env_flag("AGY_MITOSIS_DEBUG", "AGY_ARGON_DEBUG"):
+    """With AGY_MITOSIS_DEBUG=1 / CLAUDE_MITOSIS_DEBUG=1 (or legacy AGY_ARGON_DEBUG=1), append one JSON line per hook call to the artifact directory."""
+    if not _env_flag("CLAUDE_MITOSIS_DEBUG", "AGY_MITOSIS_DEBUG", "AGY_ARGON_DEBUG"):
         return
     path = _state_file(payload)
     if not path:
         return
-    tool_call = payload.get("toolCall") or {}
+    tool_name, _ = _extract_tool_call(payload)
     entry = {
         "mode": mode,
-        "tool": tool_call.get("name"),
-        "modelName": payload.get("modelName"),
+        "tool": tool_name,
+        "modelName": payload.get("modelName") or payload.get("model_name") or payload.get("model"),
         "invocationNum": payload.get("invocationNum"),
         "executionNum": payload.get("executionNum"),
         "fullyIdle": payload.get("fullyIdle"),
@@ -1255,14 +1527,27 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
 HANDLERS = {
     "session-start": handle_session_start,
     "pre-invocation": handle_pre_invocation,
+    "user-prompt-submit": handle_pre_invocation,
     "pre-tool-use": handle_pre_tool_use,
     "post-tool-use": handle_post_tool_use,
     "stop": handle_stop,
+    "subagent-stop": handle_subagent_stop,
+}
+
+EVENT_NAME_TO_MODE = {
+    "SessionStart": "session-start",
+    "PreInvocation": "pre-invocation",
+    "UserPromptSubmit": "user-prompt-submit",
+    "PreToolUse": "pre-tool-use",
+    "PostToolUse": "post-tool-use",
+    "PostToolUseFailure": "post-tool-use",
+    "Stop": "stop",
+    "SubagentStop": "subagent-stop",
 }
 
 
 def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "pre-tool-use"
+    mode = sys.argv[1] if len(sys.argv) > 1 else None
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
@@ -1271,11 +1556,16 @@ def main() -> None:
     except Exception:
         payload = {}
 
+    if not mode and payload.get("hook_event_name"):
+        mode = EVENT_NAME_TO_MODE.get(payload["hook_event_name"])
+    if not mode:
+        mode = "pre-tool-use"
+
     handler = HANDLERS.get(mode)
     try:
         result = handler(payload) if handler else {}
     except Exception as exc:  # never break the agent loop because of the guard
-        result = {"decision": "allow"} if mode in ("stop", "pre-tool-use") else {}
+        result = _allow("Mitosis Orchestrator: pass-through.", payload=payload) if mode in ("stop", "pre-tool-use") else {}
         sys.stderr.write(f"[mitosis-orchestrator] {mode} hook error: {exc!r}\n")
     _debug_log(payload, mode, result)
 

@@ -1,0 +1,23 @@
+{
+  "name": "mitosis-orchestrator",
+  "version": "1.1.0",
+  "description": "Cross-model frontier orchestrator for Claude Code and Antigravity (agy): coordinates frontier primary models with sonnet / flash workers and haiku / flash_lite scouts.",
+  "author": {
+    "name": "ivanusto"
+  },
+  "repository": "https://github.com/ivanusto/mitosis-orchestrator",
+  "homepage": "https://github.com/ivanusto/mitosis-orchestrator#readme",
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "subagents",
+    "claude-code",
+    "antigravity",
+    "agy",
+    "haiku",
+    "sonnet",
+    "flash",
+    "flash-lite"
+  ],
+  "agents": "./claude-agents"
+}

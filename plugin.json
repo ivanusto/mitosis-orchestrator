@@ -1,8 +1,8 @@
 {
   "name": "mitosis-orchestrator",
   "displayName": "Mitosis Orchestrator",
-  "version": "1.0.0",
-  "description": "Cross-model frontier orchestrator for Antigravity (agy): pins xAI Grok, Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, OpenAI GPT/o-series, DeepSeek, or Qwen as the primary master architect while dividing subagent workloads into flash (execution) and flash_lite (reconnaissance).",
+  "version": "1.1.0",
+  "description": "Cross-model frontier orchestrator for Antigravity (agy) and Claude Code: pins frontier models (Grok, Claude Opus/Sonnet, Gemini Argon, OpenAI GPT/o-series, DeepSeek, Qwen) as the primary master architect while dividing subagent workloads into worker/execution (flash / sonnet) and scout/reconnaissance (flash_lite / haiku).",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "/orchestrate Decompose this task across flash-lite scouts and flash workers",
