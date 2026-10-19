@@ -40,7 +40,7 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 ---
 
-## Unified 3-Platform Context Routing Matrix (v1.4.0)
+## Unified 3-Platform Context Routing Matrix (v1.4.1)
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
@@ -140,7 +140,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.4.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.4.1)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -203,8 +203,8 @@ Zero-dependency Python 3.8+ standard library hook engine enforcing orchestration
 | :--- | :--- |
 | `SessionStart` | Checks settings, **warns** if the configured primary model is not a supported frontier model, and injects the Mitosis routing policy. Rewrites settings only when `*_MITOSIS_PIN_SETTINGS=1` is enabled. |
 | `PreInvocation` (agy) · `UserPromptSubmit` (Claude Code / Codex) | Verifies the live session model on every turn; warns once per invocation if switched to a non-frontier model. Resets per-turn tracking (`turn_edited_files`, `consecutive_failures`). |
-| `PreToolUse` · `invoke_subagent` (agy) | Classifies every spawned subagent into `flash` or `flash_lite` based on `TypeName`, `Workspace`, `Role`, and `Prompt`. Strong signals (testing, debugging, call-graph tracing, mutation verbs) always override lookup keywords. Automatically upgrades `flash-lite-scout` to `flash-worker` if given a mutation task. |
-| `PreToolUse` · `Agent` (Claude Code) | Pins **only** this plugin's own agent types (`flash-worker`, `flash-lite-scout`, with or without the `mitosis-orchestrator:` prefix) and untyped `Agent` calls that use `model: inherit`. Pins `effort` too (scout `low`, worker `medium`; caller values honoured; `CLAUDE_MITOSIS_PIN_EFFORT=0` disables). Other plugins' agents, built-in types (`Explore`, `Plan`, `general-purpose`, …), and untyped calls with an explicit model are passed through untouched. `CLAUDE_MITOSIS_PIN_SUBAGENTS=0` disables pinning entirely. |
+| `PreToolUse` · `invoke_subagent` (agy) | Classifies every spawned subagent into `flash` or `flash_lite` based on `TypeName`, `Workspace`, `Role`, and `Prompt`. Strong signals (testing, debugging, call-graph tracing, mutation verbs) always override lookup keywords. Automatically upgrades `flash-lite-scout` to `flash-worker` if given a mutation task, and appends the `REPORT FORMAT` block to prompts that lack one. |
+| `PreToolUse` · `Agent` (Claude Code) | Pins **only** this plugin's own agent types (`flash-worker`, `flash-lite-scout`, with or without the `mitosis-orchestrator:` prefix) and untyped `Agent` calls that use `model: inherit`. Pins `effort` too (scout `low`, worker `medium`; caller values honoured; `CLAUDE_MITOSIS_PIN_EFFORT=0` disables) and appends the four-header `REPORT FORMAT` block to prompts that lack one (`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` disables). Other plugins' agents, built-in types (`Explore`, `Plan`, `general-purpose`, …), and untyped calls with an explicit model are passed through untouched. `CLAUDE_MITOSIS_PIN_SUBAGENTS=0` disables pinning entirely. |
 | `PreToolUse` · `spawn_agent` / `codex exec` (Codex) | Pins subagents to `gpt-5.6-luna` (scout) or `gpt-5.6-terra` (worker) by prompt classification. |
 | `PreToolUse` · `send_message` (agy) · `SendMessage` (Claude Code) | Blocks code-editing or multi-step (>3 numbered rules) follow-up instructions sent to a scout. Claude Code recipients are recognised by the agent id that `PostToolUse` / `SubagentStop` pair with the spawn. |
 | `PreToolUse` · `run_workflow` | Blocks workflow scripts whose `agent(...)` calls omit model specification. |
@@ -249,6 +249,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | Set to `0` to stop adding `effort` to pinned `Agent` calls in Claude Code (models are still pinned). |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code effort pinned per tier (`low`, `medium`, `high`, `xhigh`, `max`); a valid `effort` passed by the caller wins. |
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | Set to `0` to stop `SubagentStop` from sending a plugin subagent back when its final message is not the four-header report. |
+| `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | Set to `0` to stop appending the four-header `REPORT FORMAT` block to subagent prompts that lack one (agy `invoke_subagent`, Claude Code `Agent`). |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | Set to `1` to enable the in-workspace permission scope guard in interactive sessions. |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | Maximum distinct workspace files the primary agent may edit directly in a single turn. |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
@@ -262,7 +263,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 170 tests (hooks + cost report)
+python3 -m unittest discover -s tests -v     # 176 tests (hooks + cost report)
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session

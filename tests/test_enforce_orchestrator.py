@@ -137,6 +137,20 @@ class TestInvokeSubagent(HookBase):
 
     def test_correct_call_passes_untouched(self):
         res = eo.handle_pre_tool_use(self.tool("invoke_subagent", {"Subagents": [
+            sub("Locate where the config loader is defined.\n\nREPORT FORMAT:\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: NONE\nVERIFICATION: x\nNOTES: y",
+                type_name="flash-lite-scout", model="flash_lite")]}))
+        self.assertEqual(res, {"decision": "allow"})
+
+    def test_report_format_appended_when_missing(self):
+        res = eo.handle_pre_tool_use(self.tool("invoke_subagent", {"Subagents": [
+            sub("Locate where the config loader is defined.", type_name="flash-lite-scout", model="flash_lite"),
+            sub("Implement the retry logic and run pytest.", type_name="flash-worker", model="flash")]}))
+        scout, worker = res["overwrite"]["Subagents"]
+        self.assertTrue(scout["Prompt"].endswith(eo.REPORT_FORMAT_SCOUT))
+        self.assertTrue(worker["Prompt"].endswith(eo.REPORT_FORMAT_WORKER))
+        self.assertIn("appended REPORT FORMAT", res["reason"])
+        os.environ["AGY_MITOSIS_APPEND_REPORT_FORMAT"] = "0"
+        res = eo.handle_pre_tool_use(self.tool("invoke_subagent", {"Subagents": [
             sub("Locate where the config loader is defined.", type_name="flash-lite-scout", model="flash_lite")]}))
         self.assertEqual(res, {"decision": "allow"})
 
@@ -1688,6 +1702,46 @@ class TestClaudeCodeSubagentStopReport(ClaudeHookBase):
         bare = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ran tests, exit 0\nNOTES:\n- Ran 150 tests - OK\n- nothing else"
         self.assertIsNone(eo.validate_subagent_report(bare))
         self.assertIsNotNone(eo.validate_subagent_report("STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ok\nNOTES:"))
+
+
+class TestClaudeCodeReportFormatAppend(ClaudeHookBase):
+    def _pin(self, prompt, subagent_type):
+        return eo.handle_pre_tool_use(self.tool("Agent", {"prompt": prompt, "description": "x", "subagent_type": subagent_type, "model": "inherit"}))["hookSpecificOutput"]
+
+    def test_appended_per_tier_when_missing(self):
+        out = self._pin("Locate where parse_token is defined.", "mitosis-orchestrator:flash-lite-scout")
+        self.assertTrue(out["updatedInput"]["prompt"].endswith(eo.REPORT_FORMAT_SCOUT))
+        self.assertTrue(out["updatedInput"]["prompt"].startswith("Locate where parse_token is defined."))
+        self.assertIn("REPORT FORMAT appended", out["permissionDecisionReason"])
+        out = self._pin("Run the tests and fix failures.", "mitosis-orchestrator:flash-worker")
+        self.assertTrue(out["updatedInput"]["prompt"].endswith(eo.REPORT_FORMAT_WORKER))
+
+    def test_existing_format_left_alone(self):
+        prompt = "Locate parse_token.\n\nREPORT FORMAT:\nReturn only these four headers:\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: NONE\nVERIFICATION: x\nNOTES: y"
+        out = self._pin(prompt, "mitosis-orchestrator:flash-lite-scout")
+        self.assertEqual(out["updatedInput"]["prompt"], prompt)
+        self.assertNotIn("REPORT FORMAT appended", out["permissionDecisionReason"])
+
+    def test_adhoc_format_is_superseded(self):
+        # The primary wrote its own headers (seen live: STATUS: found / FILES / EVIDENCE / NOTES).
+        prompt = "Find main().\n\nREPORT FORMAT:\nSTATUS: <found | not found>\nFILES: <path:line>\nEVIDENCE: <line>\nNOTES: <anything>"
+        out = self._pin(prompt, "mitosis-orchestrator:flash-lite-scout")
+        new_prompt = out["updatedInput"]["prompt"]
+        self.assertTrue(new_prompt.startswith(prompt))
+        self.assertIn(eo.REPORT_FORMAT_SUPERSEDE, new_prompt)
+        self.assertTrue(new_prompt.endswith(eo.REPORT_FORMAT_SCOUT.split("\n", 1)[1]))
+        self.assertFalse(eo.prompt_has_report_format(prompt))
+        self.assertTrue(eo.prompt_has_report_format(new_prompt))
+
+    def test_disabled_by_env(self):
+        os.environ["CLAUDE_MITOSIS_APPEND_REPORT_FORMAT"] = "0"
+        out = self._pin("Locate where parse_token is defined.", "mitosis-orchestrator:flash-lite-scout")
+        self.assertEqual(out["updatedInput"]["prompt"], "Locate where parse_token is defined.")
+
+    def test_appended_prompt_passes_validator_shape(self):
+        # The appended block is the shape SubagentStop validates; a report copied from it must pass.
+        report = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: grep found it, exit 0\nNOTES: app.py defines main()"
+        self.assertIsNone(eo.validate_subagent_report(report))
 
 
 class TestClaudeStopPayloadDetection(unittest.TestCase):

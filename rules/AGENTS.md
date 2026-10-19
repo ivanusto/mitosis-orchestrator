@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.4.0)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.4.1)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model — **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -82,7 +82,7 @@ NOTES: <summary (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILE
 Scouts omit rules 3 to 5 and always report `FILES_CHANGED: NONE`. Subagent reports must follow the bounded report format:
 - Up to 10 compact bullet lines (`- ` or `* `) under `NOTES:` (total report length capped at ≤ 1,600 chars).
 - When `STATUS` is `BLOCKED` or `FAILED`, `NOTES:` must include a `file://.../*.log` URI pointing to raw failure output in `<scratch_dir>/<task_id>.log` (`<artifactDirectoryPath>/scratch/` on agy).
-The four-header bounded report keeps subagent output cheap to read back; do not ask subagents for unstructured prose summaries.
+The four-header bounded report keeps subagent output cheap to read back; do not ask subagents for unstructured prose summaries. If a prompt is dispatched without a `REPORT FORMAT` block, the hook appends the tier's block automatically (`*_MITOSIS_APPEND_REPORT_FORMAT=0` disables).
 
 ---
 

@@ -5,7 +5,9 @@ What it does (costs a few cents at `--model opus`, ~30 s):
   1. creates a throwaway git project with two Python files,
   2. runs `claude -p` asking the primary to spawn exactly one `mitosis-orchestrator:flash-lite-scout`,
      with CLAUDE_MITOSIS_DEBUG=1 so the hook writes its decisions to a debug log,
-  3. asserts from the debug log that the Agent call was rewritten to model=haiku / effort=low,
+  3. asserts from the debug log that the Agent call was rewritten to model=haiku / effort=low
+     with the REPORT FORMAT block appended, and that SubagentStop never had to send the scout
+     back for a malformed report,
   4. asserts from Claude Code's own `--output-format json` usage that a haiku model actually ran,
   5. prints the session cost and (if present) the Mitosis cost report for the session.
 
@@ -92,6 +94,7 @@ def main(argv=None) -> int:
             failures.append(f"debug log not found at {log} (is the plugin loaded and CLAUDE_MITOSIS_DEBUG honoured?)")
         else:
             pinned = []
+            report_blocks = 0
             for line in log.read_text(encoding="utf-8").splitlines():
                 try:
                     entry = json.loads(line)
@@ -100,17 +103,24 @@ def main(argv=None) -> int:
                 if entry.get("mode") == "pre-tool-use" and entry.get("tool") in ("Agent", "Task"):
                     out = (entry.get("result") or {}).get("hookSpecificOutput") or {}
                     ui = out.get("updatedInput") or {}
-                    pinned.append((ui.get("model"), ui.get("effort"), ui.get("subagent_type"), out.get("permissionDecisionReason")))
+                    pinned.append((ui.get("model"), ui.get("effort"), ui.get("subagent_type"), out.get("permissionDecisionReason"), "REPORT FORMAT:" in str(ui.get("prompt") or "")))
+                if entry.get("mode") == "subagent-stop" and (entry.get("result") or {}).get("decision") == "block":
+                    report_blocks += 1
+            print(f"hook: SubagentStop report rewrites requested: {report_blocks}")
+            if report_blocks:
+                failures.append(f"SubagentStop sent a subagent back {report_blocks} time(s) for a malformed report")
             if not pinned:
                 failures.append("no Agent call passed through the PreToolUse hook")
             else:
-                model, effort, stype, reason = pinned[0]
-                print(f"hook: model={model} effort={effort} subagent_type={stype}")
+                model, effort, stype, reason, has_format = pinned[0]
+                print(f"hook: model={model} effort={effort} subagent_type={stype} report_format_in_prompt={has_format}")
                 print(f"      {reason}")
                 if model != "haiku":
                     failures.append(f"expected model=haiku, got {model}")
                 if effort != "low":
                     failures.append(f"expected effort=low, got {effort}")
+                if not has_format:
+                    failures.append("REPORT FORMAT block was not appended to the scout prompt")
 
         report = Path(__file__).resolve().parent / "mitosis-cost-report.py"
         if report.is_file() and session_id:

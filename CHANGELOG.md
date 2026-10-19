@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1 — 2026-10-19
+
+### Added
+- **REPORT FORMAT auto-append**: when a subagent prompt has no `REPORT FORMAT` block, the hook appends the tier's four-header block (scout variant fixes `FILES_CHANGED: NONE`) on both agy `invoke_subagent` and Claude Code `Agent` calls, so a forgetful primary no longer costs a SubagentStop round trip. Prompts that already carry all four canonical headers are left untouched; a prompt whose primary invented its own `REPORT FORMAT:` headers (seen live: `STATUS: found` / `FILES` / `EVIDENCE`) gets the canonical block appended with a line saying it supersedes the earlier one. `*_MITOSIS_APPEND_REPORT_FORMAT=0` disables.
+- `scripts/smoke-claude.py` now also asserts the block was appended and that SubagentStop never had to send the scout back.
+- 176 tests (was 170).
+
 ## 1.4.0 — 2026-10-19
 
 ### Added (Claude Code)

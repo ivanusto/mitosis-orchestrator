@@ -71,6 +71,8 @@ Environment variables:
     CLAUDE_MITOSIS_WORKER_EFFORT=<e>    (Claude Code) worker effort (default: medium)
     CLAUDE_MITOSIS_ENFORCE_REPORT=0     (Claude Code) do not block a plugin subagent's stop when its
                                         final message is not the four-header report
+    AGY_MITOSIS_APPEND_REPORT_FORMAT=0  do not append the REPORT FORMAT block to subagent prompts
+                                        that lack one (agy invoke_subagent, Claude Code Agent)
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
                                         <artifactDirectoryPath>/mitosis_orchestrator_debug.log
     (All variables support legacy AGY_ARGON_* and AGY_ALLOW_NON_ARGON_PRIMARY fallbacks)
@@ -243,6 +245,54 @@ REPORT_LINE_PATTERNS = (
     re.compile(r"^VERIFICATION:\s*\S+"),
     re.compile(r"^NOTES:\s*\S+"),
 )
+
+REPORT_FORMAT_HEADER = "REPORT FORMAT:"
+REPORT_FORMAT_HEADERS = ("STATUS:", "FILES_CHANGED:", "VERIFICATION:", "NOTES:")
+REPORT_FORMAT_PHRASE_RE = re.compile(r"REPORT FORMAT", re.IGNORECASE)
+REPORT_FORMAT_SUPERSEDE = (
+    "REPORT FORMAT (required by the orchestrator hook; this supersedes any other report format above):"
+)
+REPORT_FORMAT_SCOUT = (
+    "REPORT FORMAT:\n"
+    "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\n"
+    "STATUS: COMPLETED | BLOCKED | FAILED\n"
+    "FILES_CHANGED: NONE\n"
+    "VERIFICATION: <one sentence stating what was checked and the result>\n"
+    "NOTES: <findings (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>"
+)
+REPORT_FORMAT_WORKER = (
+    "REPORT FORMAT:\n"
+    "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\n"
+    "STATUS: COMPLETED | BLOCKED | FAILED\n"
+    "FILES_CHANGED: <comma-separated paths or NONE>\n"
+    "VERIFICATION: <one sentence stating the command run and exit result>\n"
+    "NOTES: <summary (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>"
+)
+
+
+def prompt_has_report_format(prompt: str) -> bool:
+    """True only when the prompt carries all four canonical headers; an ad-hoc
+    'REPORT FORMAT:' with other headers does not count (SubagentStop would reject it)."""
+    text = prompt or ""
+    return all(h in text for h in REPORT_FORMAT_HEADERS)
+
+
+def append_report_format(prompt: str, tier: str) -> str:
+    """Append the bounded four-header REPORT FORMAT block when the prompt lacks one.
+
+    If the prompt already names a different report format, the canonical block is
+    still appended, headed by a line saying it supersedes the earlier one."""
+    if prompt_has_report_format(prompt):
+        return prompt
+    block = REPORT_FORMAT_SCOUT if tier == "flash_lite" else REPORT_FORMAT_WORKER
+    if REPORT_FORMAT_PHRASE_RE.search(prompt or ""):
+        block = block.replace(REPORT_FORMAT_HEADER, REPORT_FORMAT_SUPERSEDE, 1)
+    return (prompt or "").rstrip() + "\n\n" + block
+
+
+def _append_report_format_enabled() -> bool:
+    return _get_env("AGY_MITOSIS_APPEND_REPORT_FORMAT", default="1") != "0"
+
 
 TEST_RUNNER_RE = re.compile(
     r"\b(pytest|python(?:\d+(?:\.\d+)?)?\s+-m\s+unittest|npm\s+test|pnpm\s+test|yarn\s+test|vitest|jest|cargo\s+test|go\s+test)\b",
@@ -1198,6 +1248,10 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
             item.pop("typeName", None)
             item["TypeName"] = type_override
             changes.append(f"{label}: TypeName {current_type} -> {type_override}")
+        if _append_report_format_enabled() and not prompt_has_report_format(prompt):
+            item.pop("prompt", None)
+            item["Prompt"] = append_report_format(prompt, target_model)
+            changes.append(f"{label}: appended REPORT FORMAT")
 
         workspace = str(_get(item, "Workspace", "workspace", default="inherit")).strip().lower()
         spawns.append(
@@ -1322,6 +1376,10 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
             updated_input["subagentType"] = type_override
         else:
             updated_input["subagent_type"] = type_override
+
+    if _append_report_format_enabled() and not prompt_has_report_format(prompt):
+        updated_input["prompt"] = append_report_format(prompt, target_tier)
+        effort_note += ", REPORT FORMAT appended"
 
     target_type = type_override or subagent_type
     spawns = [{

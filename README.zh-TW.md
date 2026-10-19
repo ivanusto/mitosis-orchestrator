@@ -40,7 +40,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ---
 
-## 三平台情境路由矩陣 (v1.4.0)
+## 三平台情境路由矩陣 (v1.4.1)
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -140,7 +140,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.4.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.4.1)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -203,8 +203,8 @@ MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代�
 | :--- | :--- |
 | `SessionStart` | 讀取設定檔，若主模型不是支援的尖端模型則發出**警告**並注入 Mitosis 編排政策；僅在啟用 `*_MITOSIS_PIN_SETTINGS=1` 時改寫設定檔。 |
 | `PreInvocation`（agy）· `UserPromptSubmit`（Claude Code / Codex） | 每回合檢查即時模型；若切換到非尖端模型，每回合提醒一次。同時重設單回合編輯計數（`turn_edited_files`）與連續失敗計數（`consecutive_failures`）。 |
-| `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理。 |
-| `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
+| `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理；提示詞缺少 `REPORT FORMAT` 區塊時自動補上。 |
+| `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉），並為缺少 `REPORT FORMAT` 區塊的提示詞自動補上（`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
 | `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。 |
 | `PreToolUse` · `send_message`（agy）· `SendMessage`（Claude Code） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
@@ -248,6 +248,7 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | 設為 `0` 時 Claude Code 端不再為釘定的 `Agent` 呼叫加上 `effort`（模型仍會釘定）。 |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code 各階層釘定的 effort（`low`、`medium`、`high`、`xhigh`、`max`）；呼叫端自帶的合法 `effort` 優先。 |
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，`SubagentStop` 不再因最後訊息不是四標頭回報而退回外掛子代理。 |
+| `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | 設為 `0` 時，不再為缺少 `REPORT FORMAT` 區塊的子代理提示詞自動補上（agy `invoke_subagent`、Claude Code `Agent`）。 |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。 |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
@@ -261,7 +262,7 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 170 個測試（hook 與成本報表）
+python3 -m unittest discover -s tests -v     # 176 個測試（hook 與成本報表）
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
