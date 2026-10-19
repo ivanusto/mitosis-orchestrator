@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.3.1)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.3.2)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model — **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -6,7 +6,7 @@ You are operating under the **Mitosis Orchestrator** multi-platform policy:
 
 > [!IMPORTANT]
 > - In **Antigravity (`agy`)**: Never pass `Model: "inherit"` or `Model: "pro"` to `invoke_subagent`, and never call `agent(...)` inside a `run_workflow` script without `model="flash"` or `model="flash_lite"`.
-> - In **Anthropic Claude Code**: Delegate execution tasks to `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet) and fast reconnaissance to `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku). Other plugins' agents and built-in types are not rewritten by the policy.
+> - In **Anthropic Claude Code**: Delegate execution tasks to `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet, effort `medium`) and fast reconnaissance to `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku, effort `low`); the hook pins both model and effort. Other plugins' agents and built-in types are not rewritten by the policy.
 > - In **OpenAI Codex CLI (0.134+)**: Pinned via role files in `$CODEX_HOME/agents/` (`explorer` / `flash-lite-scout` on `gpt-5.6-luna`, `worker` / `flash-worker` on `gpt-5.6-terra`) selected with `spawn_agent(agent_type=...)`, or via profile files `$CODEX_HOME/mitosis-scout.config.toml` (`read-only`) and `mitosis-worker.config.toml` (`workspace-write`) used with `codex exec --profile <name>`.
 
 ---
@@ -106,6 +106,9 @@ All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*`
 - **`*_MITOSIS_PRIMARY_MODEL=<name>`**: Target primary frontier model when pinning (defaults: `Gemini 4 Argon (High)`, `opus`, `gpt-6.1-sol`).
 - **`AGY_ALLOW_NON_MITOSIS_PRIMARY=1`** / **`*_MITOSIS_ALLOW_NON_PRIMARY=1`**: Silence session-start and per-turn non-frontier primary model warnings.
 - **`CLAUDE_MITOSIS_PIN_SUBAGENTS=0`**: Stop rewriting `Agent` calls in Claude Code entirely.
+- **`CLAUDE_MITOSIS_SCOUT_MODEL` / `CLAUDE_MITOSIS_WORKER_MODEL`**: Claude Code model per tier (defaults `haiku` / `sonnet`; accepts `haiku`, `sonnet`, `opus`, `fable`).
+- **`CLAUDE_MITOSIS_PIN_EFFORT=0`**: Stop adding `effort` to pinned Claude Code `Agent` calls.
+- **`CLAUDE_MITOSIS_SCOUT_EFFORT` / `CLAUDE_MITOSIS_WORKER_EFFORT`**: Claude Code effort per tier (defaults `low` / `medium`).
 - **`*_MITOSIS_AUTO_ALLOW=1`**: Enable workspace scope guard for automated in-workspace permissions.
 - **`*_MITOSIS_MAX_DIRECT_EDITS=<int>`**: Cap direct primary agent file edits per turn (default: 3).
 - **`*_MITOSIS_ALLOW_DIRECT_LOGS=1`**: Allow primary agent direct inspection of raw `.log` and transcripts.

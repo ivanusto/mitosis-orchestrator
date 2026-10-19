@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.2 — 2026-10-19
+
+### Added
+- **Effort pinning on Claude Code**: the `PreToolUse` hook now sets `effort` alongside `model` on every `Agent` call it rewrites (scouts `low`, workers `medium`, mirroring the Codex roles). A valid caller-supplied `effort` is honoured; `CLAUDE_MITOSIS_PIN_EFFORT=0` turns it off; `CLAUDE_MITOSIS_SCOUT_EFFORT` / `CLAUDE_MITOSIS_WORKER_EFFORT` override per tier.
+- **Per-tier model overrides on Claude Code**: `CLAUDE_MITOSIS_SCOUT_MODEL` / `CLAUDE_MITOSIS_WORKER_MODEL` (`haiku`, `sonnet`, `opus`, `fable`), e.g. `opus` workers under a `fable` primary. The session banner, delegation hints and deny messages reflect the effective models and efforts.
+- **`scripts/mitosis-cost-report.py`**: token and USD ledger for Claude Code sessions. Reads `<project>/<session>.jsonl` and `<session>/subagents/agent-*.jsonl`, de-duplicates streamed usage by message id, aggregates per model, splits primary from subagents, prints duration, primary share and a side-by-side comparison for several sessions (`--last N`, `--session`, `--json`, `--prices`, `--primary-cache-ttl` / `--subagent-cache-ttl`). With the defaults (primary 1-hour cache writes, subagents 5-minute) it reproduces Claude Code's own `--output-format json` cost figures to the cent.
+
+### Fixed
+- The edit-then-test deny message on Claude Code / Codex now names the platform's delegation primitive instead of agy's `TypeName=` syntax.
+
+### Docs
+- README / README.zh-TW: new section on choosing the primary model on Claude Code (Fable 5.1 vs Opus 5.5): list prices, latency and capability differences, a recommendation table, an illustrative cost example, subscription-plan note, and how to measure with the cost report.
+- 159 tests (was 144): effort / model pinning and the cost report.
+
 ## 1.3.1 — 2026-10-19
 
 ### Fixed (found by an end-to-end `/orchestrate` run on Claude Code 2.1.303)

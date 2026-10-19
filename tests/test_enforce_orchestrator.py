@@ -1554,6 +1554,59 @@ class TestClaudeCodeScopeNarrowing(ClaudeHookBase):
         self.assertEqual(res["permissionDecision"], "deny")
 
 
+class TestClaudeCodeEffortAndModelPinning(ClaudeHookBase):
+    def _pin(self, prompt="Locate where parse_token is defined.", subagent_type="mitosis-orchestrator:flash-lite-scout", **extra):
+        args = {"prompt": prompt, "description": "x", "subagent_type": subagent_type, "model": "inherit"}
+        args.update(extra)
+        return eo.handle_pre_tool_use(self.tool("Agent", args))["hookSpecificOutput"]
+
+    def test_default_effort_scout_low_worker_medium(self):
+        out = self._pin()
+        self.assertEqual(out["updatedInput"]["model"], "haiku")
+        self.assertEqual(out["updatedInput"]["effort"], "low")
+        self.assertIn("effort low", out["permissionDecisionReason"])
+        out = self._pin(prompt="Investigate memory usage and optimize cache.", subagent_type="mitosis-orchestrator:flash-worker")
+        self.assertEqual(out["updatedInput"]["model"], "sonnet")
+        self.assertEqual(out["updatedInput"]["effort"], "medium")
+
+    def test_caller_effort_is_honoured(self):
+        out = self._pin(effort="high")
+        self.assertEqual(out["updatedInput"]["effort"], "high")
+        self.assertIn("effort high (caller)", out["permissionDecisionReason"])
+
+    def test_invalid_caller_effort_replaced_by_tier_default(self):
+        out = self._pin(effort="turbo")
+        self.assertEqual(out["updatedInput"]["effort"], "low")
+
+    def test_effort_env_override_and_invalid_value(self):
+        os.environ["CLAUDE_MITOSIS_SCOUT_EFFORT"] = "medium"
+        os.environ["CLAUDE_MITOSIS_WORKER_EFFORT"] = "bogus"
+        self.assertEqual(self._pin()["updatedInput"]["effort"], "medium")
+        out = self._pin(prompt="Run the tests and fix failures.", subagent_type="mitosis-orchestrator:flash-worker")
+        self.assertEqual(out["updatedInput"]["effort"], "medium")  # bogus -> default
+
+    def test_pin_effort_disabled(self):
+        os.environ["CLAUDE_MITOSIS_PIN_EFFORT"] = "0"
+        out = self._pin(effort="turbo")
+        self.assertEqual(out["updatedInput"]["model"], "haiku")
+        self.assertNotIn("effort", out["updatedInput"])
+        self.assertIn("effort unpinned", out["permissionDecisionReason"])
+        ctx = eo.handle_session_start(dict(self.payload, hook_event_name="SessionStart"))["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("effort", ctx)
+
+    def test_model_env_override_and_invalid_value(self):
+        os.environ["CLAUDE_MITOSIS_WORKER_MODEL"] = "opus"
+        os.environ["CLAUDE_MITOSIS_SCOUT_MODEL"] = "gemini-flash"
+        out = self._pin(prompt="Run the tests and fix failures.", subagent_type="mitosis-orchestrator:flash-worker")
+        self.assertEqual(out["updatedInput"]["model"], "opus")
+        self.assertEqual(self._pin()["updatedInput"]["model"], "haiku")  # invalid -> default
+        ctx = eo.handle_session_start(dict(self.payload, hook_event_name="SessionStart"))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("(opus, effort medium)", ctx)
+        self.assertIn("(haiku, effort low)", ctx)
+        reason = eo.handle_pre_tool_use(self.tool("Read", {"file_path": str(self.project_dir / "x.log")}))["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("model: haiku", reason)
+
+
 class TestMitosisMCPSandbox(unittest.TestCase):
     def setUp(self):
         self._env = dict(os.environ)

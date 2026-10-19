@@ -63,6 +63,11 @@ Environment variables:
     AGY_MITOSIS_ALLOW_DIRECT_FASTPATH=1 allow primary agent direct edit-test loops and unlimited edits
     AGY_MITOSIS_CIRCUIT_BREAKER=0       disable the 2-failure circuit breaker
     CLAUDE_MITOSIS_PIN_SUBAGENTS=0      (Claude Code) stop rewriting Agent calls entirely
+    CLAUDE_MITOSIS_SCOUT_MODEL=<m>      (Claude Code) scout model (default: haiku; haiku|sonnet|opus|fable)
+    CLAUDE_MITOSIS_WORKER_MODEL=<m>     (Claude Code) worker model (default: sonnet)
+    CLAUDE_MITOSIS_PIN_EFFORT=0         (Claude Code) stop adding `effort` to pinned Agent calls
+    CLAUDE_MITOSIS_SCOUT_EFFORT=<e>     (Claude Code) scout effort (default: low; low|medium|high|xhigh|max)
+    CLAUDE_MITOSIS_WORKER_EFFORT=<e>    (Claude Code) worker effort (default: medium)
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
                                         <artifactDirectoryPath>/mitosis_orchestrator_debug.log
     (All variables support legacy AGY_ARGON_* and AGY_ALLOW_NON_ARGON_PRIMARY fallbacks)
@@ -84,6 +89,9 @@ DEFAULT_CODEX_SCOUT_MODEL = "gpt-5.6-luna"
 DEFAULT_CLAUDE_PRIMARY_MODEL = "opus"
 DEFAULT_CLAUDE_WORKER_MODEL = "sonnet"
 DEFAULT_CLAUDE_SCOUT_MODEL = "haiku"
+DEFAULT_CLAUDE_SCOUT_EFFORT = "low"
+DEFAULT_CLAUDE_WORKER_EFFORT = "medium"
+CLAUDE_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 CLAUDE_PLUGIN_PREFIX = "mitosis-orchestrator"
 # Built-in Claude Code subagent types that the pinning policy must never rewrite.
 CLAUDE_BUILTIN_AGENT_TYPES = {
@@ -405,11 +413,11 @@ def _delegation_hint(payload: Optional[Dict[str, Any]], tier: str) -> str:
         if tier == "flash_lite":
             return (
                 f"`Agent` with `subagent_type: \"{CLAUDE_PLUGIN_PREFIX}:{SCOUT_TYPE}\"` "
-                f"(model: {DEFAULT_CLAUDE_SCOUT_MODEL})"
+                f"(model: {claude_tier_model('flash_lite')})"
             )
         return (
             f"`Agent` with `subagent_type: \"{CLAUDE_PLUGIN_PREFIX}:{WORKER_TYPE}\"` "
-            f"(model: {DEFAULT_CLAUDE_WORKER_MODEL})"
+            f"(model: {claude_tier_model('flash')})"
         )
     if payload and is_codex_payload(payload):
         if tier == "flash_lite":
@@ -560,6 +568,32 @@ def _env_flag(*names: str) -> bool:
         if val is not None and val.strip() != "":
             return val.strip() == "1"
     return False
+
+
+def claude_tier_model(tier: str) -> str:
+    """Claude Code model for a subagent tier, honouring CLAUDE_MITOSIS_{SCOUT,WORKER}_MODEL."""
+    if tier == "flash_lite":
+        default, env_name = DEFAULT_CLAUDE_SCOUT_MODEL, "CLAUDE_MITOSIS_SCOUT_MODEL"
+    else:
+        default, env_name = DEFAULT_CLAUDE_WORKER_MODEL, "CLAUDE_MITOSIS_WORKER_MODEL"
+    override = _get_env(env_name).lower()
+    return override if override in CLAUDE_SUBAGENT_MODELS else default
+
+
+def claude_tier_effort(tier: str) -> Optional[str]:
+    """Claude Code effort for a subagent tier (None when CLAUDE_MITOSIS_PIN_EFFORT=0).
+
+    Scouts default to `low`, workers to `medium`; CLAUDE_MITOSIS_{SCOUT,WORKER}_EFFORT
+    override them. Invalid values fall back to the default.
+    """
+    if _get_env("CLAUDE_MITOSIS_PIN_EFFORT", default="1") == "0":
+        return None
+    if tier == "flash_lite":
+        default, env_name = DEFAULT_CLAUDE_SCOUT_EFFORT, "CLAUDE_MITOSIS_SCOUT_EFFORT"
+    else:
+        default, env_name = DEFAULT_CLAUDE_WORKER_EFFORT, "CLAUDE_MITOSIS_WORKER_EFFORT"
+    override = _get_env(env_name).lower()
+    return override if override in CLAUDE_EFFORT_LEVELS else default
 
 
 def codex_config_path(payload: Optional[Dict[str, Any]] = None) -> str:
@@ -905,16 +939,25 @@ POLICY_NOTICE = (
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
 
-CLAUDE_POLICY_NOTICE = (
-    "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
-    "location, git/log checks, single-file inspection) to the `Agent` tool with "
-    "`subagent_type: \"mitosis-orchestrator:flash-lite-scout\"` (haiku) and multi-file research, "
-    "test runs, web/docs research and scoped code edits to "
-    "`subagent_type: \"mitosis-orchestrator:flash-worker\"` (sonnet). "
-    "Untyped `Agent` calls are classified by prompt; other plugins' agents and built-in types "
-    "(Explore, Plan, general-purpose) are left untouched. "
-    "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
-)
+def claude_policy_notice() -> str:
+    scout_model, worker_model = claude_tier_model("flash_lite"), claude_tier_model("flash")
+    scout_effort, worker_effort = claude_tier_effort("flash_lite"), claude_tier_effort("flash")
+    scout_tag = f"{scout_model}, effort {scout_effort}" if scout_effort else scout_model
+    worker_tag = f"{worker_model}, effort {worker_effort}" if worker_effort else worker_model
+    return (
+        "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
+        "location, git/log checks, single-file inspection) to the `Agent` tool with "
+        f"`subagent_type: \"mitosis-orchestrator:flash-lite-scout\"` ({scout_tag}) and multi-file research, "
+        "test runs, web/docs research and scoped code edits to "
+        f"`subagent_type: \"mitosis-orchestrator:flash-worker\"` ({worker_tag}). "
+        "Untyped `Agent` calls are classified by prompt; other plugins' agents and built-in types "
+        "(Explore, Plan, general-purpose) are left untouched. "
+        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+    )
+
+
+# Backwards-compatible constant (default configuration).
+CLAUDE_POLICY_NOTICE = claude_policy_notice()
 
 CODEX_POLICY_NOTICE = (
     "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
@@ -958,7 +1001,7 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CLAUDE_POLICY_NOTICE}",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {claude_policy_notice()}",
             }
         }
     return {
@@ -1237,10 +1280,25 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     }
 
     target_tier, type_override, reason = classify_subagent(item)
-    claude_model = DEFAULT_CLAUDE_SCOUT_MODEL if target_tier == "flash_lite" else DEFAULT_CLAUDE_WORKER_MODEL
+    claude_model = claude_tier_model(target_tier)
 
     updated_input = copy.deepcopy(args)
     updated_input["model"] = claude_model
+    # Effort: honour an explicit, valid caller value; otherwise pin per tier
+    # (scouts low, workers medium) unless CLAUDE_MITOSIS_PIN_EFFORT=0.
+    caller_effort = str(args.get("effort") or "").strip().lower()
+    if caller_effort in CLAUDE_EFFORT_LEVELS:
+        claude_effort: Optional[str] = caller_effort
+        effort_note = f"effort {caller_effort} (caller)"
+    else:
+        claude_effort = claude_tier_effort(target_tier)
+        if claude_effort:
+            updated_input["effort"] = claude_effort
+            effort_note = f"effort {claude_effort}"
+        else:
+            if caller_effort:
+                updated_input.pop("effort", None)  # drop an invalid caller value
+            effort_note = "effort unpinned"
     if type_override:
         if prefix and not type_override.startswith(prefix):
             type_override = f"{prefix}{type_override}"
@@ -1261,7 +1319,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     state.setdefault("pending_spawns", []).extend(spawns)
     save_state(payload, state)
 
-    reason_msg = f"Mitosis Orchestrator pinned subagent model: {claude_model} ({reason})"
+    reason_msg = f"Mitosis Orchestrator pinned subagent model: {claude_model}, {effort_note} ({reason})"
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -1940,7 +1998,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                     return _deny(
                         "[Mitosis Orchestrator] Direct workspace edit followed by test runner execution detected "
                         f"in the primary agent ('{cmd}'). Delegate code editing and test execution loops "
-                        "to `flash-worker` (TypeName='flash-worker', Model='flash').",
+                        f"to {_delegation_hint(payload, 'flash')}.",
                         payload,
                     )
 

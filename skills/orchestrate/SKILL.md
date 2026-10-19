@@ -8,7 +8,7 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate` — v1.3.1)
+# Mitosis Orchestrator Workflow (`/orchestrate` — v1.3.2)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -30,7 +30,7 @@ When context must be gathered across the workspace before planning:
 1. Identify independent lookups (file discovery, symbol search, config inspection, git/log status).
 2. Fan out concurrent read-only subagents in a single invocation:
    - **Antigravity (`agy`)**: `invoke_subagent` with `TypeName: "flash-lite-scout"` and `"Model": "flash_lite"`.
-   - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (the hook pins `model: haiku`). Untyped `Agent` calls with `model: inherit` are classified by prompt; built-in `Explore` is left as-is.
+   - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (the hook pins `model: haiku`, `effort: low`). Untyped `Agent` calls with `model: inherit` are classified by prompt; built-in `Explore` is left as-is.
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="explorer")` or `codex exec --profile mitosis-scout "<lookup>"` (`gpt-5.6-luna`, low effort, `read-only` sandbox).
    - Keep each prompt narrowly scoped and end it with the four-header bounded REPORT FORMAT from `rules/AGENTS.md`.
    - Scouts are strictly read-only; mutation tasks or web searches are directed to Phase 3 workers.
@@ -54,7 +54,7 @@ Perform high-reasoning work directly on the primary Mitosis Orchestrator agent:
 
 1. Dispatch independent implementation or test work units:
    - **Antigravity (`agy`)**: `invoke_subagent` with `TypeName: "flash-worker"` and `"Model": "flash"`.
-   - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (the hook pins `model: sonnet`); use `isolation: "worktree"` for parallel branch work.
+   - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (the hook pins `model: sonnet`, `effort: medium`); use `isolation: "worktree"` for parallel branch work.
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="worker")` or `codex exec --profile mitosis-worker "<task>"` (`gpt-5.6-terra`, medium effort, `workspace-write` sandbox).
    - Give every worker an explicit file allowlist, a verification command and the four-header bounded REPORT FORMAT.
    - Follow-up instructions go through `send_message`; never send edit tasks to a scout.
