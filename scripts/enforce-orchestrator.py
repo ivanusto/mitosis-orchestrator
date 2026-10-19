@@ -62,6 +62,7 @@ Environment variables:
     AGY_MITOSIS_ALLOW_DIRECT_LOGS=1     allow primary agent to read raw logs and transcripts
     AGY_MITOSIS_ALLOW_DIRECT_FASTPATH=1 allow primary agent direct edit-test loops and unlimited edits
     AGY_MITOSIS_CIRCUIT_BREAKER=0       disable the 2-failure circuit breaker
+    CLAUDE_MITOSIS_PIN_SUBAGENTS=0      (Claude Code) stop rewriting Agent calls entirely
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
                                         <artifactDirectoryPath>/mitosis_orchestrator_debug.log
     (All variables support legacy AGY_ARGON_* and AGY_ALLOW_NON_ARGON_PRIMARY fallbacks)
@@ -77,9 +78,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_PRIMARY_MODEL = "Gemini 4 Argon (High)"
-DEFAULT_CODEX_PRIMARY_MODEL = "gpt-5.4"
-DEFAULT_CODEX_WORKER_MODEL = "codex-mini-latest"
+DEFAULT_CODEX_PRIMARY_MODEL = "gpt-6.1-sol"
+DEFAULT_CODEX_WORKER_MODEL = "gpt-5.6-terra"
 DEFAULT_CODEX_SCOUT_MODEL = "gpt-5.6-luna"
+DEFAULT_CLAUDE_PRIMARY_MODEL = "opus"
+DEFAULT_CLAUDE_WORKER_MODEL = "sonnet"
+DEFAULT_CLAUDE_SCOUT_MODEL = "haiku"
+CLAUDE_PLUGIN_PREFIX = "mitosis-orchestrator"
+# Built-in Claude Code subagent types that the pinning policy must never rewrite.
+CLAUDE_BUILTIN_AGENT_TYPES = {
+    "explore", "plan", "general-purpose", "claude", "claude-code-guide",
+    "statusline-setup", "output-style-setup", "bash",
+}
+CLAUDE_SUBAGENT_MODELS = {"haiku", "sonnet", "opus", "fable", "best"}
 ALLOWED_PRIMARY_MODELS = {
     "Gemini 4 Argon (High)",
     "Gemini 4 Argon (Medium)",
@@ -364,13 +375,35 @@ def _ask(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any
             }
         }
     if payload and is_codex_payload(payload):
+        # Codex hooks honour allow/deny only; "ask" is treated as a failed hook.
         return {
-            "decision": "ask",
+            "decision": "deny",
             "reason": reason,
-            "permissionDecision": "ask",
+            "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }
     return {"decision": "ask", "reason": reason}
+
+
+def _delegation_hint(payload: Optional[Dict[str, Any]], tier: str) -> str:
+    """Platform-specific wording that tells the primary agent how to delegate."""
+    if payload and is_claude_code_payload(payload):
+        if tier == "flash_lite":
+            return (
+                f"`Agent` with `subagent_type: \"{CLAUDE_PLUGIN_PREFIX}:{SCOUT_TYPE}\"` "
+                f"(model: {DEFAULT_CLAUDE_SCOUT_MODEL})"
+            )
+        return (
+            f"`Agent` with `subagent_type: \"{CLAUDE_PLUGIN_PREFIX}:{WORKER_TYPE}\"` "
+            f"(model: {DEFAULT_CLAUDE_WORKER_MODEL})"
+        )
+    if payload and is_codex_payload(payload):
+        if tier == "flash_lite":
+            return f"`spawn_agent` with `agent_type: \"explorer\"` ({DEFAULT_CODEX_SCOUT_MODEL})"
+        return f"`spawn_agent` with `agent_type: \"worker\"` ({DEFAULT_CODEX_WORKER_MODEL})"
+    if tier == "flash_lite":
+        return f"`{SCOUT_TYPE}` (TypeName='{SCOUT_TYPE}', Model='flash_lite')"
+    return f"`{WORKER_TYPE}` (TypeName='{WORKER_TYPE}', Model='flash')"
 
 
 def is_primary_agent(payload: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> bool:
@@ -452,6 +485,8 @@ FRONTIER_TOKENS = (
     "claude",
     "opus",
     "sonnet",
+    "fable",
+    "mythos",
     "grok",
     "gpt-4",
     "gpt-5",
@@ -810,7 +845,7 @@ def check_primary_model_settings(payload: Optional[Dict[str, Any]] = None) -> Tu
     is_codex = (payload and is_codex_payload(payload)) or "CODEX_CONFIG_PATH" in os.environ
     is_claude = (payload and is_claude_code_payload(payload)) or "CLAUDE_SETTINGS_PATH" in os.environ
     preferred = _get_env("CODEX_MITOSIS_PRIMARY_MODEL", "CLAUDE_MITOSIS_PRIMARY_MODEL", "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL")
-    default_model = DEFAULT_CODEX_PRIMARY_MODEL if is_codex else ("Claude 3.7 Sonnet" if is_claude else DEFAULT_PRIMARY_MODEL)
+    default_model = DEFAULT_CODEX_PRIMARY_MODEL if is_codex else (DEFAULT_CLAUDE_PRIMARY_MODEL if is_claude else DEFAULT_PRIMARY_MODEL)
     target = preferred if (preferred in ALLOWED_PRIMARY_MODELS or is_frontier_tier(preferred)) else default_model
     if is_codex:
         data, path = _read_codex_config_toml(path)
@@ -855,10 +890,12 @@ POLICY_NOTICE = (
 
 CLAUDE_POLICY_NOTICE = (
     "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
-    "location, git/log checks, single-file inspection) to `haiku` "
-    "(`subagent_type: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
-    "research and scoped code edits to `sonnet` (`subagent_type: \"flash-worker\"`). "
-    "Never use `model: \"inherit\"` on subagents. "
+    "location, git/log checks, single-file inspection) to the `Agent` tool with "
+    "`subagent_type: \"mitosis-orchestrator:flash-lite-scout\"` (haiku) and multi-file research, "
+    "test runs, web/docs research and scoped code edits to "
+    "`subagent_type: \"mitosis-orchestrator:flash-worker\"` (sonnet). "
+    "Untyped `Agent` calls are classified by prompt; other plugins' agents and built-in types "
+    "(Explore, Plan, general-purpose) are left untouched. "
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
 
@@ -866,7 +903,7 @@ CODEX_POLICY_NOTICE = (
     "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
     "location, git/log checks, single-file inspection) to `gpt-5.6-luna` "
     "(`subagent_type: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
-    "research and scoped code edits to `codex-mini-latest` (`subagent_type: \"flash-worker\"`). "
+    "research and scoped code edits to `gpt-5.6-terra` (`subagent_type: \"flash-worker\"`). "
     "Never use `model: \"inherit\"` on subagents. "
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
@@ -1110,23 +1147,66 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
     }
 
 
+def _claude_subagent_in_scope(subagent_type: str) -> Tuple[bool, str]:
+    """Return (in_scope, reason). Only this plugin's own agent types and untyped calls are pinned."""
+    raw = (subagent_type or "").strip()
+    if not raw:
+        return True, "untyped Agent call"
+    prefix, bare = "", raw.lower()
+    if ":" in bare:
+        prefix, bare = bare.split(":", 1)
+        prefix, bare = prefix.strip(), bare.strip()
+    if bare in (WORKER_TYPE, SCOUT_TYPE) and prefix in ("", CLAUDE_PLUGIN_PREFIX):
+        return True, f"{bare} type"
+    if prefix and prefix != CLAUDE_PLUGIN_PREFIX:
+        return False, f"agent '{raw}' belongs to plugin '{prefix}'"
+    if bare in CLAUDE_BUILTIN_AGENT_TYPES:
+        return False, f"built-in agent type '{raw}'"
+    return False, f"unknown agent type '{raw}' left untouched"
+
+
 def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     prompt = str(args.get("prompt") or "").strip()
     if not prompt:
         return _deny(f"{tool_name} prompt cannot be empty.", payload)
 
     subagent_type = str(args.get("subagent_type") or args.get("subagentType") or "").strip()
+    description = str(args.get("description") or args.get("role") or "").strip()
+    isolation = str(args.get("isolation") or args.get("workspace") or "inherit").strip().lower()
+    workspace = "branch" if isolation == "worktree" else isolation
+    model_req = str(args.get("model") or "inherit").strip().lower()
+
+    def _passthrough(reason: str) -> Dict[str, Any]:
+        # Still track worktree spawns so the Stop reminder can nag about live branches.
+        if workspace == "branch":
+            state = load_state(payload)
+            state.setdefault("pending_spawns", []).append({
+                "role": description or subagent_type or tool_name.lower(),
+                "type": subagent_type,
+                "model": model_req,
+                "workspace": workspace,
+                "active_branch": True,
+            })
+            save_state(payload, state)
+        return _allow(f"Mitosis Orchestrator: {reason}; not pinned.", payload=payload)
+
+    if _get_env("CLAUDE_MITOSIS_PIN_SUBAGENTS", default="1") == "0":
+        return _passthrough("subagent pinning disabled (CLAUDE_MITOSIS_PIN_SUBAGENTS=0)")
+
+    in_scope, scope_reason = _claude_subagent_in_scope(subagent_type)
+    if not in_scope:
+        return _passthrough(scope_reason)
+
+    # Untyped call with an explicit, valid Claude model: honour the caller's choice.
+    if not subagent_type and model_req in CLAUDE_SUBAGENT_MODELS:
+        return _passthrough(f"explicit model '{model_req}' honoured")
+
     prefix = ""
     bare_type = subagent_type
     if ":" in bare_type:
         prefix_part, bare_type = bare_type.split(":", 1)
         prefix = f"{prefix_part}:"
         bare_type = bare_type.strip()
-
-    description = str(args.get("description") or args.get("role") or "").strip()
-    isolation = str(args.get("isolation") or args.get("workspace") or "inherit").strip().lower()
-    workspace = "branch" if isolation == "worktree" else isolation
-    model_req = str(args.get("model") or "inherit").strip().lower()
 
     # Map Claude Code model strings for classification
     internal_model = "flash_lite" if model_req in ("haiku", "flash_lite") else ("flash" if model_req in ("sonnet", "flash") else model_req)
@@ -1140,7 +1220,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     }
 
     target_tier, type_override, reason = classify_subagent(item)
-    claude_model = "haiku" if target_tier == "flash_lite" else "sonnet"
+    claude_model = DEFAULT_CLAUDE_SCOUT_MODEL if target_tier == "flash_lite" else DEFAULT_CLAUDE_WORKER_MODEL
 
     updated_input = copy.deepcopy(args)
     updated_input["model"] = claude_model
@@ -1765,7 +1845,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return _deny(
                     f"[Mitosis Orchestrator] Direct inspection of log/transcript file '{Path(target).name}' "
                     "by the primary agent is blocked for context hygiene. "
-                    "Delegate log slicing to `flash-lite-scout` (TypeName='flash-lite-scout').",
+                    f"Delegate log slicing to {_delegation_hint(payload, 'flash_lite')}.",
                     payload,
                 )
 
@@ -1790,8 +1870,8 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if len(edited) + len(new_targets) > max_edits:
                         return _deny(
                             f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
-                            f"when editing via apply_patch. Delegate multi-file modifications to `flash-worker` "
-                            "(TypeName='flash-worker', Model='flash').",
+                            f"when editing via apply_patch. Delegate multi-file modifications to "
+                            f"{_delegation_hint(payload, 'flash')}.",
                             payload,
                         )
                     for nt in new_targets:
@@ -1828,8 +1908,8 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                         if norm_target not in edited and len(edited) >= max_edits:
                             return _deny(
                                 f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
-                                f"when editing '{Path(target).name}'. Delegate multi-file modifications to `flash-worker` "
-                                "(TypeName='flash-worker', Model='flash').",
+                                f"when editing '{Path(target).name}'. Delegate multi-file modifications to "
+                                f"{_delegation_hint(payload, 'flash')}.",
                                 payload,
                             )
                         if norm_target not in edited:

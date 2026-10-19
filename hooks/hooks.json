@@ -34,7 +34,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Task|Agent|Bash|invoke_subagent|manage_subagents|run_command",
+        "matcher": "Agent|Bash",
         "hooks": [
           {
             "type": "command",

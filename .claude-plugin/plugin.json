@@ -1,7 +1,7 @@
 {
   "name": "mitosis-orchestrator",
-  "version": "1.2.0",
-  "description": "Cross-model frontier orchestrator with unified 3-platform support (Google Antigravity agy, Anthropic Claude Code, OpenAI Codex CLI): coordinates frontier primary models with sonnet / flash / codex-mini-latest workers and haiku / flash_lite / gpt-5.6-luna scouts.",
+  "version": "1.3.0",
+  "description": "Cross-model frontier orchestrator with unified 3-platform support (Google Antigravity agy, Anthropic Claude Code, OpenAI Codex CLI): coordinates frontier primary models with sonnet / flash / gpt-5.6-terra workers and haiku / flash_lite / gpt-5.6-luna scouts.",
   "author": {
     "name": "ivanusto"
   },
@@ -20,5 +20,8 @@
     "flash",
     "flash-lite"
   ],
-  "agents": "./claude-agents"
+  "agents": [
+    "./claude-agents/flash-worker.md",
+    "./claude-agents/flash-lite-scout.md"
+  ]
 }

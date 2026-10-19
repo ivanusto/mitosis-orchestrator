@@ -1,0 +1,6 @@
+# Mitosis Orchestrator scout profile for OpenAI Codex CLI (>= 0.134).
+# Usage: codex exec --profile mitosis-scout "<read-only lookup task>"
+# Installed to $CODEX_HOME/mitosis-scout.config.toml by scripts/setup-codex.py.
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"

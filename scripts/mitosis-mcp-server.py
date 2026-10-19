@@ -39,13 +39,13 @@ WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
 
 SERVER_NAME = "mitosis-mcp-server"
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.3.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_DEFINITIONS = [
     {
         "name": "mitosis_invoke_subagent",
-        "description": "Fan-out one or more subagent tasks in parallel via OpenAI Codex CLI, classifying each into scout (gpt-5.6-luna) or worker (codex-mini-latest) and validating bounded 4-header reports.",
+        "description": "Fan-out one or more subagent tasks in parallel via OpenAI Codex CLI, classifying each into scout (gpt-5.6-luna, read-only sandbox) or worker (gpt-5.6-terra, workspace-write sandbox) and validating bounded 4-header reports.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -81,7 +81,7 @@ TOOLS_DEFINITIONS = [
     },
     {
         "name": "mitosis_worker",
-        "description": "Execute a scoped execution subagent for multi-file research, test execution, or code edits using codex-mini-latest.",
+        "description": "Execute a scoped execution subagent for multi-file research, test execution, or code edits using gpt-5.6-terra (workspace-write sandbox).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -102,10 +102,25 @@ def resolve_codex_bin() -> str:
     found = shutil.which("codex")
     if found:
         return found
-    default_win = os.path.expanduser(r"~\AppData\Local\OpenAI\Codex\bin\9614f1d9b40d9c4f\codex.exe")
-    if os.path.exists(default_win):
-        return default_win
     return "codex"
+
+
+def sandbox_for(role_type: str) -> str:
+    """Scouts run read-only; workers get workspace-write."""
+    return "read-only" if role_type == SCOUT_TYPE else "workspace-write"
+
+
+def build_codex_cmd(prompt: str, model: str, workspace: str = "inherit", role_type: str = WORKER_TYPE) -> List[str]:
+    """Build the 'codex exec' argv. Sandboxed by tier unless MITOSIS_CODEX_YOLO=1."""
+    cmd = [resolve_codex_bin(), "exec", "-m", model]
+    if workspace in ("branch", "worktree"):
+        cmd.append("--worktree")
+    if os.environ.get("MITOSIS_CODEX_YOLO", "").strip() == "1":
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        cmd.extend(["--sandbox", sandbox_for(role_type)])
+    cmd.append(prompt)
+    return cmd
 
 
 def run_codex_exec(
@@ -114,17 +129,13 @@ def run_codex_exec(
     workspace: str = "inherit",
     cwd: Optional[str] = None,
     runner: Optional[Callable[..., Tuple[int, str, str]]] = None,
+    role_type: str = WORKER_TYPE,
 ) -> Tuple[int, str, str]:
     """Run a single subagent task via 'codex exec'."""
     if runner is not None:
         return runner(prompt=prompt, model=model, workspace=workspace, cwd=cwd)
 
-    codex_bin = resolve_codex_bin()
-    cmd = [codex_bin, "exec", "-m", model]
-    if workspace in ("branch", "worktree"):
-        cmd.append("--worktree")
-    cmd.append("--dangerously-bypass-approvals-and-sandbox")
-    cmd.append(prompt)
+    cmd = build_codex_cmd(prompt, model, workspace=workspace, role_type=role_type)
 
     try:
         proc = subprocess.run(
@@ -184,7 +195,7 @@ def execute_subagent_task(
     role = str(task.get("role") or role_type)
     cwd = task.get("cwd")
 
-    rc, stdout, stderr = run_codex_exec(prompt, model, workspace=workspace, cwd=cwd, runner=runner)
+    rc, stdout, stderr = run_codex_exec(prompt, model, workspace=workspace, cwd=cwd, runner=runner, role_type=role_type)
     output = stdout.strip() if stdout else stderr.strip()
 
     val_error = validate_subagent_report(output)

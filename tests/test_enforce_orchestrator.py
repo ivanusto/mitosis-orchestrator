@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -1186,8 +1187,8 @@ class TestCodexEngine(HookBase):
         self.assertFalse(eo.is_frontier_tier("spark-1"))
 
     def test_codex_model_constants(self):
-        self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-5.4")
-        self.assertEqual(eo.DEFAULT_CODEX_WORKER_MODEL, "codex-mini-latest")
+        self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-6.1-sol")
+        self.assertEqual(eo.DEFAULT_CODEX_WORKER_MODEL, "gpt-5.6-terra")
         self.assertEqual(eo.DEFAULT_CODEX_SCOUT_MODEL, "gpt-5.6-luna")
 
     def test_is_codex_payload(self):
@@ -1207,9 +1208,9 @@ class TestCodexEngine(HookBase):
         cfg.write_text('model = "codex-mini"\nverbose = true\n', encoding="utf-8")
         data, _ = eo._read_codex_config_toml(cfg)
         self.assertEqual(data.get("model"), "codex-mini")
-        eo._write_codex_config_model(cfg, "gpt-5.4")
+        eo._write_codex_config_model(cfg, "gpt-6.1-sol")
         data2, _ = eo._read_codex_config_toml(cfg)
-        self.assertEqual(data2.get("model"), "gpt-5.4")
+        self.assertEqual(data2.get("model"), "gpt-6.1-sol")
         content = cfg.read_text(encoding="utf-8")
         self.assertIn("verbose = true", content)
 
@@ -1227,7 +1228,7 @@ class TestCodexEngine(HookBase):
         payload = {"thread_id": "thr_test", "hook_event_name": "SessionStart"}
         res = eo.handle_session_start(payload)
         data, _ = eo._read_codex_config_toml(cfg)
-        self.assertEqual(data.get("model"), "gpt-5.4")
+        self.assertEqual(data.get("model"), "gpt-6.1-sol")
         self.assertIn("additionalContext", res)
         self.assertIn(eo.CODEX_POLICY_NOTICE, res["additionalContext"])
 
@@ -1281,7 +1282,7 @@ class TestCodexEngine(HookBase):
         res_worker = eo.handle_pre_tool_use(p_worker)
         self.assertEqual(res_worker.get("decision"), "allow")
         updated = (res_worker.get("updatedInput") or res_worker.get("overwrite") or {}).get("cmd", "")
-        self.assertIn("codex-mini-latest", updated)
+        self.assertIn("gpt-5.6-terra", updated)
 
         p_scout = {
             "thread_id": "thr_test",
@@ -1315,7 +1316,7 @@ class TestCodexEngine(HookBase):
         res2 = eo.handle_pre_tool_use(p2)
         self.assertEqual(res2.get("decision"), "allow")
         model2 = (res2.get("updatedInput") or res2.get("overwrite") or {}).get("model")
-        self.assertEqual(model2, "codex-mini-latest")
+        self.assertEqual(model2, "gpt-5.6-terra")
 
         p3 = {
             "thread_id": "thr_test",
@@ -1337,7 +1338,7 @@ class TestCodexEngine(HookBase):
         res4 = eo.handle_pre_tool_use(p4)
         self.assertEqual(res4.get("decision"), "allow")
         model4 = (res4.get("updatedInput") or res4.get("overwrite") or {}).get("model")
-        self.assertEqual(model4, "codex-mini-latest")
+        self.assertEqual(model4, "gpt-5.6-terra")
 
     def test_codex_notify_report_validation_and_branch_worktree(self):
         msg_ok = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: pytest ok\nNOTES: All tests pass"
@@ -1422,7 +1423,7 @@ class TestMitosisMCPServer(unittest.TestCase):
 
     def test_tools_call_worker_mock_runner(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):
-            self.assertEqual(model, "codex-mini-latest")
+            self.assertEqual(model, "gpt-5.6-terra")
             self.assertEqual(workspace, "branch")
             return 0, "STATUS: COMPLETED\nFILES_CHANGED: src/auth.py\nVERIFICATION: pytest ok\nNOTES: Fixed bug", ""
 
@@ -1462,7 +1463,7 @@ class TestMitosisMCPServer(unittest.TestCase):
         })
         self.assertFalse(res["result"]["isError"])
         self.assertIn("gpt-5.6-luna", recorded_models)
-        self.assertIn("codex-mini-latest", recorded_models)
+        self.assertIn("gpt-5.6-terra", recorded_models)
 
     def test_report_validation_failure_marks_error(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):
@@ -1480,3 +1481,126 @@ class TestMitosisMCPServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClaudeCodeScopeNarrowing(ClaudeHookBase):
+    def test_fable_and_mythos_are_frontier(self):
+        self.assertTrue(eo.is_frontier_tier("fable"))
+        self.assertTrue(eo.is_frontier_tier("claude-fable-5-1"))
+        self.assertTrue(eo.is_frontier_tier("mythos"))
+        self.assertFalse(eo.is_frontier_tier("haiku"))
+
+    def test_claude_session_start_accepts_fable(self):
+        settings_file = Path(self.tmp.name) / "settings.json"
+        settings_file.write_text(json.dumps({"model": "fable"}), encoding="utf-8")
+        os.environ["CLAUDE_SETTINGS_PATH"] = str(settings_file)
+        res = eo.handle_session_start(dict(self.payload, hook_event_name="SessionStart"))
+        ctx = res["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("WARNING", ctx)
+        self.assertIn("mitosis-orchestrator:flash-lite-scout", ctx)
+
+    def test_third_party_plugin_agent_passthrough(self):
+        call = self.tool("Agent", {
+            "prompt": "Review the manuscript.",
+            "description": "review",
+            "subagent_type": "academic-research-skills:synthesis_agent",
+            "model": "opus",
+        })
+        res = eo.handle_pre_tool_use(call)
+        out = res["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertNotIn("updatedInput", out)
+        self.assertIn("academic-research-skills", out["permissionDecisionReason"])
+
+    def test_builtin_agent_type_passthrough(self):
+        for t in ("Explore", "Plan", "general-purpose"):
+            call = self.tool("Agent", {"prompt": "grep for foo", "subagent_type": t})
+            out = eo.handle_pre_tool_use(call)["hookSpecificOutput"]
+            self.assertEqual(out["permissionDecision"], "allow")
+            self.assertNotIn("updatedInput", out)
+
+    def test_untyped_explicit_model_honoured(self):
+        call = self.tool("Agent", {"prompt": "grep for foo", "model": "opus"})
+        out = eo.handle_pre_tool_use(call)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertNotIn("updatedInput", out)
+
+    def test_untyped_inherit_is_classified(self):
+        call = self.tool("Agent", {"prompt": "grep for foo", "model": "inherit"})
+        out = eo.handle_pre_tool_use(call)["hookSpecificOutput"]
+        self.assertEqual(out["updatedInput"]["model"], "haiku")
+
+    def test_pin_subagents_disabled(self):
+        os.environ["CLAUDE_MITOSIS_PIN_SUBAGENTS"] = "0"
+        call = self.tool("Agent", {"prompt": "grep for foo", "subagent_type": "flash-lite-scout"})
+        out = eo.handle_pre_tool_use(call)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertNotIn("updatedInput", out)
+
+    def test_passthrough_worktree_still_tracked(self):
+        call = self.tool("Agent", {"prompt": "implement feature", "subagent_type": "general-purpose", "isolation": "worktree"})
+        eo.handle_pre_tool_use(call)
+        state = eo.load_state(self.payload)
+        self.assertTrue(any(p.get("active_branch") for p in state.get("pending_spawns", [])))
+
+    def test_claude_deny_messages_use_claude_terms(self):
+        res = eo.handle_pre_tool_use(self.tool("Read", {"file_path": str(self.project_dir / "x.log")}))
+        reason = res["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("mitosis-orchestrator:flash-lite-scout", reason)
+        self.assertNotIn("TypeName", reason)
+
+    def test_codex_ask_degrades_to_deny(self):
+        res = eo._ask("why", {"client": "codex"})
+        self.assertEqual(res["permissionDecision"], "deny")
+
+
+class TestMitosisMCPSandbox(unittest.TestCase):
+    def setUp(self):
+        self._env = dict(os.environ)
+        os.environ.pop("MITOSIS_CODEX_YOLO", None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env)
+
+    def test_scout_is_read_only(self):
+        cmd = mcp.build_codex_cmd("p", "gpt-5.6-luna", role_type=mcp.SCOUT_TYPE)
+        self.assertIn("read-only", cmd)
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", cmd)
+
+    def test_worker_is_workspace_write(self):
+        cmd = mcp.build_codex_cmd("p", "gpt-5.6-terra", workspace="branch", role_type=mcp.WORKER_TYPE)
+        self.assertIn("workspace-write", cmd)
+        self.assertIn("--worktree", cmd)
+
+    def test_yolo_opt_in(self):
+        os.environ["MITOSIS_CODEX_YOLO"] = "1"
+        cmd = mcp.build_codex_cmd("p", "gpt-5.6-terra")
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", cmd)
+        self.assertNotIn("--sandbox", cmd)
+
+
+class TestSetupCodex(unittest.TestCase):
+    def test_setup_into_temp_home(self):
+        import importlib.util as _iu
+        spec = _iu.spec_from_file_location("setup_codex", Path(__file__).resolve().parent.parent / "scripts" / "setup-codex.py")
+        mod = _iu.module_from_spec(spec); spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "codex"
+            home.mkdir()
+            (home / "config.toml").write_text('model = "gpt-5.6-terra"\n[features]\nhooks = true\n', encoding="utf-8")
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()):
+                mod.setup_codex(codex_home=home, interpreter="/usr/bin/python3")
+            cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(cfg["model"], "gpt-5.6-terra")
+            self.assertEqual(cfg["mcp_servers"]["mitosis"]["command"], "/usr/bin/python3")
+            self.assertTrue(cfg["mcp_servers"]["mitosis"]["args"][0].endswith("mitosis-mcp-server.py"))
+            self.assertNotIn("profiles", cfg)
+            self.assertTrue((home / "mitosis-scout.config.toml").exists())
+            self.assertTrue((home / "agents" / "explorer.toml").exists())
+            self.assertTrue((home / "config.toml.bak").exists())
+            # idempotent
+            with contextlib.redirect_stdout(io.StringIO()):
+                mod.setup_codex(codex_home=home, interpreter="/usr/bin/python3")
+            self.assertEqual((home / "config.toml").read_text(encoding="utf-8").count("[mcp_servers.mitosis]"), 1)

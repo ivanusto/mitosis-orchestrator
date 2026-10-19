@@ -1,0 +1,6 @@
+# Mitosis Orchestrator worker profile for OpenAI Codex CLI (>= 0.134).
+# Usage: codex exec --profile mitosis-worker "<scoped edit / test task>"
+# Installed to $CODEX_HOME/mitosis-worker.config.toml by scripts/setup-codex.py.
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"

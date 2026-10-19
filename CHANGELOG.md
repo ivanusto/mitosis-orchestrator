@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.0 — 2026-10-19
+
+### Fixed
+- **Claude Code install path**: the documented `claude plugin add` command does not exist. The repo now ships `.claude-plugin/marketplace.json`, so it installs with `claude plugin marketplace add ivanusto/mitosis-orchestrator` + `claude plugin install mitosis-orchestrator@mitosis-orchestrator` (or `claude --plugin-dir` for a single session).
+- **Claude Code agents never loaded**: `.claude-plugin/plugin.json` pointed `agents` at a directory, which the manifest schema rejects; it now lists the two `.md` files explicitly. Removed the non-existent `LS` / `MultiEdit` tools from the agent frontmatter and narrowed the `PostToolUse` matcher to `Agent|Bash`.
+- **Claude 5 family recognised as frontier**: `fable` / `mythos` were classified as non-frontier, so every session and prompt emitted a "switch model" warning. Default Claude pin target is now `opus` (was `Claude 3.7 Sonnet`).
+- **Claude Code `Agent` rewrite scoped down**: only this plugin's `flash-worker` / `flash-lite-scout` types (with or without the `mitosis-orchestrator:` prefix) and untyped `model: inherit` calls are pinned. Other plugins' agents, built-in types (`Explore`, `Plan`, `general-purpose`, …) and untyped calls with an explicit model pass through unchanged. New `CLAUDE_MITOSIS_PIN_SUBAGENTS=0` switch. Worktree spawns are still tracked for the Stop reminder.
+- **Platform-specific guidance text**: deny messages on Claude Code / Codex now name the right delegation primitive (`Agent` + `subagent_type`, `spawn_agent` + `agent_type`) instead of agy's `TypeName=` / `Model=` syntax.
+- **Codex `ask` decision**: Codex hooks only honour allow/deny, so the workspace guard now returns `deny` instead of an unsupported `ask`.
+
+### Changed (OpenAI Codex CLI, verified against 0.154.0 docs/binary and the 0.163.0 docs)
+- `[profiles.*]` tables are no longer honoured by Codex (removed in 0.134.0). `codex-config/config.toml.snippet` is replaced by `codex-config/mitosis-scout.config.toml` and `mitosis-worker.config.toml`, installed to `$CODEX_HOME/<name>.config.toml` for `codex exec --profile <name>`.
+- Agent role TOMLs gained the required `name` field and dropped `sandbox_mode` (ignored in role files; sandboxing is set by the parent session or profile).
+- Default Codex models: primary `gpt-6.1-sol`, worker `gpt-5.6-terra`, scout `gpt-5.6-luna`. `codex-mini-latest`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark` are retired or not shipped by current Codex builds.
+- `scripts/setup-codex.py` uses the running interpreter (`sys.executable`) and this repo's own `scripts/mitosis-mcp-server.py` path for `[mcp_servers.mitosis]` instead of a hard-coded `python` + `~/.gemini/...` / Windows path; it also installs the profile files and validates role `name`s.
+- `scripts/mitosis-mcp-server.py` runs scouts with `--sandbox read-only` and workers with `--sandbox workspace-write`; `--dangerously-bypass-approvals-and-sandbox` is opt-in via `MITOSIS_CODEX_YOLO=1`. Dropped the hard-coded Windows `codex.exe` fallback path.
+
+### Docs
+- README / README.zh-TW rewritten: per-platform install + verification steps, agy conflict note for the predecessor `argon-orchestrator`, Claude 5 and current Codex model tables, unified `*_MITOSIS_*` env table. Chinese docs use 尖端模型 for "frontier model".
+- 141 unit tests (was 127): fable tier, third-party / built-in agent pass-through, explicit model honouring, pin switch, Claude-specific deny wording, Codex sandbox flags, `setup-codex.py` end-to-end into a temp `$CODEX_HOME`.
+
 ## 1.2.0 — 2026-10-19
 
 ### Added
