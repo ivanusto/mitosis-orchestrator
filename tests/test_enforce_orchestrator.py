@@ -1604,3 +1604,28 @@ class TestSetupCodex(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 mod.setup_codex(codex_home=home, interpreter="/usr/bin/python3")
             self.assertEqual((home / "config.toml").read_text(encoding="utf-8").count("[mcp_servers.mitosis]"), 1)
+
+
+class TestNegatedMutationAndSubagentCalls(ClaudeHookBase):
+    def test_negated_mutation_keeps_scout(self):
+        for prompt in ("Read ops.py. Do not edit anything, do not run anything.",
+                       "Locate parse_token. Never modify files.",
+                       "Inspect config without deleting it."):
+            tier, override, reason = eo.classify_subagent({"TypeName": "flash-lite-scout", "Prompt": prompt})
+            self.assertEqual((tier, override), ("flash_lite", None), prompt)
+
+    def test_real_mutation_still_upgrades(self):
+        tier, override, _ = eo.classify_subagent({"TypeName": "flash-lite-scout", "Prompt": "Do not run tests. Edit auth.py and fix the bug."})
+        self.assertEqual((tier, override), ("flash", "flash-worker"))
+
+    def test_claude_subagent_calls_skip_primary_guards(self):
+        sub = dict(self.payload, agent_id="agent-1", agent_type="mitosis-orchestrator:flash-worker")
+        for i in range(4):
+            res = eo.handle_pre_tool_use(dict(sub, tool_name="Edit", tool_input={"file_path": str(self.project_dir / f"f{i}.py")}))
+            self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        res = eo.handle_pre_tool_use(dict(sub, tool_name="Bash", tool_input={"command": "python3 -m unittest discover -s tests"}))
+        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        res = eo.handle_pre_tool_use(dict(sub, tool_name="Read", tool_input={"file_path": str(self.project_dir / "x.log")}))
+        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        # primary budget untouched by subagent edits
+        self.assertEqual(eo.load_state(self.payload).get("turn_edited_files"), [])

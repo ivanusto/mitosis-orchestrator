@@ -40,7 +40,7 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 ---
 
-## Unified 3-Platform Context Routing Matrix (v1.3.0)
+## Unified 3-Platform Context Routing Matrix (v1.3.1)
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
@@ -177,7 +177,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 141 tests
+python3 -m unittest discover -s tests -v     # 144 tests
 agy plugin validate . --strict
 claude --plugin-dir . -p "/orchestrate smoke test"   # optional Claude Code dry run
 ```

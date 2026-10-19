@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 — 2026-10-19
+
+### Fixed (found by an end-to-end `/orchestrate` run on Claude Code 2.1.303)
+- **Negated mutation verbs no longer upgrade scouts**: prompts ending in "Do not edit anything" (the wording the orchestrator naturally produces) matched the mutation regex, so every `flash-lite-scout` was silently promoted to a `sonnet` worker. Negated phrases (`do not / never / without / no ... edit|modify|delete|...`) are stripped before classification; real mutation requests still upgrade.
+- **Subagent tool calls are no longer treated as the primary agent**: Claude Code adds `agent_id` / `agent_type` to hook input for calls made inside a subagent. Those calls now bypass the primary-only guards (edit budget, edit-then-test block, log hygiene), so a worker can edit and then run the test suite; its edits no longer count against the primary agent's budget either.
+- 144 tests.
+
 ## 1.3.0 — 2026-10-19
 
 ### Fixed

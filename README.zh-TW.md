@@ -40,7 +40,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ---
 
-## 三平台情境路由矩陣 (v1.3.0)
+## 三平台情境路由矩陣 (v1.3.1)
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -176,7 +176,7 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 141 個測試
+python3 -m unittest discover -s tests -v     # 144 個測試
 agy plugin validate . --strict
 claude --plugin-dir . -p "/orchestrate smoke test"   # Claude Code 試跑（選用）
 ```

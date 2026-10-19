@@ -153,6 +153,20 @@ MUTATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
+NEGATED_MUTATION_RE = re.compile(
+    r"\b(?:do not|don't|dont|never|must not|mustn't|should not|shouldn't|without|not|no)\s+"
+    r"(?:(?!\b(?:" + MUTATION_RE.pattern[3:-3] + r")\b)\w+\s+){0,2}"
+    r"(?:" + MUTATION_RE.pattern[3:-3] + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_negated_mutations(text: str) -> str:
+    """Remove negated mutation phrases so prohibitions do not read as tasks."""
+    return NEGATED_MUTATION_RE.sub(" ", text)
+
+
 # Moderate-complexity work that needs flash even when read-only.
 HEAVY_RE = re.compile(
     r"\b("
@@ -409,6 +423,9 @@ def _delegation_hint(payload: Optional[Dict[str, Any]], tier: str) -> str:
 def is_primary_agent(payload: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> bool:
     """Return True if caller is the primary orchestrator agent (not a subagent)."""
     if payload.get("isSubagent") is True or payload.get("is_subagent") is True:
+        return False
+    # Claude Code adds agent_id / agent_type to hook input when a subagent makes the call.
+    if payload.get("agent_id") or payload.get("agent_type"):
         return False
     cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or "").strip().lower()
     if state and cid and cid in state.get("subagents", {}):
@@ -1053,7 +1070,7 @@ def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str
     requested = str(_get(subagent, "Model", "model", default="")).strip().lower()
     text = f"{role}\n{prompt}"
 
-    mutation = MUTATION_RE.search(text)
+    mutation = MUTATION_RE.search(_strip_negated_mutations(text))
     heavy = HEAVY_RE.search(text)
     lite = LITE_RE.search(text)
 
