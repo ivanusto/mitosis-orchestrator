@@ -40,13 +40,39 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ---
 
-## 三平台情境路由矩陣 (v1.4.1)
+## 三平台情境路由矩陣 (v1.5.0)
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
 | **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
 | **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
 | **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
+
+
+### 信心分級分流與選用判斷器（v1.5.0）
+
+每次分流都會產生一個 `Decision`，欄位包括 `tier`、`effort`、`confidence`、`source`（`rule`、`judge` 或 `default`）、`rule` 與 `reason`。開啟 `*_MITOSIS_DEBUG=1` 後，每筆決策會以 `decisions` 欄位寫進除錯日誌，從中可以看出是哪條規則觸發、信心多高。
+
+```
+關鍵字規則 ──► 信心 ≥ 0.9 ────────────────────────────────► 採用規則
+      │
+      └─ 信心 < 0.9 且設了 MITOSIS_JUDGE_URL ──► 判斷器 ──► 有把握 ──► 採用判斷器
+                                                  └──► 不確定或錯誤 ──► flash（不會讓任務失敗）
+```
+
+- **規則信心值。**
+  - 0.95：明確型別、工作區模式、明確指定模型（這三類永遠不送判斷器），以及修改動詞
+  - 0.9：重型訊號
+  - 0.85：輕型訊號
+  - 0.5：提示詞長度後備
+- **唯讀宣告。** 提示詞若宣告唯讀（`read-only`、`do not modify anything`、`唯讀`），修改動詞與重型訊號的信心會降到 0.6。這類提示詞裡的那些字通常只是題目，例如「審查這些修正」「規劃遷移」。
+- **否定規則放寬。** `Do NOT git fetch/pull or modify`、`never delete or rename` 現在都算禁止句；`don't X and fix Y` 仍視為要求修改。
+- **判斷器預設關閉。**
+  - 設定 `MITOSIS_JUDGE_URL` 就會啟用。請求採 Jev 的 `choice` 格式，所以 TypeSafe Jev、自架的 Jev 相容閘道與 Ollaya 可以互換。
+  - 判斷器可以否決 scout 因修改動詞而升級，但不會推翻明確型別、工作區模式或明確指定的模型。
+  - 沒有設定 URL 時，除了否定規則放寬之外，分流結果與 v1.4.1 相同。
+- **隱私。** 送給判斷器的是提示詞前 2000 字元，並先遮蔽金鑰、電子郵件、IP 位址與家目錄路徑（見 [`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)）。如果提示詞不能離開本機，請改用本機閘道。
+- **實際作用範圍。** Claude Code 的主核幾乎都會指定型別，所以判斷器主要處理未指定型別的呼叫與 Codex 的 `spawn_agent`。在 66 筆真實工作階段樣本中，帶型別的呼叫一次都沒有送到判斷器。
 
 ---
 
@@ -140,7 +166,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.4.1)
+agy plugin list            # mitosis-orchestrator (enabled, 1.5.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -255,6 +281,10 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時允許主代理繞過單回合修改數量限制與「修改後跑測試」限制。 |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | 設為 `0` 時停用連續 2 次失敗熔斷機制。 |
 | `*_MITOSIS_DEBUG` | `0` | 設為 `1` 時在狀態檔旁的 `mitosis_orchestrator_debug.log` 記錄每次 Hook 呼叫的診斷 JSON。 |
+| `MITOSIS_JUDGE_URL` | 未設定 | 低信心分流決策要送往的 Jev 相容端點；未設定即停用判斷器。 |
+| `MITOSIS_JUDGE_KEY` · `MITOSIS_JUDGE_MODEL` | 未設定 · `jev-latest` | 送給判斷器的 Bearer 金鑰與模型名稱。 |
+| `MITOSIS_JUDGE_THRESHOLD` · `MITOSIS_JUDGE_MIN_CONFIDENCE` | `0.9` · `0.7` | 規則信心低於前者才詢問判斷器；判斷器信心低於後者視為不確定，退回 `flash`。 |
+| `MITOSIS_JUDGE_TIMEOUT` | `1.5` | 等待判斷器的秒數，逾時退回 `flash`。 |
 | `MITOSIS_CODEX_YOLO` | `0` | 設為 `1` 時 Codex 子代理改用 `--dangerously-bypass-approvals-and-sandbox` 而非分級沙箱。 |
 
 ---
@@ -262,7 +292,7 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 176 個測試（hook 與成本報表）
+python3 -m unittest discover -s tests -v     # 199 個測試（hook、判斷器、成本報表）
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表

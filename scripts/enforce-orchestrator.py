@@ -85,7 +85,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 DEFAULT_PRIMARY_MODEL = "Gemini 4 Argon (High)"
 DEFAULT_CODEX_PRIMARY_MODEL = "gpt-6.1-sol"
@@ -175,10 +175,16 @@ MUTATION_RE = re.compile(
 )
 
 # "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
+# Up to two words may sit between the negation and the verb, and "or"/"nor"
+# chains it, so "Do NOT git fetch/pull or modify" and "never delete or rename"
+# are prohibitions too. "and" is left out: "don't X and fix Y" asks for a fix.
+_MUTATION_ALT = MUTATION_RE.pattern[3:-3]
 NEGATED_MUTATION_RE = re.compile(
     r"\b(?:do not|don't|dont|never|must not|mustn't|should not|shouldn't|without|not|no)\s+"
-    r"(?:(?!\b(?:" + MUTATION_RE.pattern[3:-3] + r")\b)\w+\s+){0,2}"
-    r"(?:" + MUTATION_RE.pattern[3:-3] + r")\b",
+    r"(?:(?!\b(?:" + _MUTATION_ALT + r")\b)[\w/.-]+,?\s+){0,2}"
+    r"(?:(?:or|nor)\s+)?"
+    r"(?:" + _MUTATION_ALT + r")\b"
+    r"(?:,?\s+(?:or|nor)\s+(?:" + _MUTATION_ALT + r")\b)*",
     re.IGNORECASE,
 )
 
@@ -216,6 +222,18 @@ LITE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+
+# The caller declares the task read-only. Mutation and heavy keywords in such
+# prompts are usually the topic ("review the fixes", "plan the migration"),
+# so those rules lose their confidence and a judge may take over.
+READ_ONLY_RE = re.compile(
+    r"\bread[- ]?only\b|"
+    r"\bdo(?: not|n't) (?:modify|edit|change|write|touch) (?:anything|any files?|the (?:repo|code|workspace))\b|"
+    r"\bno (?:edits|writes|changes)\b|"
+    r"唯讀|只讀|不要(?:修改|改動|寫入)",
+    re.IGNORECASE,
+)
+READ_ONLY_CONFIDENCE = 0.6
 
 NUMBERED_RULE_RE = re.compile(r"(?m)^\s*[0-9]+[.)]\s+")
 CONVERSATION_ID_RE = re.compile(
@@ -1149,8 +1167,122 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
 # Classification
 # ---------------------------------------------------------------------------
 
-def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str]:
-    """Return (model, type_override_or_None, reason).
+class Decision(NamedTuple):
+    """One routing decision with the evidence behind it.
+
+    `confidence` is a prior per rule for now (see RULE_CONFIDENCE); `source`
+    says which layer decided: rule, model, judge or default.
+    """
+    tier: str
+    type_override: Optional[str]
+    effort: Optional[str]
+    confidence: float
+    source: str
+    rule: str
+    reason: str
+
+    def as_log(self) -> Dict[str, Any]:
+        return {
+            "tier": self.tier,
+            "type_override": self.type_override,
+            "effort": self.effort,
+            "confidence": self.confidence,
+            "source": self.source,
+            "rule": self.rule,
+            "reason": self.reason,
+        }
+
+
+# Prior confidence per rule. Explicit signals are near certain; the prompt
+# length fallbacks are guesses and are the cases a judge should take over.
+RULE_CONFIDENCE = {
+    "worker-type": 0.95,
+    "mutation": 0.95,
+    "scout-type": 0.95,
+    "workspace": 0.95,
+    "heavy": 0.9,
+    "self-type": 0.95,
+    "explicit-model": 0.95,
+    "lite": 0.85,
+    "long-prompt": 0.5,
+    "short-prompt": 0.5,
+    "default": 0.5,
+}
+
+# Rules a judge may overrule when their confidence is low. Type, workspace and
+# explicit-model rules state the caller's intent and are never sent to a judge.
+JUDGEABLE_RULES = {"mutation", "heavy", "lite", "long-prompt", "short-prompt", "default"}
+
+# Decisions made during this process, read by _debug_log. Hooks are one-shot
+# processes; the cap keeps the long-running MCP server from growing it.
+_RECENT_DECISIONS: List[Decision] = []
+
+_JUDGE_MODULE: Any = None
+
+
+def _tier_effort(tier: str) -> str:
+    return "low" if tier == "flash_lite" else "medium"
+
+
+def _rule_decision(tier: str, type_override: Optional[str], rule: str, reason: str) -> Decision:
+    return Decision(tier, type_override, _tier_effort(tier), RULE_CONFIDENCE[rule], "rule", rule, reason)
+
+
+def _load_judge() -> Any:
+    """Import scripts/mitosis_judge.py lazily, only when a judge is configured."""
+    global _JUDGE_MODULE
+    if _JUDGE_MODULE is None:
+        import importlib.util
+        path = Path(__file__).resolve().with_name("mitosis_judge.py")
+        spec = importlib.util.spec_from_file_location("mitosis_judge", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _JUDGE_MODULE = module
+    return _JUDGE_MODULE
+
+
+def _apply_judge(decision: Decision, prompt: str, scout_typed: bool, worker_type_name: str) -> Decision:
+    """Hand a low-confidence rule decision to the configured judge (MITOSIS_JUDGE_URL)."""
+    if decision.rule not in JUDGEABLE_RULES or not _get_env("MITOSIS_JUDGE_URL"):
+        return decision
+    try:
+        threshold = float(_get_env("MITOSIS_JUDGE_THRESHOLD", default="0.9"))
+    except ValueError:
+        threshold = 0.9
+    if decision.confidence >= threshold:
+        return decision
+    try:
+        verdict = _load_judge().judge_tier(prompt)
+    except Exception as exc:  # the judge must never break routing
+        verdict = None
+        decision = decision._replace(reason=f"{decision.reason}; judge error {type(exc).__name__}")
+    if verdict is None:
+        # Unreachable or unsure judge: take the tier that cannot fail the task.
+        return Decision("flash", decision.type_override, _tier_effort("flash"), decision.confidence,
+                        "default", decision.rule, f"{decision.reason}; judge unavailable, conservative flash")
+    tier, confidence = verdict
+    type_override = decision.type_override
+    if scout_typed:
+        # Only a mutation verb reaches here for a scout: the judge confirms or vetoes the upgrade.
+        type_override = worker_type_name if tier == "flash" else None
+    return Decision(tier, type_override, _tier_effort(tier), round(confidence, 3), "judge", decision.rule,
+                    f"{decision.reason}; judge chose {tier} ({confidence:.2f})")
+
+
+def decide_subagent(subagent: Dict[str, Any]) -> Decision:
+    """Return the routing Decision for a subagent spec: rules first, then the optional judge."""
+    decision, prompt, scout_typed, worker_name = _decide_by_rules(subagent)
+    if READ_ONLY_RE.search(prompt) and decision.rule in ("mutation", "heavy"):
+        decision = decision._replace(confidence=min(decision.confidence, READ_ONLY_CONFIDENCE),
+                                     reason=f"{decision.reason}; prompt declares read-only")
+    decision = _apply_judge(decision, prompt, scout_typed, worker_name)
+    _RECENT_DECISIONS.append(decision)
+    del _RECENT_DECISIONS[:-16]
+    return decision
+
+
+def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str]:
+    """Keyword rules. Returns (decision, role+prompt text, scout_typed, worker type name).
 
     Precedence (first match wins):
       1. flash-worker type                      -> flash
@@ -1178,35 +1310,47 @@ def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str
     workspace = str(_get(subagent, "Workspace", "workspace", default="inherit")).strip().lower()
     requested = str(_get(subagent, "Model", "model", default="")).strip().lower()
     text = f"{role}\n{prompt}"
+    scout_typed = bare_type == SCOUT_TYPE
+    worker_name = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
+
+    def done(decision: Decision) -> Tuple[Decision, str, bool, str]:
+        return decision, text, scout_typed, worker_name
 
     mutation = MUTATION_RE.search(_strip_negated_mutations(text))
     heavy = HEAVY_RE.search(text)
     lite = LITE_RE.search(text)
 
     if bare_type == WORKER_TYPE:
-        return "flash", None, "flash-worker type"
+        return done(_rule_decision("flash", None, "worker-type", "flash-worker type"))
     if mutation:
         if bare_type == SCOUT_TYPE:
             upgrade_type = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
-            return "flash", upgrade_type, f"mutation verb '{mutation.group(0)}' on read-only scout; upgraded to flash-worker"
-        return "flash", None, f"mutation verb '{mutation.group(0)}'"
+            return done(_rule_decision("flash", upgrade_type, "mutation",
+                                  f"mutation verb '{mutation.group(0)}' on read-only scout; upgraded to flash-worker"))
+        return done(_rule_decision("flash", None, "mutation", f"mutation verb '{mutation.group(0)}'"))
     if bare_type == SCOUT_TYPE:
-        return "flash_lite", None, "flash-lite-scout type"
+        return done(_rule_decision("flash_lite", None, "scout-type", "flash-lite-scout type"))
     if workspace in ("branch", "share"):
-        return "flash", None, f"Workspace '{workspace}' implies writes"
+        return done(_rule_decision("flash", None, "workspace", f"Workspace '{workspace}' implies writes"))
     if heavy:
-        return "flash", None, f"heavy signal '{heavy.group(0)}'"
+        return done(_rule_decision("flash", None, "heavy", f"heavy signal '{heavy.group(0)}'"))
     if bare_type == "self":
-        return "flash", None, "self type carries the full tool set"
+        return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))
     if requested in ALLOWED_SUBAGENT_MODELS:
-        return requested, None, "explicit model honoured"
+        return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
     if lite and len(prompt) <= 600:
-        return "flash_lite", None, f"lite signal '{lite.group(0)}'"
+        return done(_rule_decision("flash_lite", None, "lite", f"lite signal '{lite.group(0)}'"))
     if len(prompt) > 450:
-        return "flash", None, "long prompt"
+        return done(_rule_decision("flash", None, "long-prompt", "long prompt"))
     if len(prompt) <= 320:
-        return "flash_lite", None, "short prompt without heavy signals"
-    return "flash", None, "default"
+        return done(_rule_decision("flash_lite", None, "short-prompt", "short prompt without heavy signals"))
+    return done(_rule_decision("flash", None, "default", "default"))
+
+
+def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str]:
+    """Return (model, type_override_or_None, reason); see decide_subagent."""
+    decision = decide_subagent(subagent)
+    return decision.tier, decision.type_override, decision.reason
 
 
 def classify_subagent_tier(subagent: Dict[str, Any]) -> str:
@@ -1797,7 +1941,7 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return _deny("mitosis_scout prompt cannot be empty.", payload)
-        mutation = MUTATION_RE.search(prompt)
+        mutation = MUTATION_RE.search(_strip_negated_mutations(prompt))
         if mutation:
             target_model = DEFAULT_CODEX_WORKER_MODEL
             target_type = WORKER_TYPE
@@ -2359,6 +2503,9 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
         "payloadKeys": sorted(payload.keys()),
         "result": result,
     }
+    if _RECENT_DECISIONS:
+        entry["decisions"] = [d.as_log() for d in _RECENT_DECISIONS]
+        _RECENT_DECISIONS.clear()
     try:
         with open(path.with_name("mitosis_orchestrator_debug.log"), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.0 — 2026-10-20
+
+### Added
+- **`Decision` routing record**: `decide_subagent` returns `tier`, `type_override`, `effort`, `confidence`, `source`, `rule` and `reason`; `classify_subagent` / `classify_subagent_tier` keep their old return shapes. Each rule carries a prior confidence (`RULE_CONFIDENCE`): explicit types, workspace and models 0.95, mutation 0.95, heavy 0.9, lite 0.85, prompt-length fallbacks 0.5. The debug log records every decision under `decisions`, and the Codex MCP server reports `confidence` / `decision_source` per task.
+- **Read-only declarations**: prompts that declare themselves read-only (`read-only`, `do not modify anything`, `唯讀`) drop mutation and heavy hits to 0.6.
+- **Optional judge** (`scripts/mitosis_judge.py`, off by default): with `MITOSIS_JUDGE_URL` set, decisions below `MITOSIS_JUDGE_THRESHOLD` (0.9) go to a Jev-compatible endpoint (TypeSafe Jev, a self-hosted gateway, Ollaya). The prompt is cut to 2000 characters and secrets, e-mail and IP addresses and home directories are masked. An unsure, slow (`MITOSIS_JUDGE_TIMEOUT`, 1.5 s) or failing judge falls back to `flash`. Typed, workspace and explicit-model decisions are never judged; a judge may veto a scout's mutation upgrade.
+
+### Fixed
+- Negated mutation phrases with coordinated verbs or slash-joined words (`Do NOT git fetch/pull or modify`, `never delete or rename`) were read as edit requests. `don't X and fix Y` still counts as a fix.
+- Codex `mitosis_scout` matched mutation verbs without stripping negations, so "Do not edit anything" upgraded the scout to a worker.
+- The MCP server reported `SERVER_VERSION` 1.3.0.
+
+### Notes
+- Measured on 66 real subagent prompts from local sessions: with the judge off, no tier or type changes against 1.4.1; plugin-typed calls never reached the judge threshold.
+- 199 tests (was 176).
+
 ## 1.4.1 — 2026-10-19
 
 ### Added

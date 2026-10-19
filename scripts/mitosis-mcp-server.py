@@ -30,6 +30,7 @@ _eo = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_eo)
 
 classify_subagent = _eo.classify_subagent
+decide_subagent = _eo.decide_subagent
 validate_subagent_report = _eo.validate_subagent_report
 DEFAULT_CODEX_PRIMARY_MODEL = _eo.DEFAULT_CODEX_PRIMARY_MODEL
 DEFAULT_CODEX_WORKER_MODEL = _eo.DEFAULT_CODEX_WORKER_MODEL
@@ -39,7 +40,7 @@ WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
 
 SERVER_NAME = "mitosis-mcp-server"
-SERVER_VERSION = "1.3.0"
+SERVER_VERSION = "1.5.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_DEFINITIONS = [
@@ -153,16 +154,22 @@ def run_codex_exec(
         return 1, "", str(exc)
 
 
-def classify_task(task: Dict[str, Any]) -> Tuple[str, str, str]:
-    """Classify a task dictionary into (model, role_type, reason)."""
-    tier, type_override, reason = classify_subagent(task)
-    if tier == "flash_lite":
+def decide_task(task: Dict[str, Any]) -> Tuple[str, str, Any]:
+    """Route a task dictionary to (model, role_type, Decision)."""
+    decision = decide_subagent(task)
+    if decision.tier == "flash_lite":
         model = DEFAULT_CODEX_SCOUT_MODEL
-        role_type = type_override or SCOUT_TYPE
+        role_type = decision.type_override or SCOUT_TYPE
     else:
         model = DEFAULT_CODEX_WORKER_MODEL
-        role_type = type_override or WORKER_TYPE
-    return model, role_type, reason
+        role_type = decision.type_override or WORKER_TYPE
+    return model, role_type, decision
+
+
+def classify_task(task: Dict[str, Any]) -> Tuple[str, str, str]:
+    """Classify a task dictionary into (model, role_type, reason)."""
+    model, role_type, decision = decide_task(task)
+    return model, role_type, decision.reason
 
 
 def execute_subagent_task(
@@ -185,12 +192,14 @@ def execute_subagent_task(
     workspace = str(task.get("workspace") or task.get("isolation") or "inherit").strip().lower()
     explicit_model = str(task.get("model") or "").strip()
 
+    decision = None
     if explicit_model:
         model = explicit_model
         role_type = WORKER_TYPE if model == DEFAULT_CODEX_WORKER_MODEL else SCOUT_TYPE
         reason = "explicit model"
     else:
-        model, role_type, reason = classify_task(task)
+        model, role_type, decision = decide_task(task)
+        reason = decision.reason
 
     role = str(task.get("role") or role_type)
     cwd = task.get("cwd")
@@ -206,6 +215,8 @@ def execute_subagent_task(
         "model": model,
         "type": role_type,
         "reason": reason,
+        "confidence": decision.confidence if decision else 1.0,
+        "decision_source": decision.source if decision else "explicit",
         "workspace": workspace,
         "returncode": rc,
         "output": output,

@@ -77,6 +77,36 @@ class TestClassifier(unittest.TestCase):
         self.assertIn("mutation", reason)
 
 
+class TestDecision(unittest.TestCase):
+    def test_decision_matches_classify_subagent_on_table(self):
+        for _, item in CLASSIFIER_TABLE:
+            with self.subTest(prompt=item["Prompt"][:60]):
+                d = eo.decide_subagent(item)
+                self.assertEqual((d.tier, d.type_override, d.reason), eo.classify_subagent(item))
+                self.assertEqual(d.source, "rule")
+                self.assertEqual(d.confidence, eo.RULE_CONFIDENCE[d.rule])
+                self.assertEqual(d.effort, "low" if d.tier == "flash_lite" else "medium")
+
+    def test_rule_ids_and_confidence(self):
+        cases = [
+            (sub("Fix the off-by-one in parse_token."), "mutation", 0.95),
+            (sub("Look up where parse_token is defined.", type_name="flash-lite-scout"), "scout-type", 0.95),
+            (sub("Debug why the login test fails."), "heavy", 0.9),
+            (sub("Locate where the config loader is defined."), "lite", 0.85),
+            (sub("Which file defines UserRepository?"), "short-prompt", 0.5),
+            (sub("y" * 500), "long-prompt", 0.5),
+            (sub("y" * 400), "default", 0.5),
+        ]
+        for item, rule, confidence in cases:
+            with self.subTest(rule=rule):
+                d = eo.decide_subagent(item)
+                self.assertEqual((d.rule, d.confidence), (rule, confidence))
+
+    def test_length_fallbacks_are_low_confidence(self):
+        for rule in ("long-prompt", "short-prompt", "default"):
+            self.assertLess(eo.RULE_CONFIDENCE[rule], eo.RULE_CONFIDENCE["lite"])
+
+
 class HookBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -770,6 +800,18 @@ class TestDebugLog(HookBase):
         content = log_file.read_text(encoding="utf-8")
         self.assertIn("pre-tool-use", content)
 
+    def test_debug_log_records_decisions(self):
+        os.environ["AGY_MITOSIS_DEBUG"] = "1"
+        eo._RECENT_DECISIONS.clear()
+        eo.decide_subagent(sub("Locate where the config loader is defined."))
+        p = self.tool("run_command", {"CommandLine": "ls"})
+        eo._debug_log(p, "pre-tool-use", {"decision": "allow"})
+        log_file = Path(self.tmp.name) / "mitosis_orchestrator_debug.log"
+        entry = json.loads(log_file.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(entry["decisions"][0]["rule"], "lite")
+        self.assertEqual(entry["decisions"][0]["confidence"], 0.85)
+        self.assertEqual(eo._RECENT_DECISIONS, [])
+
     def test_debug_log_legacy_argon_env(self):
         os.environ["AGY_ARGON_DEBUG"] = "1"
         p = self.tool("run_command", {"CommandLine": "ls"})
@@ -1343,6 +1385,11 @@ class TestCodexEngine(HookBase):
         model3 = (res3.get("updatedInput") or res3.get("overwrite") or {}).get("model")
         self.assertEqual(model3, "gpt-5.6-luna")
 
+        p3b = dict(p3, tool_input={"prompt": "Locate parse_token in src/. Do not edit anything."})
+        res3b = eo.handle_pre_tool_use(p3b)
+        model3b = (res3b.get("updatedInput") or res3b.get("overwrite") or {}).get("model")
+        self.assertEqual(model3b, "gpt-5.6-luna")
+
         p4 = {
             "thread_id": "thr_test",
             "tool_name": "mitosis_worker",
@@ -1419,6 +1466,15 @@ class TestMitosisMCPServer(unittest.TestCase):
         self.assertIn("mitosis_invoke_subagent", names)
         self.assertIn("mitosis_scout", names)
         self.assertIn("mitosis_worker", names)
+
+    def test_execute_task_reports_decision(self):
+        def mock_runner(prompt, model, workspace="inherit", cwd=None):
+            return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: grep ok\nNOTES: none", ""
+
+        res = mcp.execute_subagent_task({"prompt": "Locate parse_token in src/"}, runner=mock_runner)
+        self.assertEqual((res["model"], res["confidence"], res["decision_source"]), ("gpt-5.6-luna", 0.85, "rule"))
+        res = mcp.execute_subagent_task({"prompt": "Locate parse_token", "model": "gpt-5.6-terra"}, runner=mock_runner)
+        self.assertEqual((res["confidence"], res["decision_source"]), (1.0, "explicit"))
 
     def test_tools_call_scout_mock_runner(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):

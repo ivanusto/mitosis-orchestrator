@@ -40,13 +40,32 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 ---
 
-## Unified 3-Platform Context Routing Matrix (v1.4.1)
+## Unified 3-Platform Context Routing Matrix (v1.5.0)
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
 | **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
 | **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
 | **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). |
+
+
+### Confidence-graded routing and the optional judge (v1.5.0)
+
+Every routing decision is a `Decision`: `tier`, `effort`, `confidence`, `source` (`rule`, `judge` or `default`), `rule` and `reason`. With `*_MITOSIS_DEBUG=1` each one is written to the debug log under `decisions`, so you can see which rule fired and how sure it was.
+
+```
+keyword rules ──► confidence ≥ 0.9 ──────────────────────────────► use the rule
+      │
+      └─ confidence < 0.9 and MITOSIS_JUDGE_URL set ──► judge ──► sure  ──► use the judge
+                                                          └────► unsure / error ──► flash (cannot fail the task)
+```
+
+- **Rule confidence.** Explicit types, workspace and explicit models score 0.95 and are never judged. Mutation verbs score 0.95, heavy signals 0.9, lite signals 0.85, and the prompt-length fallbacks 0.5.
+- **Read-only declarations.** A prompt that says it is read-only (`read-only`, `do not modify anything`, `唯讀`) drops mutation and heavy hits to 0.6, because in such prompts those words are usually the topic ("review the fixes", "plan the migration").
+- **Wider negation.** `Do NOT git fetch/pull or modify` and `never delete or rename` now count as prohibitions; `don't X and fix Y` still asks for a fix.
+- **The judge is off by default.** Setting `MITOSIS_JUDGE_URL` turns it on. It speaks the Jev `choice` request format, so TypeSafe Jev, a self-hosted Jev-compatible gateway and Ollaya are interchangeable. A judge may veto a scout's mutation upgrade, but never overrides explicit types, workspace modes or models. Without a URL, routing is identical to v1.4.1 apart from the wider negation.
+- **Privacy.** The judge receives the first 2000 characters of the prompt after secrets, e-mail and IP addresses and home directories are masked ([`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)). Use a local gateway if prompts must not leave the machine.
+- **When it matters.** On Claude Code the primary nearly always picks a typed agent, so the judge mostly sees untyped calls and Codex `spawn_agent` prompts. In a 66-prompt sample of real sessions, typed calls never reached it.
 
 ---
 
@@ -140,7 +159,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.4.1)
+agy plugin list            # mitosis-orchestrator (enabled, 1.5.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -256,6 +275,10 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to allow unlimited direct workspace edits and direct edit-then-test loops on the primary agent. |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | Set to `0` to disable the 2-consecutive-failure circuit breaker. |
 | `*_MITOSIS_DEBUG` | `0` | Set to `1` to append diagnostic JSON lines to `mitosis_orchestrator_debug.log` next to the state file. |
+| `MITOSIS_JUDGE_URL` | unset | Jev-compatible endpoint for low-confidence routing decisions; unset disables the judge. |
+| `MITOSIS_JUDGE_KEY` · `MITOSIS_JUDGE_MODEL` | unset · `jev-latest` | Bearer token and model name sent to the judge. |
+| `MITOSIS_JUDGE_THRESHOLD` · `MITOSIS_JUDGE_MIN_CONFIDENCE` | `0.9` · `0.7` | Rule confidence below which the judge is asked; judge confidence below which it counts as unsure (falls back to `flash`). |
+| `MITOSIS_JUDGE_TIMEOUT` | `1.5` | Seconds to wait for the judge before falling back to `flash`. |
 | `MITOSIS_CODEX_YOLO` | `0` | Set to `1` to run Codex subagents with `--dangerously-bypass-approvals-and-sandbox` instead of tiered sandboxes. |
 
 ---
@@ -263,7 +286,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 176 tests (hooks + cost report)
+python3 -m unittest discover -s tests -v     # 199 tests (hooks, judge, cost report)
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session
