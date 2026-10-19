@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — 2026-10-19
+
+### Added (Claude Code)
+- **`SendMessage` guard**: follow-ups sent to a `flash-lite-scout` that contain mutation verbs or more than 3 numbered steps are denied, as `send_message` already was on agy. Scout recipients are recognised by agent id: `PostToolUse` pairs the `agentId` in the `Agent` tool result with the pending spawn, and `SubagentStop` pairs by `agent_id` / `agent_type` as a fallback.
+- **Four-header report enforcement**: `SubagentStop` validates the final message of this plugin's own subagents and, once per agent, blocks the stop with the exact report shape so the agent rewrites it (`CLAUDE_MITOSIS_ENFORCE_REPORT=0` disables; `stop_hook_active` and third-party agent types are never blocked). The validator now accepts a bare `NOTES:` line followed by bullets and ignores code fences.
+- **`scripts/smoke-claude.py`**: headless end-to-end check that runs `claude -p` on a throwaway project, asserts from the hook debug log that the scout was pinned to `haiku` / `effort low`, confirms a haiku model ran from Claude Code's own usage output, and prints the cost report for the session.
+
+### Fixed
+- Claude Code `Stop` and `SubagentStop` payloads carry `last_assistant_message`, which the Codex payload detector treated as a Codex marker, so both events ran the Codex code path on Claude Code (the branch-worktree Stop reminder never fired there). A Claude `hook_event_name` now settles platform detection first.
+
+### Changed
+- `hooks/hooks.json` `PreToolUse` matcher narrowed from `*` to `Agent|Task|Bash|Read|NotebookRead|Write|Edit|NotebookEdit|SendMessage`; other tools (`Grep`, `Glob`, `WebFetch`, MCP) no longer spawn the hook. The opt-in workspace guard therefore only auto-approves those tools.
+- `skills/orchestrate/SKILL.md` and `rules/AGENTS.md`: "end the turn after dispatching" is agy behaviour; on Claude Code subagents run in the background, the primary keeps working on independent planning, and follow-ups reuse a worker's context through `SendMessage` instead of re-spawning.
+- 170 tests (was 159).
+
 ## 1.3.2 — 2026-10-19
 
 ### Added

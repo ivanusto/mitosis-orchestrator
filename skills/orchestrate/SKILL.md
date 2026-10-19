@@ -8,7 +8,7 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate` — v1.3.2)
+# Mitosis Orchestrator Workflow (`/orchestrate` — v1.4.0)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -34,7 +34,10 @@ When context must be gathered across the workspace before planning:
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="explorer")` or `codex exec --profile mitosis-scout "<lookup>"` (`gpt-5.6-luna`, low effort, `read-only` sandbox).
    - Keep each prompt narrowly scoped and end it with the four-header bounded REPORT FORMAT from `rules/AGENTS.md`.
    - Scouts are strictly read-only; mutation tasks or web searches are directed to Phase 3 workers.
-3. End turn after dispatching. The platform wakes you when scouts report.
+3. Dispatch, then keep going:
+   - **Antigravity (`agy`)**: end the turn right after dispatching; the platform wakes you when scouts report.
+   - **Claude Code**: subagents run in the background and you are notified as each one finishes. Keep working on the parts of Phase 2 that do not depend on their reports; never poll or redo their lookups yourself. For follow-ups, reuse a finished worker's context with `SendMessage` (`to:` its agent id) instead of spawning a new one; the hook still blocks edit or multi-step instructions sent to a scout.
+   - **OpenAI Codex CLI**: `spawn_agent` returns when the role finishes; batch independent lookups in one turn.
 
 ---
 
@@ -57,7 +60,7 @@ Perform high-reasoning work directly on the primary Mitosis Orchestrator agent:
    - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (the hook pins `model: sonnet`, `effort: medium`); use `isolation: "worktree"` for parallel branch work.
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="worker")` or `codex exec --profile mitosis-worker "<task>"` (`gpt-5.6-terra`, medium effort, `workspace-write` sandbox).
    - Give every worker an explicit file allowlist, a verification command and the four-header bounded REPORT FORMAT.
-   - Follow-up instructions go through `send_message`; never send edit tasks to a scout.
+   - Follow-up instructions go through `send_message` (agy) or `SendMessage` (Claude Code) to a worker that already holds the context; never send edit tasks to a scout.
 2. For large programmatic fan-out, workers operate in parallel across disjoint files or branch worktrees.
 
 ---

@@ -40,7 +40,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ---
 
-## 三平台情境路由矩陣 (v1.3.2)
+## 三平台情境路由矩陣 (v1.4.0)
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -140,7 +140,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.3.2)
+agy plugin list            # mitosis-orchestrator (enabled, 1.4.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -197,7 +197,7 @@ MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代�
 ## 核心組件與安全防護機制
 
 ### 1. 生命週期強制守衛 ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
-零外部依賴（僅 Python 3.8+ 標準函式庫），每次呼叫約 30 毫秒，於每個代理生命週期自動把關：
+零外部依賴（僅 Python 3.8+ 標準函式庫），每次呼叫約 30 毫秒，於每個代理生命週期自動把關。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
 
 | Hook 事件 | 防護機制與行為說明 |
 | :--- | :--- |
@@ -206,7 +206,7 @@ MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代�
 | `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理。 |
 | `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
 | `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。 |
-| `PreToolUse` · `send_message` | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令。 |
+| `PreToolUse` · `send_message`（agy）· `SendMessage`（Claude Code） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
 | `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |
@@ -214,7 +214,7 @@ MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代�
 | `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 指令或子代理呼叫連續失敗達 `2` 次即熔斷，阻止無效重試並要求回報阻礙原因。 |
 | `PreToolUse` · **工作區範圍守衛 (Workspace Guard)** | 選用（`*_MITOSIS_AUTO_ALLOW=1`）：工作區內的檔案讀寫與安全命令自動放行；跨出工作區、提權或危險指令轉為詢問（`ask`；Codex 沒有 `ask`，改為 `deny`）。未啟用時一律回傳明確的 `allow`。 |
 | `PostToolUse` | 配對新建子代理中繼資料，並更新連續失敗計數。 |
-| `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。 |
+| `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。Claude Code 端的 `SubagentStop` 另會檢查 `flash-lite-scout` / `flash-worker` 是否以四標頭回報結尾，不符時每個子代理退回一次要求重寫（`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 關閉）。 |
 
 ### 2. 有界四標頭子代理回報合約 (Bounded 4-Header Report Contract)
 所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結）：
@@ -247,6 +247,7 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 | `CLAUDE_MITOSIS_SCOUT_MODEL` · `CLAUDE_MITOSIS_WORKER_MODEL` | `haiku` · `sonnet` | Claude Code 各階層釘定的模型（`haiku`、`sonnet`、`opus`、`fable`）；不合法的值會退回預設。 |
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | 設為 `0` 時 Claude Code 端不再為釘定的 `Agent` 呼叫加上 `effort`（模型仍會釘定）。 |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code 各階層釘定的 effort（`low`、`medium`、`high`、`xhigh`、`max`）；呼叫端自帶的合法 `effort` 優先。 |
+| `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，`SubagentStop` 不再因最後訊息不是四標頭回報而退回外掛子代理。 |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。 |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
@@ -260,9 +261,9 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 159 個測試（hook 與成本報表）
+python3 -m unittest discover -s tests -v     # 170 個測試（hook 與成本報表）
 agy plugin validate . --strict
-claude --plugin-dir . -p "/orchestrate smoke test"   # Claude Code 試跑（選用）
+python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
 ```
 

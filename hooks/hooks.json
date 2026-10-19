@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "Agent|Task|Bash|Read|NotebookRead|Write|Edit|NotebookEdit|SendMessage",
         "hooks": [
           {
             "type": "command",

@@ -1607,6 +1607,108 @@ class TestClaudeCodeEffortAndModelPinning(ClaudeHookBase):
         self.assertIn("model: haiku", reason)
 
 
+class TestClaudeCodeSendMessageGuard(ClaudeHookBase):
+    SCOUT_ID = "a0312a7a126e64f00"
+    WORKER_ID = "b7b7b7b7b7b7b7b77"
+
+    def spawn_and_pair(self, subagent_type, agent_id, prompt):
+        pre = self.tool("Agent", {"prompt": prompt, "description": "x", "subagent_type": subagent_type, "model": "inherit"})
+        eo.handle_pre_tool_use(pre)
+        post = self.tool("Agent", pre["tool_input"], hook_event_name="PostToolUse",
+                         tool_response=f"Async agent launched successfully.\nagentId: {agent_id} (internal)")
+        eo.handle_post_tool_use(post)
+
+    def test_post_tool_use_pairs_agent_id_with_pending_spawn(self):
+        self.spawn_and_pair("mitosis-orchestrator:flash-lite-scout", self.SCOUT_ID, "Locate where parse_token is defined.")
+        state = eo.load_state(self.payload)
+        self.assertEqual(state["pending_spawns"], [])
+        self.assertEqual(state["subagents"][self.SCOUT_ID]["model"], "flash_lite")
+
+    def test_edit_task_to_scout_denied_lookup_allowed(self):
+        self.spawn_and_pair("mitosis-orchestrator:flash-lite-scout", self.SCOUT_ID, "Locate where parse_token is defined.")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": "Now fix the bug in parse_token and rerun."}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("mitosis-orchestrator:flash-worker", out["permissionDecisionReason"])
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": "Also look up where Settings is defined. Do not edit anything."}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        steps = "1. open a\n2. open b\n3. open c\n4. open d\n"
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": steps}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_edit_task_to_worker_or_unknown_allowed(self):
+        self.spawn_and_pair("mitosis-orchestrator:flash-worker", self.WORKER_ID, "Run the tests and fix failures.")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.WORKER_ID, "message": "Fix the remaining failure too."}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": "someone-else", "message": "Fix it."}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "allow")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.WORKER_ID, "message": ""}))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+
+
+class TestClaudeCodeSubagentStopReport(ClaudeHookBase):
+    GOOD = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ran grep, exit 0\nNOTES: found it in app.py"
+
+    def stop(self, **kw):
+        p = dict(self.payload, hook_event_name="SubagentStop", agent_id="a0312a7a126e64f00",
+                 agent_type="mitosis-orchestrator:flash-lite-scout", last_assistant_message=self.GOOD)
+        p.update(kw)
+        return eo.handle_subagent_stop(p)
+
+    def test_valid_report_passes(self):
+        self.assertEqual(self.stop(), {})
+
+    def test_invalid_report_blocked_once(self):
+        res = self.stop(last_assistant_message="I found main() in app.py, hope that helps!")
+        self.assertEqual(res["decision"], "block")
+        self.assertIn("STATUS: COMPLETED | BLOCKED | FAILED", res["reason"])
+        self.assertEqual(self.stop(last_assistant_message="still chatty"), {})  # nagged once per agent
+
+    def test_stop_hook_active_and_env_opt_out(self):
+        self.assertEqual(self.stop(last_assistant_message="chatty", stop_hook_active=True), {})
+        os.environ["CLAUDE_MITOSIS_ENFORCE_REPORT"] = "0"
+        self.assertEqual(self.stop(last_assistant_message="chatty"), {})
+
+    def test_non_plugin_agent_not_enforced(self):
+        self.assertEqual(self.stop(agent_type="Explore", last_assistant_message="chatty"), {})
+        self.assertEqual(self.stop(agent_type="other-plugin:flash-worker", last_assistant_message="chatty"), {})
+
+    def test_stop_pairs_pending_spawn_and_clears_branch(self):
+        pre = self.tool("Agent", {"prompt": "implement feature", "subagent_type": "mitosis-orchestrator:flash-worker", "isolation": "worktree"})
+        eo.handle_pre_tool_use(pre)
+        self.assertTrue(any(p.get("active_branch") for p in eo.load_state(self.payload)["pending_spawns"]))
+        self.stop(agent_id="deadbeefdeadbeef0", agent_type="mitosis-orchestrator:flash-worker")
+        state = eo.load_state(self.payload)
+        self.assertEqual(state["pending_spawns"], [])
+        self.assertFalse(state["subagents"]["deadbeefdeadbeef0"]["active_branch"])
+        self.assertEqual(eo.handle_stop(dict(self.payload, hook_event_name="Stop")), {})
+
+    def test_fenced_and_bare_notes_reports_validate(self):
+        fenced = "```\n" + self.GOOD + "\n```"
+        self.assertIsNone(eo.validate_subagent_report(fenced))
+        bare = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ran tests, exit 0\nNOTES:\n- Ran 150 tests - OK\n- nothing else"
+        self.assertIsNone(eo.validate_subagent_report(bare))
+        self.assertIsNotNone(eo.validate_subagent_report("STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ok\nNOTES:"))
+
+
+class TestClaudeStopPayloadDetection(unittest.TestCase):
+    def test_claude_stop_payloads_with_last_assistant_message_are_not_codex(self):
+        for event in ("Stop", "SubagentStop"):
+            p = {"session_id": "s", "hook_event_name": event, "last_assistant_message": "done", "stop_hook_active": False}
+            self.assertFalse(eo.is_codex_payload(p), event)
+            self.assertTrue(eo.is_claude_code_payload(p), event)
+        self.assertTrue(eo.is_codex_payload({"hook_event_name": "codex-notify", "last-assistant-message": "x"}))
+        self.assertTrue(eo.is_codex_payload({"thread_id": "t", "last_assistant_message": "x"}))
+
+
+class TestClaudeHooksManifest(unittest.TestCase):
+    def test_pretooluse_matcher_is_narrowed(self):
+        data = json.loads((Path(__file__).resolve().parent.parent / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        matcher = data["hooks"]["PreToolUse"][0]["matcher"]
+        self.assertNotEqual(matcher, "*")
+        for tool in ("Agent", "Task", "Bash", "Read", "Write", "Edit", "NotebookEdit", "SendMessage"):
+            self.assertIn(tool, matcher.split("|"))
+
+
 class TestMitosisMCPSandbox(unittest.TestCase):
     def setUp(self):
         self._env = dict(os.environ)

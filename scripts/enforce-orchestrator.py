@@ -23,7 +23,8 @@ pre-tool-use
                          prompts never stay on flash_lite) and records pending
                          spawns for lifecycle tracking.
     send_message      -> denies mutation or multi-step (>3 numbered rules) tasks
-                         sent to a known flash_lite recipient.
+                         sent to a known flash_lite recipient (Claude Code: `SendMessage`,
+                         recipients paired by agent id at post-tool-use / subagent-stop).
     run_workflow      -> denies scripts whose agent(...) calls omit
                          model="flash" / model="flash_lite".
     define_subagent   -> forces enable_subagent_tools=False (no nested spawning).
@@ -68,6 +69,8 @@ Environment variables:
     CLAUDE_MITOSIS_PIN_EFFORT=0         (Claude Code) stop adding `effort` to pinned Agent calls
     CLAUDE_MITOSIS_SCOUT_EFFORT=<e>     (Claude Code) scout effort (default: low; low|medium|high|xhigh|max)
     CLAUDE_MITOSIS_WORKER_EFFORT=<e>    (Claude Code) worker effort (default: medium)
+    CLAUDE_MITOSIS_ENFORCE_REPORT=0     (Claude Code) do not block a plugin subagent's stop when its
+                                        final message is not the four-header report
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
                                         <artifactDirectoryPath>/mitosis_orchestrator_debug.log
     (All variables support legacy AGY_ARGON_* and AGY_ALLOW_NON_ARGON_PRIMARY fallbacks)
@@ -99,6 +102,10 @@ CLAUDE_BUILTIN_AGENT_TYPES = {
     "statusline-setup", "output-style-setup", "bash",
 }
 CLAUDE_SUBAGENT_MODELS = {"haiku", "sonnet", "opus", "fable", "best"}
+CLAUDE_HOOK_EVENTS = {
+    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "SubagentStart", "SubagentStop", "Stop", "Notification", "PreCompact",
+}
 ALLOWED_PRIMARY_MODELS = {
     "Gemini 4 Argon (High)",
     "Gemini 4 Argon (Medium)",
@@ -115,6 +122,10 @@ def is_codex_payload(payload: Dict[str, Any]) -> bool:
         return False
     if payload.get("client") == "codex" or payload.get("platform") == "codex":
         return True
+    # Claude Code Stop / SubagentStop payloads also carry `last_assistant_message`;
+    # a Claude hook event name settles it before the key-based heuristics below.
+    if str(payload.get("hook_event_name") or "") in CLAUDE_HOOK_EVENTS:
+        return False
     if any(k in payload for k in ("turn_id", "turn-id", "thread_id", "thread-id", "call_id", "last-assistant-message", "last_assistant_message", "input-messages", "input_messages")):
         return True
     if payload.get("type") in ("agent-turn-complete", "approval-requested", "turn-ended") or \
@@ -224,6 +235,8 @@ MAX_SUBAGENT_REPORT_CHARS = 1600
 MAX_REPORT_BULLET_LINES = 10
 REPORT_BULLET_RE = re.compile(r"^[-*]\s+\S+")
 REPORT_LOG_URI_RE = re.compile(r"file://\S+\.log\b", re.IGNORECASE)
+REPORT_FENCE_RE = re.compile(r"^\s*`{3,}[\w-]*\s*$")
+CLAUDE_AGENT_ID_RE = re.compile(r"agentId\"?\s*[:=]\s*\"?([0-9a-f]{8,})", re.IGNORECASE)
 REPORT_LINE_PATTERNS = (
     re.compile(r"^STATUS:\s*(?:COMPLETED|BLOCKED|FAILED)\b", re.IGNORECASE),
     re.compile(r"^FILES_CHANGED:\s*\S+"),
@@ -463,7 +476,7 @@ def validate_subagent_report(text: str) -> Optional[str]:
 
     Returns None if valid, or an error description string if invalid.
     """
-    stripped = (text or "").strip()
+    stripped = "\n".join(l for l in (text or "").splitlines() if not REPORT_FENCE_RE.match(l)).strip()
     if not stripped:
         return "Subagent report is empty."
     if len(stripped) > MAX_SUBAGENT_REPORT_CHARS:
@@ -484,6 +497,9 @@ def validate_subagent_report(text: str) -> Optional[str]:
     expected_prefixes = ("STATUS:", "FILES_CHANGED:", "VERIFICATION:", "NOTES:")
     for idx, (pattern, prefix) in enumerate(zip(REPORT_LINE_PATTERNS, expected_prefixes), start=1):
         if not pattern.match(lines[idx - 1]):
+            # `NOTES:` may be bare when bullet lines follow it.
+            if prefix == "NOTES:" and re.match(r"^NOTES:\s*$", lines[idx - 1], re.IGNORECASE) and len(lines) > 4:
+                continue
             return f"Line {idx} must match '{prefix} <value>'."
 
     bullet_lines = lines[4:]
@@ -1331,10 +1347,12 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
 
 
 def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-    recipient = str(_get(args, "Recipient", "recipient", default="")).strip().lower()
+    is_claude = is_claude_code_payload(payload)
+    recipient = str(_get(args, "Recipient", "recipient", "to", "To", default="")).strip().lower()
     message = str(_get(args, "Message", "message", default=""))
+    tool_label = "SendMessage.message" if is_claude else "send_message.Message"
     if not message.strip():
-        return {"decision": "deny", "reason": "send_message.Message cannot be empty."}
+        return _deny(f"{tool_label} cannot be empty.", payload) if is_claude else {"decision": "deny", "reason": f"{tool_label} cannot be empty."}
 
     state = load_state(payload)
     sync_subagents(payload, state)
@@ -1342,21 +1360,59 @@ def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[
 
     info = state.get("subagents", {}).get(recipient)
     if not info or info.get("model") != "flash_lite":
-        return {"decision": "allow"}
+        return _allow("Mitosis Orchestrator: pass-through.", payload=payload) if is_claude else {"decision": "allow"}
 
-    mutation = MUTATION_RE.search(message)
+    mutation = MUTATION_RE.search(_strip_negated_mutations(message))
     rule_count = len(NUMBERED_RULE_RE.findall(message))
     if mutation or rule_count > 3:
         why = f"mutation verb '{mutation.group(0)}'" if mutation else f"{rule_count} numbered steps"
-        return {
-            "decision": "deny",
-            "reason": (
-                f"Recipient '{recipient}' is a flash_lite '{info.get('type') or SCOUT_TYPE}' "
-                f"subagent ({why}). Do not send code changes or multi-step (>3 rules) tasks to "
-                "flash_lite. Invoke a flash-worker subagent instead."
-            ),
+        reason = (
+            f"Recipient '{recipient}' is a flash_lite '{info.get('type') or SCOUT_TYPE}' "
+            f"subagent ({why}). Do not send code changes or multi-step (>3 rules) tasks to "
+            f"a scout. Use {_delegation_hint(payload, 'flash')} instead."
+        )
+        return _deny(reason, payload) if is_claude else {"decision": "deny", "reason": reason}
+    return _allow("Mitosis Orchestrator: pass-through.", payload=payload) if is_claude else {"decision": "allow"}
+
+
+def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint: str = "") -> Optional[Dict[str, Any]]:
+    """Pair a Claude Code agent id with the oldest pending spawn (or infer a record from the type)."""
+    agent_id = (agent_id or "").strip().lower()
+    if not agent_id:
+        return None
+    subagents: Dict[str, Dict[str, Any]] = state.setdefault("subagents", {})
+    if agent_id in subagents:
+        return subagents[agent_id]
+    pending: List[Dict[str, Any]] = state.setdefault("pending_spawns", [])
+    hint = (agent_type_hint or "").strip()
+    bare_hint = hint.split(":", 1)[1].lower() if ":" in hint else hint.lower()
+    idx = next((i for i, p in enumerate(pending) if bare_hint and str(p.get("type", "")).split(":")[-1].lower() == bare_hint), None)
+    if idx is None and pending:
+        idx = 0
+    if idx is not None:
+        record = pending.pop(idx)
+    elif bare_hint:
+        record = {
+            "role": hint, "type": hint,
+            "model": "flash_lite" if bare_hint == SCOUT_TYPE else "flash",
+            "workspace": "inherit", "active_branch": False,
         }
-    return {"decision": "allow"}
+    else:
+        return None
+    record["agent_id"] = agent_id
+    record["alive"] = True
+    subagents[agent_id] = record
+    return record
+
+
+def _claude_agent_ids_from_response(payload: Dict[str, Any]) -> List[str]:
+    ids: List[str] = []
+    for text in _iter_strings(payload.get("tool_response")):
+        for m in CLAUDE_AGENT_ID_RE.finditer(text):
+            aid = m.group(1).lower()
+            if aid not in ids:
+                ids.append(aid)
+    return ids
 
 
 def _iter_strings(value: Any):
@@ -1888,7 +1944,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _handle_spawn_agent(payload, tool_name, args)
     if tool_name in ("mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"):
         return _handle_mitosis_tools(payload, tool_name, args)
-    if tool_name == "send_message":
+    if tool_name in ("send_message", "SendMessage"):
         return _handle_send_message(payload, args)
     if tool_name == "run_workflow":
         return _handle_run_workflow(args)
@@ -2058,6 +2114,10 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
             if pending:
                 pending.pop()
     else:
+        if is_claude_code_payload(payload) and tool_name in ("Task", "Agent"):
+            hint = str((payload.get("tool_input") or {}).get("subagent_type") or "")
+            for aid in _claude_agent_ids_from_response(payload):
+                _claude_register_agent(state, aid, hint)
         sync_subagents(payload, state)
 
     # Track consecutive failures for the circuit breaker
@@ -2135,7 +2195,64 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+REPORT_BLOCK_REASON = (
+    "[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). "
+    "Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):\n"
+    "STATUS: COMPLETED | BLOCKED | FAILED\n"
+    "FILES_CHANGED: <comma-separated paths or NONE>\n"
+    "VERIFICATION: <one sentence stating the command run and its exit result>\n"
+    "NOTES: <one sentence or up to 10 '- ' bullets; include a file://.../*.log URI when BLOCKED or FAILED>"
+)
+
+
+def _is_plugin_agent_type(type_name: str) -> bool:
+    bare = (type_name or "").strip().lower()
+    if ":" in bare:
+        prefix, bare = bare.split(":", 1)
+        if prefix.strip() not in ("", CLAUDE_PLUGIN_PREFIX):
+            return False
+    return bare.strip() in (SCOUT_TYPE, WORKER_TYPE)
+
+
+def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = load_state(payload)
+    agent_id = str(payload.get("agent_id") or "").strip().lower()
+    agent_type = str(payload.get("agent_type") or "").strip()
+    record = _claude_register_agent(state, agent_id, agent_type)
+    cleared = False
+    if record is not None:
+        record["alive"] = False
+        record["active_branch"] = False
+        cleared = True
+    if not cleared:
+        for meta in state.setdefault("pending_spawns", []):
+            meta["active_branch"] = False
+        for meta in state.setdefault("subagents", {}).values():
+            meta["active_branch"] = False
+    save_state(payload, state)
+
+    if payload.get("stop_hook_active") is True:
+        return {}
+    if _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") == "0":
+        return {}
+    type_name = agent_type or (str(record.get("type") or "") if record else "")
+    if not _is_plugin_agent_type(type_name):
+        return {}
+    error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
+    if error is None:
+        return {}
+    nagged: List[str] = state.setdefault("report_nagged", [])
+    key = agent_id or type_name
+    if key in nagged:
+        return {}
+    nagged.append(key)
+    save_state(payload, state)
+    return {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
+
+
 def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if is_claude_code_payload(payload):
+        return _handle_claude_subagent_stop(payload)
     state = load_state(payload)
     sync_subagents(payload, state)
     subagents = state.setdefault("subagents", {})
