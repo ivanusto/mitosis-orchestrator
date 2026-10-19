@@ -1,7 +1,7 @@
 {
   "name": "mitosis-orchestrator",
-  "version": "1.1.0",
-  "description": "Cross-model frontier orchestrator for Claude Code and Antigravity (agy): coordinates frontier primary models with sonnet / flash workers and haiku / flash_lite scouts.",
+  "version": "1.2.0",
+  "description": "Cross-model frontier orchestrator with unified 3-platform support (Google Antigravity agy, Anthropic Claude Code, OpenAI Codex CLI): coordinates frontier primary models with sonnet / flash / codex-mini-latest workers and haiku / flash_lite / gpt-5.6-luna scouts.",
   "author": {
     "name": "ivanusto"
   },
@@ -14,6 +14,7 @@
     "claude-code",
     "antigravity",
     "agy",
+    "codex",
     "haiku",
     "sonnet",
     "flash",

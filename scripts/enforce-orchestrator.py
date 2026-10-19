@@ -77,6 +77,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_PRIMARY_MODEL = "Gemini 4 Argon (High)"
+DEFAULT_CODEX_PRIMARY_MODEL = "gpt-5.4"
+DEFAULT_CODEX_WORKER_MODEL = "codex-mini-latest"
+DEFAULT_CODEX_SCOUT_MODEL = "gpt-5.6-luna"
 ALLOWED_PRIMARY_MODELS = {
     "Gemini 4 Argon (High)",
     "Gemini 4 Argon (Medium)",
@@ -87,9 +90,37 @@ WORKER_TYPE = "flash-worker"
 STATE_FILENAME = "mitosis_orchestrator_state.json"
 
 
+def is_codex_payload(payload: Dict[str, Any]) -> bool:
+    """Return True if payload matches OpenAI Codex CLI hook or MCP input schemas."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("client") == "codex" or payload.get("platform") == "codex":
+        return True
+    if any(k in payload for k in ("turn_id", "turn-id", "thread_id", "thread-id", "call_id", "last-assistant-message", "last_assistant_message", "input-messages", "input_messages")):
+        return True
+    if payload.get("type") in ("agent-turn-complete", "approval-requested", "turn-ended") or \
+       payload.get("event") in ("agent-turn-complete", "approval-requested", "turn-ended"):
+        return True
+    if str(payload.get("hook_event_name") or "").lower() in ("codex-notify", "turn-ended"):
+        return True
+    tool_name = str(payload.get("tool_name") or payload.get("tool") or "").strip()
+    if not tool_name and isinstance(payload.get("toolCall"), dict):
+        tool_name = str(payload["toolCall"].get("name") or "").strip()
+    if not tool_name and isinstance(payload.get("tool_call"), dict):
+        tool_name = str(payload["tool_call"].get("name") or "").strip()
+    if tool_name in (
+        "apply_patch", "exec_command", "local_shell", "shell",
+        "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"
+    ):
+        return True
+    return False
+
+
 def is_claude_code_payload(payload: Dict[str, Any]) -> bool:
     """Return True if payload matches Claude Code hook input schemas."""
     if not isinstance(payload, dict):
+        return False
+    if is_codex_payload(payload):
         return False
     return any(k in payload for k in ("hook_event_name", "session_id", "tool_name", "tool_input"))
 
@@ -175,7 +206,7 @@ LOG_OR_TRANSCRIPT_RE = re.compile(
     r"(?:^|[/\\])(?:transcript(?:_full)?\.jsonl|[^/\\]+\.log)$",
     re.IGNORECASE,
 )
-READ_TOOLS = {"view_file", "view_file_outline", "view_code_item", "Read", "NotebookRead"}
+READ_TOOLS = {"view_file", "view_file_outline", "view_code_item", "Read", "NotebookRead", "read_file", "read"}
 MUTATION_TOOLS = {
     "write_to_file",
     "replace_file_content",
@@ -184,6 +215,8 @@ MUTATION_TOOLS = {
     "Edit",
     "MultiEdit",
     "NotebookEdit",
+    "write_file",
+    "apply_patch",
 }
 
 
@@ -191,7 +224,68 @@ MUTATION_TOOLS = {
 # Small helpers
 # ---------------------------------------------------------------------------
 
+def _extract_apply_patch_files(patch_text_or_args: Any) -> List[str]:
+    """Extract list of target file paths from apply_patch tool arguments or raw diff text."""
+    files: List[str] = []
+    text = ""
+    if isinstance(patch_text_or_args, dict):
+        for k in ("file_path", "filePath", "path", "target_file", "targetFile", "file"):
+            val = patch_text_or_args.get(k)
+            if isinstance(val, str) and val.strip():
+                files.append(val.strip())
+        list_val = patch_text_or_args.get("files") or patch_text_or_args.get("file_paths")
+        if isinstance(list_val, list):
+            for v in list_val:
+                if isinstance(v, str) and v.strip():
+                    files.append(v.strip())
+        for k in ("patch", "diff", "content", "patch_text"):
+            val = patch_text_or_args.get(k)
+            if isinstance(val, str):
+                text += "\n" + val
+    elif isinstance(patch_text_or_args, str):
+        text = patch_text_or_args
+
+    if text:
+        for m in re.finditer(r"^\s*diff\s+--git\s+[a-z]/(\S+)\s+[a-z]/(\S+)", text, re.MULTILINE):
+            files.append(m.group(2))
+        for m in re.finditer(r"^\s*Index:\s+([^\r\n\t]+)", text, re.MULTILINE):
+            files.append(m.group(1).strip())
+        for m in re.finditer(r"^\s*\*\*\*\s+([^\r\n\t]+)", text, re.MULTILINE):
+            path_str = m.group(1).strip()
+            path_str = re.split(r"\s{2,}|\t", path_str)[0].strip()
+            if path_str.startswith(("a/", "b/")):
+                path_str = path_str[2:]
+            files.append(path_str)
+        for m in re.finditer(r"^\s*(?:---|\+\+\+)\s+([^\r\n\t]+)", text, re.MULTILINE):
+            path_str = m.group(1).strip()
+            path_str = re.split(r"\s{2,}|\t", path_str)[0].strip()
+            if path_str.startswith(("a/", "b/")):
+                path_str = path_str[2:]
+            files.append(path_str)
+
+    cleaned: List[str] = []
+    seen = set()
+    for f in files:
+        f = f.strip().strip("'\"")
+        if not f or f in ("/dev/null", "dev/null"):
+            continue
+        if f not in seen:
+            seen.add(f)
+            cleaned.append(f)
+    return cleaned
+
+
 def _extract_tool_call(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    if is_codex_payload(payload):
+        name = str(payload.get("tool_name") or payload.get("tool") or "").strip()
+        inp = payload.get("tool_input") or payload.get("args") or payload.get("arguments") or payload.get("input")
+        if not name:
+            tc = payload.get("tool_call") or payload.get("toolCall")
+            if isinstance(tc, dict):
+                name = str(tc.get("name") or "").strip()
+                inp = tc.get("args") or tc.get("arguments") or tc.get("input")
+        args = inp if isinstance(inp, dict) else {}
+        return name, args
     if is_claude_code_payload(payload):
         name = str(payload.get("tool_name") or "").strip()
         inp = payload.get("tool_input")
@@ -220,6 +314,19 @@ def _allow(
         if updated_input is not None:
             out["updatedInput"] = updated_input
         return {"hookSpecificOutput": out}
+    if payload and is_codex_payload(payload):
+        res: Dict[str, Any] = {
+            "decision": "allow",
+            "reason": reason,
+            "permissionDecision": "allow",
+            "permissionDecisionReason": reason,
+        }
+        if updated_input is not None:
+            res["updatedInput"] = updated_input
+            res["overwrite"] = updated_input
+        if overrides:
+            res["permissionOverrides"] = overrides
+        return res
     res: Dict[str, Any] = {"decision": "allow", "reason": reason}
     if updated_input is not None:
         res["overwrite"] = updated_input
@@ -237,6 +344,13 @@ def _deny(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, An
                 "permissionDecisionReason": reason,
             }
         }
+    if payload and is_codex_payload(payload):
+        return {
+            "decision": "deny",
+            "reason": reason,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
     return {"decision": "deny", "reason": reason}
 
 
@@ -249,6 +363,13 @@ def _ask(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any
                 "permissionDecisionReason": reason,
             }
         }
+    if payload and is_codex_payload(payload):
+        return {
+            "decision": "ask",
+            "reason": reason,
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        }
     return {"decision": "ask", "reason": reason}
 
 
@@ -256,7 +377,7 @@ def is_primary_agent(payload: Dict[str, Any], state: Optional[Dict[str, Any]] = 
     """Return True if caller is the primary orchestrator agent (not a subagent)."""
     if payload.get("isSubagent") is True or payload.get("is_subagent") is True:
         return False
-    cid = str(payload.get("conversationId") or payload.get("session_id") or "").strip().lower()
+    cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or "").strip().lower()
     if state and cid and cid in state.get("subagents", {}):
         return False
     for wp in payload.get("workspacePaths") or []:
@@ -323,7 +444,7 @@ def validate_subagent_report(text: str) -> Optional[str]:
     return None
 
 
-SMALL_TIER_RE = re.compile(r"(?<![a-z0-9])(flash|lite|mini|nano|haiku)(?![a-z0-9])", re.IGNORECASE)
+SMALL_TIER_RE = re.compile(r"(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])", re.IGNORECASE)
 FRONTIER_TOKENS = (
     "argon",
     "pro",
@@ -334,6 +455,7 @@ FRONTIER_TOKENS = (
     "grok",
     "gpt-4",
     "gpt-5",
+    "gpt-6",
     "chatgpt-4o",
     "o1",
     "o3",
@@ -362,7 +484,9 @@ def _get_env(*names: str, default: str = "") -> str:
     expanded_names: List[str] = []
     for name in names:
         if name.startswith("AGY_MITOSIS_"):
-            expanded_names.append("CLAUDE_MITOSIS_" + name[len("AGY_MITOSIS_"):])
+            suffix = name[len("AGY_MITOSIS_"):]
+            expanded_names.append("CODEX_MITOSIS_" + suffix)
+            expanded_names.append("CLAUDE_MITOSIS_" + suffix)
         expanded_names.append(name)
     for name in expanded_names:
         val = os.environ.get(name)
@@ -375,7 +499,9 @@ def _env_flag(*names: str) -> bool:
     expanded_names: List[str] = []
     for name in names:
         if name.startswith("AGY_MITOSIS_"):
-            expanded_names.append("CLAUDE_MITOSIS_" + name[len("AGY_MITOSIS_"):])
+            suffix = name[len("AGY_MITOSIS_"):]
+            expanded_names.append("CODEX_MITOSIS_" + suffix)
+            expanded_names.append("CLAUDE_MITOSIS_" + suffix)
         expanded_names.append(name)
     for name in expanded_names:
         val = os.environ.get(name)
@@ -384,7 +510,22 @@ def _env_flag(*names: str) -> bool:
     return False
 
 
+def codex_config_path(payload: Optional[Dict[str, Any]] = None) -> str:
+    codex_override = os.environ.get("CODEX_CONFIG_PATH", "").strip()
+    if codex_override:
+        return os.path.expanduser(codex_override)
+    codex_home = os.environ.get("CODEX_HOME", "").strip()
+    if codex_home:
+        return str(Path(os.path.expanduser(codex_home)) / "config.toml")
+    return os.path.expanduser("~/.codex/config.toml")
+
+
 def settings_path(payload: Optional[Dict[str, Any]] = None) -> str:
+    codex_override = os.environ.get("CODEX_CONFIG_PATH", "").strip()
+    if codex_override:
+        return os.path.expanduser(codex_override)
+    if payload and is_codex_payload(payload):
+        return codex_config_path(payload)
     claude_override = os.environ.get("CLAUDE_SETTINGS_PATH", "").strip()
     if claude_override:
         return os.path.expanduser(claude_override)
@@ -425,7 +566,7 @@ def _state_file(payload: Dict[str, Any]) -> Optional[Path]:
     if artifact_dir:
         base = Path(artifact_dir)
     else:
-        cid = str(payload.get("conversationId") or payload.get("session_id") or "default")
+        cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or payload.get("turn_id") or "default")
         base = Path(tempfile.gettempdir()) / "mitosis-orchestrator" / cid
     try:
         base.mkdir(parents=True, exist_ok=True)
@@ -607,22 +748,80 @@ def _write_settings_atomic(path: str, data: Dict[str, Any]) -> None:
         raise
 
 
+def _read_codex_config_toml(path: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str]:
+    target_path = path or codex_config_path()
+    if not os.path.exists(target_path):
+        return None, target_path
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        m = re.search(r'^\s*model\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+        model = m.group(1).strip() if m else None
+        data = {"model": model} if model else {}
+        return data, target_path
+    except OSError:
+        return None, target_path
+
+
+def _write_codex_config_model(path: str, model: str) -> None:
+    dir_name = os.path.dirname(path) or "."
+    try:
+        os.makedirs(dir_name, exist_ok=True)
+    except OSError:
+        pass
+    content = ""
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            content = ""
+    if re.search(r'^\s*model\s*=.*$', content, flags=re.MULTILINE):
+        new_content = re.sub(r'^\s*model\s*=.*$', f'model = "{model}"', content, flags=re.MULTILINE)
+    else:
+        new_content = f'model = "{model}"\n' + content
+
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix=".config.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_f:
+            tmp_f.write(new_content)
+            if not new_content.endswith("\n"):
+                tmp_f.write("\n")
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
 def check_primary_model_settings(payload: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
     """Return (status, model) where status is one of:
     'ok' (frontier/mitosis), 'warn' (non-frontier, not changed), 'pinned' (rewritten, opt-in),
     'unknown' (settings file missing/unreadable), 'silenced'.
     """
     path = settings_path(payload)
+    is_codex = (payload and is_codex_payload(payload)) or "CODEX_CONFIG_PATH" in os.environ
     is_claude = (payload and is_claude_code_payload(payload)) or "CLAUDE_SETTINGS_PATH" in os.environ
-    preferred = _get_env("CLAUDE_MITOSIS_PRIMARY_MODEL", "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL")
-    default_model = "Claude 3.7 Sonnet" if is_claude else DEFAULT_PRIMARY_MODEL
+    preferred = _get_env("CODEX_MITOSIS_PRIMARY_MODEL", "CLAUDE_MITOSIS_PRIMARY_MODEL", "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL")
+    default_model = DEFAULT_CODEX_PRIMARY_MODEL if is_codex else ("Claude 3.7 Sonnet" if is_claude else DEFAULT_PRIMARY_MODEL)
     target = preferred if (preferred in ALLOWED_PRIMARY_MODELS or is_frontier_tier(preferred)) else default_model
-    data, path = _read_settings(path)
+    if is_codex:
+        data, path = _read_codex_config_toml(path)
+    else:
+        data, path = _read_settings(path)
     if data is None:
         return "unknown", target
     current = str(data.get("model") or "").strip()
 
     if _env_flag(
+        "CODEX_MITOSIS_ALLOW_NON_PRIMARY",
         "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_ALLOW_NON_MITOSIS_PRIMARY",
@@ -632,11 +831,14 @@ def check_primary_model_settings(payload: Optional[Dict[str, Any]] = None) -> Tu
         return "silenced", current or target
     if is_frontier_tier(current) and (not preferred or current == preferred):
         return "ok", current
-    if not _env_flag("CLAUDE_MITOSIS_PIN_SETTINGS", "AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS"):
+    if not _env_flag("CODEX_MITOSIS_PIN_SETTINGS", "CLAUDE_MITOSIS_PIN_SETTINGS", "AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS"):
         return "warn", current
     try:
-        data["model"] = target
-        _write_settings_atomic(path, data)
+        if is_codex:
+            _write_codex_config_model(path, target)
+        else:
+            data["model"] = target
+            _write_settings_atomic(path, data)
         return "pinned", target
     except Exception:
         return "warn", current
@@ -660,30 +862,49 @@ CLAUDE_POLICY_NOTICE = (
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
 
+CODEX_POLICY_NOTICE = (
+    "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
+    "location, git/log checks, single-file inspection) to `gpt-5.6-luna` "
+    "(`subagent_type: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
+    "research and scoped code edits to `codex-mini-latest` (`subagent_type: \"flash-worker\"`). "
+    "Never use `model: \"inherit\"` on subagents. "
+    "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+)
+
 
 def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     p = payload or {}
     status, model = check_primary_model_settings(p)
+    target_file = "config.toml" if (is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ) else "settings.json"
     if status == "ok":
         note = f"Primary model is '{model}'."
     elif status == "pinned":
-        note = f"Restored primary model pin to '{model}' in settings.json (pin settings opted-in)."
+        note = f"Restored primary model pin to '{model}' in {target_file} (pin settings opted-in)."
     elif status == "warn":
         note = (
-            f"WARNING: settings.json primary model is '{model or 'unset'}', not a frontier model. "
+            f"WARNING: {target_file} primary model is '{model or 'unset'}', not a frontier model. "
             "Ask the user to switch to a supported frontier model (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
-            "or set AGY_MITOSIS_ALLOW_NON_PRIMARY=1 / CLAUDE_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
+            "or set CODEX_MITOSIS_ALLOW_NON_PRIMARY=1 / AGY_MITOSIS_ALLOW_NON_PRIMARY=1 / CLAUDE_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
         )
     elif status == "silenced":
         note = f"Primary model is '{model}' (non-frontier warnings silenced)."
     else:
-        note = "settings.json not found; the live model is checked on every turn instead."
+        note = f"{target_file} not found; the live model is checked on every turn instead."
 
+    if is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ:
+        return {
+            "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+            "systemMessage": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+            },
+        }
     if is_claude_code_payload(p):
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CLAUDE_POLICY_NOTICE}"
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CLAUDE_POLICY_NOTICE}",
             }
         }
     return {
@@ -704,12 +925,17 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     save_state(payload, state)
 
     model_name = str(payload.get("modelName") or payload.get("model_name") or payload.get("model") or "")
-    if not model_name and is_claude_code_payload(payload):
+    if not model_name and (is_codex_payload(payload) or "CODEX_CONFIG_PATH" in os.environ):
+        data, _ = _read_codex_config_toml(codex_config_path(payload))
+        if data and isinstance(data, dict):
+            model_name = str(data.get("model") or "")
+    elif not model_name and is_claude_code_payload(payload):
         data, _ = _read_settings(settings_path(payload))
         if data and isinstance(data, dict):
             model_name = str(data.get("model") or "")
 
     if not model_name or is_frontier_tier(model_name) or _env_flag(
+        "CODEX_MITOSIS_ALLOW_NON_PRIMARY",
         "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_MITOSIS_ALLOW_NON_PRIMARY",
         "AGY_ALLOW_NON_MITOSIS_PRIMARY",
@@ -717,7 +943,7 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "AGY_ARGON_ALLOW_NON_PRIMARY",
     ):
         return {}
-    cid = str(payload.get("conversationId") or payload.get("session_id") or "")
+    cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or "")
     inv_num = payload.get("invocationNum", 0)
     key = f"{cid}:{inv_num}"
     warned: List[str] = state.setdefault("warned_invocations", [])
@@ -731,11 +957,20 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "not a frontier model. Tell the user to switch Model Selection to "
         "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
     )
+    if is_codex_payload(payload):
+        return {
+            "additionalContext": warn_text,
+            "systemMessage": warn_text,
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": warn_text,
+            },
+        }
     if is_claude_code_payload(payload):
         return {
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": warn_text
+                "additionalContext": warn_text,
             }
         }
     return {
@@ -1129,7 +1364,12 @@ def allowed_roots(payload: Dict[str, Any]) -> List[Path]:
             roots.append(Path(os.path.expanduser(str(cwd))).resolve())
         except OSError:
             pass
-    proj_dir = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("project_dir")
+    proj_dir = (
+        os.environ.get("CLAUDE_PROJECT_DIR")
+        or os.environ.get("CODEX_PROJECT_DIR")
+        or payload.get("project_dir")
+        or payload.get("workspace_dir")
+    )
     if proj_dir:
         try:
             roots.append(Path(os.path.expanduser(str(proj_dir))).resolve())
@@ -1193,19 +1433,237 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
     return True, ""
 
 
+def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any], cmd: str) -> Dict[str, Any]:
+    matches = re.findall(r"""(?:"([^"]*)"|'([^']*)')""", cmd)
+    prompt = ""
+    for m in reversed(matches):
+        candidate = (m[0] or m[1]).strip()
+        if candidate and len(candidate) > 2 and not candidate.startswith("-"):
+            prompt = candidate
+            break
+    if not prompt:
+        cleaned = re.sub(r"\bcodex\s+exec\b", "", cmd)
+        cleaned = re.sub(r"-(?:m|c|i|s|p|C|-model|-config|-sandbox|-cd)\s+\S+", "", cleaned)
+        cleaned = re.sub(r"--\S+", "", cleaned)
+        prompt = cleaned.strip() or cmd
+
+    item = {"Prompt": prompt, "Role": "codex-subagent"}
+    tier, type_override, reason = classify_subagent(item)
+    target_model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+    target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
+
+    if re.search(r"(?:-m|--model)\s+(\S+)", cmd):
+        new_cmd = re.sub(r"(-m|--model)\s+\S+", f"-m {target_model}", cmd, count=1)
+    else:
+        new_cmd = re.sub(r"\bcodex\s+exec\b", f"codex exec -m {target_model}", cmd, count=1)
+
+    active_branch = "--worktree" in cmd
+    spawns = [{
+        "role": target_type,
+        "type": target_type,
+        "model": target_model,
+        "workspace": "branch" if active_branch else "inherit",
+        "active_branch": active_branch,
+    }]
+    state = load_state(payload)
+    state.setdefault("pending_spawns", []).extend(spawns)
+    save_state(payload, state)
+
+    updated_args = copy.deepcopy(args)
+    for key in ("command", "CommandLine", "commandLine", "cmd"):
+        if key in updated_args:
+            updated_args[key] = new_cmd
+
+    return _allow(
+        f"Mitosis Orchestrator pinned codex exec model to '{target_model}' ({reason})",
+        updated_input=updated_args,
+        payload=payload,
+    )
+
+
+def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(args.get("prompt") or args.get("instructions") or args.get("message") or "").strip()
+    if not prompt:
+        return _deny(f"{tool_name} prompt cannot be empty.", payload)
+    role = str(args.get("role") or args.get("type") or args.get("name") or "").strip()
+    workspace = str(args.get("workspace") or args.get("isolation") or "inherit").strip().lower()
+    if workspace == "worktree":
+        workspace = "branch"
+    item = {
+        "Prompt": prompt,
+        "Role": role,
+        "Workspace": workspace,
+        "TypeName": role,
+    }
+    tier, type_override, reason = classify_subagent(item)
+    target_model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+    target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
+
+    updated_args = copy.deepcopy(args)
+    updated_args["model"] = target_model
+    if "type" in updated_args:
+        updated_args["type"] = target_type
+
+    spawns = [{
+        "role": role or target_type,
+        "type": target_type,
+        "model": target_model,
+        "workspace": workspace,
+        "active_branch": workspace == "branch",
+    }]
+    state = load_state(payload)
+    state.setdefault("pending_spawns", []).extend(spawns)
+    save_state(payload, state)
+
+    return _allow(
+        f"Mitosis Orchestrator pinned subagent model: {target_model} ({reason})",
+        updated_input=updated_args,
+        payload=payload,
+    )
+
+
+def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    state = load_state(payload)
+    if tool_name == "mitosis_scout":
+        prompt = str(args.get("prompt") or "").strip()
+        if not prompt:
+            return _deny("mitosis_scout prompt cannot be empty.", payload)
+        mutation = MUTATION_RE.search(prompt)
+        if mutation:
+            target_model = DEFAULT_CODEX_WORKER_MODEL
+            target_type = WORKER_TYPE
+            reason = f"mutation verb '{mutation.group(0)}' upgraded scout to worker"
+        else:
+            target_model = DEFAULT_CODEX_SCOUT_MODEL
+            target_type = SCOUT_TYPE
+            reason = "read-only scout"
+        updated_args = copy.deepcopy(args)
+        updated_args["model"] = target_model
+        state.setdefault("pending_spawns", []).append({
+            "role": str(args.get("role") or target_type),
+            "type": target_type,
+            "model": target_model,
+            "workspace": "inherit",
+            "active_branch": False,
+        })
+        save_state(payload, state)
+        return _allow(f"Mitosis Orchestrator pinned scout: {target_model} ({reason})", updated_input=updated_args, payload=payload)
+
+    if tool_name == "mitosis_worker":
+        prompt = str(args.get("prompt") or "").strip()
+        if not prompt:
+            return _deny("mitosis_worker prompt cannot be empty.", payload)
+        target_model = DEFAULT_CODEX_WORKER_MODEL
+        workspace = str(args.get("workspace") or "inherit").strip().lower()
+        active_branch = workspace in ("branch", "worktree")
+        updated_args = copy.deepcopy(args)
+        updated_args["model"] = target_model
+        state.setdefault("pending_spawns", []).append({
+            "role": str(args.get("role") or WORKER_TYPE),
+            "type": WORKER_TYPE,
+            "model": target_model,
+            "workspace": "branch" if active_branch else workspace,
+            "active_branch": active_branch,
+        })
+        save_state(payload, state)
+        return _allow(f"Mitosis Orchestrator pinned worker: {target_model}", updated_input=updated_args, payload=payload)
+
+    if tool_name == "mitosis_invoke_subagent":
+        if "Subagents" in args or "subagents" in args:
+            return _handle_invoke_subagent(payload, args)
+        tasks = args.get("tasks")
+        if isinstance(tasks, list):
+            updated_tasks = copy.deepcopy(tasks)
+            spawns = []
+            for t in updated_tasks:
+                if not isinstance(t, dict):
+                    continue
+                p = str(t.get("prompt") or "").strip()
+                tier, _, reason = classify_subagent(t)
+                model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+                t["model"] = model
+                ws = str(t.get("workspace") or "inherit").strip().lower()
+                spawns.append({
+                    "role": str(t.get("role") or tier),
+                    "type": SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE,
+                    "model": model,
+                    "workspace": ws,
+                    "active_branch": ws in ("branch", "worktree"),
+                })
+            state.setdefault("pending_spawns", []).extend(spawns)
+            save_state(payload, state)
+            updated_args = copy.deepcopy(args)
+            updated_args["tasks"] = updated_tasks
+            return _allow("Mitosis Orchestrator pinned tasks", updated_input=updated_args, payload=payload)
+        prompt = str(args.get("prompt") or "").strip()
+        if prompt:
+            tier, _, reason = classify_subagent(args)
+            model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+            updated_args = copy.deepcopy(args)
+            updated_args["model"] = model
+            state.setdefault("pending_spawns", []).append({
+                "role": str(args.get("role") or tier),
+                "type": SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE,
+                "model": model,
+                "workspace": "inherit",
+                "active_branch": False,
+            })
+            save_state(payload, state)
+            return _allow(f"Mitosis Orchestrator pinned subagent: {model} ({reason})", updated_input=updated_args, payload=payload)
+        return _deny("mitosis_invoke_subagent requires tasks or prompt.", payload)
+
+    return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+
+
+def handle_codex_notify(payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = load_state(payload)
+    sync_subagents(payload, state)
+
+    last_msg = str(payload.get("last-assistant-message") or payload.get("last_assistant_message") or "").strip()
+    report_error = None
+    if last_msg and ("STATUS:" in last_msg or "VERIFICATION:" in last_msg):
+        report_error = validate_subagent_report(last_msg)
+
+    active = [cid for cid, m in state.get("subagents", {}).items() if m.get("active_branch")]
+    active += [m.get("role", "worker") for m in state.get("pending_spawns", []) if m.get("active_branch")]
+
+    result: Dict[str, Any] = {"status": "ok", "decision": "allow"}
+    if report_error:
+        result["report_validation"] = "failed"
+        result["report_error"] = report_error
+    elif last_msg and ("STATUS:" in last_msg):
+        result["report_validation"] = "passed"
+
+    if active:
+        key = ",".join(sorted(active))
+        reminded: List[str] = state.setdefault("stop_reminded_sets", [])
+        if key not in reminded:
+            reminded.append(key)
+            save_state(payload, state)
+            result["decision"] = "continue"
+            result["reason"] = (
+                f"[Mitosis Orchestrator] Branch worktrees are still active ({', '.join(active)}). "
+                "Merge or discard their changes, then clean them up before finishing."
+            )
+            return result
+
+    save_state(payload, state)
+    return result
+
+
 def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or CLAUDE_MITOSIS_AUTO_ALLOW=1)
+    # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or CLAUDE_MITOSIS_AUTO_ALLOW=1 / CODEX_MITOSIS_AUTO_ALLOW=1)
     # to let project-scoped file and command tools skip the permission prompt.
     # When unset or for tools without path arguments, return an explicit "allow" pass-through.
-    if not _env_flag("CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
+    if not _env_flag("CODEX_MITOSIS_AUTO_ALLOW", "CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
         return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
     roots = allowed_roots(payload)
     if not roots:
         return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
 
-    if tool_name in ("run_command", "Bash"):
+    if tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
         cwd = str(_get(args, "cwd", "Cwd", default="") or payload.get("cwd") or "")
-        cmd = str(_get(args, "command", "CommandLine", "commandLine", default="") or "")
+        cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "")
         if not cmd:
             return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
         if cwd and not _within_roots(cwd, roots):
@@ -1214,6 +1672,15 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
         if ok:
             return _allow("Mitosis Orchestrator: command stays inside the workspace.", overrides=[f"command({cmd})"], payload=payload)
         return _ask(f"Mitosis Orchestrator: {why}.", payload=payload)
+
+    if tool_name == "apply_patch":
+        targets = _extract_apply_patch_files(args)
+        if not targets:
+            return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+        outside = [t for t in targets if not _within_roots(t, roots)]
+        if outside:
+            return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.", payload=payload)
+        return _allow("Mitosis Orchestrator: path is inside the workspace.", overrides=[f"write_file({t})" for t in targets], payload=payload)
 
     targets: List[Any] = []
     for key in ("file_path", "notebook_path") + PATH_ARG_KEYS:
@@ -1245,9 +1712,13 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Circuit breaker: if consecutive failures >= 2 and breaker is not disabled ("0"),
     # block retry loops on commands and subagents.
-    if _get_env("CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") != "0":
+    if _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER", "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") != "0":
         fails = int(state.get("consecutive_failures") or 0)
-        if fails >= 2 and tool_name in ("run_command", "invoke_subagent", "Bash", "Task", "Agent"):
+        if fails >= 2 and tool_name in (
+            "run_command", "invoke_subagent", "Bash", "Task", "Agent",
+            "shell", "exec_command", "local_shell", "spawn_agent",
+            "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"
+        ):
             return _deny(
                 f"[Mitosis Orchestrator] Circuit breaker tripped after {fails} consecutive failure(s). "
                 "Stop retrying and report the blocker to the user.",
@@ -1258,6 +1729,10 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _handle_invoke_subagent(payload, args)
     if tool_name in ("Task", "Agent"):
         return _handle_claude_task_or_agent(payload, tool_name, args)
+    if tool_name == "spawn_agent":
+        return _handle_spawn_agent(payload, tool_name, args)
+    if tool_name in ("mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"):
+        return _handle_mitosis_tools(payload, tool_name, args)
     if tool_name == "send_message":
         return _handle_send_message(payload, args)
     if tool_name == "run_workflow":
@@ -1267,10 +1742,15 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "manage_subagents":
         return _handle_manage_subagents(payload, args)
 
+    if tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
+        cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "").strip()
+        if re.search(r"\bcodex\s+exec\b", cmd):
+            return _handle_codex_exec_command(payload, tool_name, args, cmd)
+
     # Primary agent guards (context hygiene and fast-path budget)
     if is_primary_agent(payload, state):
         # Context hygiene: block direct reads of raw logs or transcripts by primary agent
-        if not _env_flag("CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS") and tool_name in READ_TOOLS:
+        if not _env_flag("CODEX_MITOSIS_ALLOW_DIRECT_LOGS", "CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS") and tool_name in READ_TOOLS:
             target = str(
                 args.get("file_path")
                 or args.get("notebook_path")
@@ -1290,47 +1770,74 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
 
         # Fast-path budget: direct workspace file mutations and test-runner loops
-        if not _env_flag("CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
-            if tool_name in MUTATION_TOOLS:
-                target = str(
-                    args.get("file_path")
-                    or args.get("notebook_path")
-                    or args.get("TargetFile")
-                    or args.get("AbsolutePath")
-                    or args.get("FilePath")
-                    or ""
-                )
-                artifact_dir = payload.get("artifactDirectoryPath")
-                is_artifact = False
-                if artifact_dir and target:
-                    try:
-                        is_artifact = _within_roots(target, [Path(artifact_dir)])
-                    except Exception:
-                        is_artifact = False
-                if target and not is_artifact:
-                    try:
-                        norm_target = str(Path(os.path.expanduser(target)).resolve())
-                    except Exception:
-                        norm_target = target
+        if not _env_flag("CODEX_MITOSIS_ALLOW_DIRECT_FASTPATH", "CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
+            if tool_name in MUTATION_TOOLS or tool_name == "apply_patch":
+                if tool_name == "apply_patch":
+                    patch_targets = _extract_apply_patch_files(args)
+                    norm_targets = []
+                    for t in patch_targets:
+                        try:
+                            norm_targets.append(str(Path(os.path.expanduser(t)).resolve()))
+                        except Exception:
+                            norm_targets.append(t)
                     edited: List[str] = state.setdefault("turn_edited_files", [])
-                    max_edits_str = _get_env("CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
+                    max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
                     try:
                         max_edits = int(max_edits_str)
                     except ValueError:
                         max_edits = 3
-                    if norm_target not in edited and len(edited) >= max_edits:
+                    new_targets = [nt for nt in norm_targets if nt not in edited]
+                    if len(edited) + len(new_targets) > max_edits:
                         return _deny(
                             f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
-                            f"when editing '{Path(target).name}'. Delegate multi-file modifications to `flash-worker` "
+                            f"when editing via apply_patch. Delegate multi-file modifications to `flash-worker` "
                             "(TypeName='flash-worker', Model='flash').",
                             payload,
                         )
-                    if norm_target not in edited:
-                        edited.append(norm_target)
+                    for nt in new_targets:
+                        edited.append(nt)
+                    if new_targets:
                         save_state(payload, state)
+                else:
+                    target = str(
+                        args.get("file_path")
+                        or args.get("notebook_path")
+                        or args.get("TargetFile")
+                        or args.get("AbsolutePath")
+                        or args.get("FilePath")
+                        or ""
+                    )
+                    artifact_dir = payload.get("artifactDirectoryPath")
+                    is_artifact = False
+                    if artifact_dir and target:
+                        try:
+                            is_artifact = _within_roots(target, [Path(artifact_dir)])
+                        except Exception:
+                            is_artifact = False
+                    if target and not is_artifact:
+                        try:
+                            norm_target = str(Path(os.path.expanduser(target)).resolve())
+                        except Exception:
+                            norm_target = target
+                        edited: List[str] = state.setdefault("turn_edited_files", [])
+                        max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
+                        try:
+                            max_edits = int(max_edits_str)
+                        except ValueError:
+                            max_edits = 3
+                        if norm_target not in edited and len(edited) >= max_edits:
+                            return _deny(
+                                f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
+                                f"when editing '{Path(target).name}'. Delegate multi-file modifications to `flash-worker` "
+                                "(TypeName='flash-worker', Model='flash').",
+                                payload,
+                            )
+                        if norm_target not in edited:
+                            edited.append(norm_target)
+                            save_state(payload, state)
 
-            elif tool_name in ("run_command", "Bash"):
-                cmd = str(_get(args, "command", "CommandLine", "commandLine", default="") or "").strip()
+            elif tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
+                cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "").strip()
                 edited = state.get("turn_edited_files", [])
                 if edited and TEST_RUNNER_RE.search(cmd):
                     return _deny(
@@ -1364,14 +1871,14 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
         output = str(tool_result.get("output") or "")
         if re.search(r"\bexited with code [1-9]", output):
             return True
-        if tool_name in ("invoke_subagent", "Task", "Agent"):
+        if tool_name in ("invoke_subagent", "Task", "Agent", "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"):
             res_str = json.dumps(tool_result)
             if re.search(r"STATUS:\s*(?:FAILED|BLOCKED)\b", res_str):
                 return True
     elif isinstance(tool_result, str):
         if re.search(r"\bexited with code [1-9]", tool_result):
             return True
-        if tool_name in ("invoke_subagent", "Task", "Agent"):
+        if tool_name in ("invoke_subagent", "Task", "Agent", "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"):
             if re.search(r"STATUS:\s*(?:FAILED|BLOCKED)\b", tool_result):
                 return True
     return False
@@ -1381,12 +1888,13 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, _ = _extract_tool_call(payload)
     state = load_state(payload)
     failed = _tool_failed(tool_name, payload)
-    if tool_name in ("invoke_subagent", "Task", "Agent") and (payload.get("error") or failed):
+    if tool_name in ("invoke_subagent", "Task", "Agent", "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker") and (payload.get("error") or failed):
         pending = state.get("pending_spawns", [])
-        if tool_name == "invoke_subagent":
-            tool_call = payload.get("toolCall") or {}
-            args = tool_call.get("args") or {}
-            n = len(_get(args, "Subagents", "subagents", default=[]) or [])
+        if tool_name in ("invoke_subagent", "mitosis_invoke_subagent"):
+            tool_call = payload.get("toolCall") or payload.get("tool_call") or {}
+            args = tool_call.get("args") or tool_call.get("input") or {}
+            tasks = _get(args, "Subagents", "subagents", "tasks", default=[]) or []
+            n = len(tasks) if isinstance(tasks, list) else 1
             if n and len(pending) >= n:
                 del pending[-n:]
             else:
@@ -1398,7 +1906,11 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         sync_subagents(payload, state)
 
     # Track consecutive failures for the circuit breaker
-    if tool_name in ("run_command", "invoke_subagent", "Bash", "Task", "Agent"):
+    if tool_name in (
+        "run_command", "invoke_subagent", "Bash", "Task", "Agent",
+        "shell", "exec_command", "local_shell", "spawn_agent",
+        "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"
+    ):
         if failed:
             state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
         else:
@@ -1409,7 +1921,7 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if is_claude_code_payload(payload):
+    if is_claude_code_payload(payload) or is_codex_payload(payload):
         if payload.get("stop_hook_active") is True:
             return {}
         state = load_state(payload)
@@ -1532,6 +2044,7 @@ HANDLERS = {
     "post-tool-use": handle_post_tool_use,
     "stop": handle_stop,
     "subagent-stop": handle_subagent_stop,
+    "codex-notify": handle_codex_notify,
 }
 
 EVENT_NAME_TO_MODE = {
@@ -1543,21 +2056,29 @@ EVENT_NAME_TO_MODE = {
     "PostToolUseFailure": "post-tool-use",
     "Stop": "stop",
     "SubagentStop": "subagent-stop",
+    "CodexNotify": "codex-notify",
+    "codex-notify": "codex-notify",
+    "agent-turn-complete": "codex-notify",
+    "turn-ended": "codex-notify",
 }
 
 
 def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 else None
+    mode = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("{") else None
     try:
         raw = sys.stdin.read()
+        if not raw.strip() and len(sys.argv) > 1 and sys.argv[-1].startswith("{"):
+            raw = sys.argv[-1]
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             payload = {}
     except Exception:
         payload = {}
 
-    if not mode and payload.get("hook_event_name"):
-        mode = EVENT_NAME_TO_MODE.get(payload["hook_event_name"])
+    if not mode:
+        ev = payload.get("hook_event_name") or payload.get("event") or payload.get("type")
+        if ev:
+            mode = EVENT_NAME_TO_MODE.get(ev)
     if not mode:
         mode = "pre-tool-use"
 

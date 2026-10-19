@@ -87,19 +87,9 @@ class HookBase(unittest.TestCase):
             "executionNum": 1,
         }
         self._env = dict(os.environ)
-        for k in (
-            "AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS",
-            "AGY_ALLOW_NON_MITOSIS_PRIMARY", "AGY_ALLOW_NON_ARGON_PRIMARY",
-            "AGY_MITOSIS_ALLOW_NON_PRIMARY", "AGY_ARGON_ALLOW_NON_PRIMARY",
-            "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL",
-            "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW",
-            "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS",
-            "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS",
-            "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH",
-            "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER",
-            "AGY_MITOSIS_DEBUG", "AGY_ARGON_DEBUG",
-        ):
-            os.environ.pop(k, None)
+        for k in list(os.environ.keys()):
+            if k.startswith(("AGY_", "CLAUDE_", "CODEX_")):
+                os.environ.pop(k, None)
 
     def tearDown(self):
         os.environ.clear()
@@ -863,20 +853,9 @@ class ClaudeHookBase(unittest.TestCase):
             "permission_mode": "ask",
         }
         self._env = dict(os.environ)
-        for k in (
-            "CLAUDE_MITOSIS_PIN_SETTINGS", "AGY_MITOSIS_PIN_SETTINGS", "AGY_ARGON_PIN_SETTINGS",
-            "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY", "AGY_MITOSIS_ALLOW_NON_PRIMARY",
-            "AGY_ALLOW_NON_MITOSIS_PRIMARY", "AGY_ALLOW_NON_ARGON_PRIMARY", "AGY_ARGON_ALLOW_NON_PRIMARY",
-            "CLAUDE_MITOSIS_PRIMARY_MODEL", "AGY_MITOSIS_PRIMARY_MODEL", "AGY_ARGON_PRIMARY_MODEL",
-            "CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW",
-            "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS",
-            "CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS",
-            "CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH",
-            "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER",
-            "CLAUDE_MITOSIS_DEBUG", "AGY_MITOSIS_DEBUG", "AGY_ARGON_DEBUG",
-            "CLAUDE_SETTINGS_PATH", "CLAUDE_PROJECT_DIR",
-        ):
-            os.environ.pop(k, None)
+        for k in list(os.environ.keys()):
+            if k.startswith(("AGY_", "CLAUDE_", "CODEX_")):
+                os.environ.pop(k, None)
 
     def tearDown(self):
         os.environ.clear()
@@ -1196,6 +1175,307 @@ class TestClaudeCodeStopAndSubagentStop(ClaudeHookBase):
         eo.handle_subagent_stop(dict(self.payload, hook_event_name="SubagentStop"))
         res = eo.handle_stop(dict(self.payload, hook_event_name="Stop"))
         self.assertEqual(res, {})
+
+
+class TestCodexEngine(HookBase):
+    def test_gpt_6_and_luna_tier_tokens(self):
+        self.assertTrue(eo.is_frontier_tier("gpt-6"))
+        self.assertTrue(eo.is_frontier_tier("gpt-6-pro"))
+        self.assertFalse(eo.is_frontier_tier("gpt-6-mini"))
+        self.assertFalse(eo.is_frontier_tier("gpt-5.6-luna"))
+        self.assertFalse(eo.is_frontier_tier("spark-1"))
+
+    def test_codex_model_constants(self):
+        self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-5.4")
+        self.assertEqual(eo.DEFAULT_CODEX_WORKER_MODEL, "codex-mini-latest")
+        self.assertEqual(eo.DEFAULT_CODEX_SCOUT_MODEL, "gpt-5.6-luna")
+
+    def test_is_codex_payload(self):
+        self.assertTrue(eo.is_codex_payload({"thread_id": "thr_123"}))
+        self.assertTrue(eo.is_codex_payload({"thread-id": "thr_123"}))
+        self.assertTrue(eo.is_codex_payload({"tool_name": "local_shell"}))
+        self.assertTrue(eo.is_codex_payload({"tool_name": "exec_command"}))
+        self.assertTrue(eo.is_codex_payload({"tool_name": "apply_patch"}))
+        self.assertTrue(eo.is_codex_payload({"tool_name": "spawn_agent"}))
+        self.assertTrue(eo.is_codex_payload({"tool_name": "mitosis_invoke_subagent"}))
+        self.assertFalse(eo.is_codex_payload({"conversationId": "cid_1"}))
+        self.assertFalse(eo.is_codex_payload({"session_id": "claude_1"}))
+        self.assertFalse(eo.is_codex_payload({}))
+
+    def test_read_and_write_codex_config_toml(self):
+        cfg = Path(self.tmp.name) / "config.toml"
+        cfg.write_text('model = "codex-mini"\nverbose = true\n', encoding="utf-8")
+        data, _ = eo._read_codex_config_toml(cfg)
+        self.assertEqual(data.get("model"), "codex-mini")
+        eo._write_codex_config_model(cfg, "gpt-5.4")
+        data2, _ = eo._read_codex_config_toml(cfg)
+        self.assertEqual(data2.get("model"), "gpt-5.4")
+        content = cfg.read_text(encoding="utf-8")
+        self.assertIn("verbose = true", content)
+
+    def test_codex_config_path_override(self):
+        cfg = Path(self.tmp.name) / "custom_config.toml"
+        os.environ["CODEX_CONFIG_PATH"] = str(cfg)
+        self.assertEqual(eo.codex_config_path(), str(cfg))
+        self.assertEqual(eo.codex_config_path({"codex_config_path": str(cfg)}), str(cfg))
+
+    def test_codex_session_start_pins_primary_model(self):
+        cfg = Path(self.tmp.name) / "config.toml"
+        cfg.write_text('model = "codex-mini"\n', encoding="utf-8")
+        os.environ["CODEX_CONFIG_PATH"] = str(cfg)
+        os.environ["CODEX_MITOSIS_PIN_SETTINGS"] = "1"
+        payload = {"thread_id": "thr_test", "hook_event_name": "SessionStart"}
+        res = eo.handle_session_start(payload)
+        data, _ = eo._read_codex_config_toml(cfg)
+        self.assertEqual(data.get("model"), "gpt-5.4")
+        self.assertIn("additionalContext", res)
+        self.assertIn(eo.CODEX_POLICY_NOTICE, res["additionalContext"])
+
+    def test_extract_apply_patch_files(self):
+        patch1 = "*** a/src/index.js\n--- b/src/index.js\n@@ -1 +1 @@\n-1\n+2\n"
+        self.assertEqual(eo._extract_apply_patch_files(patch1), ["src/index.js"])
+        patch2 = "diff --git a/foo/bar.py b/foo/bar.py\n--- a/foo/bar.py\n+++ b/foo/bar.py\n"
+        self.assertEqual(eo._extract_apply_patch_files({"patch": patch2}), ["foo/bar.py"])
+        self.assertEqual(eo._extract_apply_patch_files({"files": ["test.py"]}), ["test.py"])
+
+    def test_apply_patch_fast_path_budget(self):
+        ws = Path(self.tmp.name) / "workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        (ws / "f1.py").write_text("x", encoding="utf-8")
+        (ws / "f2.py").write_text("x", encoding="utf-8")
+        (ws / "f3.py").write_text("x", encoding="utf-8")
+        (ws / "f4.py").write_text("x", encoding="utf-8")
+
+        p = {
+            "thread_id": "thr_test",
+            "cwd": str(ws),
+            "tool_name": "apply_patch",
+            "tool_input": {"files": [str(ws / "f1.py"), str(ws / "f2.py"), str(ws / "f3.py")]},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res = eo.handle_pre_tool_use(p)
+        self.assertEqual(res.get("decision"), "allow")
+
+        p4 = {
+            "thread_id": "thr_test",
+            "cwd": str(ws),
+            "tool_name": "apply_patch",
+            "tool_input": {"files": [str(ws / "f4.py")]},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res4 = eo.handle_pre_tool_use(p4)
+        self.assertEqual(res4.get("decision"), "deny")
+        self.assertIn("Direct workspace edit limit", res4.get("reason", ""))
+
+        os.environ["CODEX_MITOSIS_ALLOW_DIRECT_FASTPATH"] = "1"
+        res4_allowed = eo.handle_pre_tool_use(p4)
+        self.assertEqual(res4_allowed.get("decision"), "allow")
+
+    def test_codex_exec_interception(self):
+        p_worker = {
+            "thread_id": "thr_test",
+            "tool_name": "exec_command",
+            "tool_input": {"cmd": "codex exec 'Refactor auth module and run tests'"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res_worker = eo.handle_pre_tool_use(p_worker)
+        self.assertEqual(res_worker.get("decision"), "allow")
+        updated = (res_worker.get("updatedInput") or res_worker.get("overwrite") or {}).get("cmd", "")
+        self.assertIn("codex-mini-latest", updated)
+
+        p_scout = {
+            "thread_id": "thr_test",
+            "tool_name": "local_shell",
+            "tool_input": {"command": "codex exec 'Locate where parse_token is defined'"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res_scout = eo.handle_pre_tool_use(p_scout)
+        self.assertEqual(res_scout.get("decision"), "allow")
+        updated_scout = (res_scout.get("updatedInput") or res_scout.get("overwrite") or {}).get("command", "")
+        self.assertIn("gpt-5.6-luna", updated_scout)
+
+    def test_spawn_agent_and_mitosis_tools_pinning(self):
+        p1 = {
+            "thread_id": "thr_test",
+            "tool_name": "spawn_agent",
+            "tool_input": {"prompt": "Locate parse_token in src/"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res1 = eo.handle_pre_tool_use(p1)
+        self.assertEqual(res1.get("decision"), "allow")
+        model1 = (res1.get("updatedInput") or res1.get("overwrite") or {}).get("model")
+        self.assertEqual(model1, "gpt-5.6-luna")
+
+        p2 = {
+            "thread_id": "thr_test",
+            "tool_name": "spawn_agent",
+            "tool_input": {"prompt": "Fix bug and run tests"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res2 = eo.handle_pre_tool_use(p2)
+        self.assertEqual(res2.get("decision"), "allow")
+        model2 = (res2.get("updatedInput") or res2.get("overwrite") or {}).get("model")
+        self.assertEqual(model2, "codex-mini-latest")
+
+        p3 = {
+            "thread_id": "thr_test",
+            "tool_name": "mitosis_scout",
+            "tool_input": {"prompt": "Locate parse_token in src/"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res3 = eo.handle_pre_tool_use(p3)
+        self.assertEqual(res3.get("decision"), "allow")
+        model3 = (res3.get("updatedInput") or res3.get("overwrite") or {}).get("model")
+        self.assertEqual(model3, "gpt-5.6-luna")
+
+        p4 = {
+            "thread_id": "thr_test",
+            "tool_name": "mitosis_worker",
+            "tool_input": {"prompt": "Fix bug and run tests"},
+            "artifactDirectoryPath": self.tmp.name,
+        }
+        res4 = eo.handle_pre_tool_use(p4)
+        self.assertEqual(res4.get("decision"), "allow")
+        model4 = (res4.get("updatedInput") or res4.get("overwrite") or {}).get("model")
+        self.assertEqual(model4, "codex-mini-latest")
+
+    def test_codex_notify_report_validation_and_branch_worktree(self):
+        msg_ok = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: pytest ok\nNOTES: All tests pass"
+        res_ok = eo.handle_codex_notify({"thread_id": "thr_test", "last-assistant-message": msg_ok})
+        self.assertEqual(res_ok.get("report_validation"), "passed")
+
+        msg_bad = "STATUS: BLOCKED\nFILES_CHANGED: NONE\nVERIFICATION: pytest ok\nNOTES: Blocked without file uri"
+        res_bad = eo.handle_codex_notify({"thread_id": "thr_test", "last-assistant-message": msg_bad})
+        self.assertEqual(res_bad.get("report_validation"), "failed")
+        self.assertIn("report_error", res_bad)
+
+        state = eo.load_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name})
+        state["subagents"] = {"w1": {"active_branch": True, "role": "worker"}}
+        eo.save_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name}, state)
+
+        res_tree = eo.handle_codex_notify({
+            "thread_id": "thr_test",
+            "artifactDirectoryPath": self.tmp.name,
+            "last-assistant-message": msg_ok,
+        })
+        self.assertEqual(res_tree.get("decision"), "continue")
+        self.assertIn("Branch worktrees are still active", res_tree.get("reason", ""))
+
+    def test_circuit_breaker_codex_tools(self):
+        state = eo.load_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name})
+        state["consecutive_failures"] = 2
+        eo.save_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name}, state)
+
+        for tname in ("exec_command", "local_shell", "spawn_agent", "mitosis_worker"):
+            with self.subTest(tool=tname):
+                p = {
+                    "thread_id": "thr_test",
+                    "tool_name": tname,
+                    "tool_input": {"prompt": "do something"},
+                    "artifactDirectoryPath": self.tmp.name,
+                }
+                res = eo.handle_pre_tool_use(p)
+                self.assertEqual(res.get("decision"), "deny")
+                self.assertIn("Circuit breaker tripped", res.get("reason", ""))
+
+
+MCP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "mitosis-mcp-server.py"
+mcp_spec = importlib.util.spec_from_file_location("mitosis_mcp_server", MCP_SCRIPT)
+mcp = importlib.util.module_from_spec(mcp_spec)
+mcp_spec.loader.exec_module(mcp)
+
+
+class TestMitosisMCPServer(unittest.TestCase):
+    def test_initialize(self):
+        server = mcp.MitosisMCPServer()
+        res = server.handle_request({"id": 1, "method": "initialize", "params": {}})
+        self.assertEqual(res["result"]["serverInfo"]["name"], "mitosis-mcp-server")
+        self.assertEqual(res["result"]["protocolVersion"], "2024-11-05")
+
+    def test_ping(self):
+        server = mcp.MitosisMCPServer()
+        res = server.handle_request({"id": 2, "method": "ping", "params": {}})
+        self.assertEqual(res["result"], {})
+
+    def test_tools_list(self):
+        server = mcp.MitosisMCPServer()
+        res = server.handle_request({"id": 3, "method": "tools/list", "params": {}})
+        names = [t["name"] for t in res["result"]["tools"]]
+        self.assertIn("mitosis_invoke_subagent", names)
+        self.assertIn("mitosis_scout", names)
+        self.assertIn("mitosis_worker", names)
+
+    def test_tools_call_scout_mock_runner(self):
+        def mock_runner(prompt, model, workspace="inherit", cwd=None):
+            self.assertEqual(model, "gpt-5.6-luna")
+            return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: grep ok\nNOTES: Found token", ""
+
+        server = mcp.MitosisMCPServer(runner=mock_runner)
+        res = server.handle_request({
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "mitosis_scout", "arguments": {"prompt": "Locate parse_token in src/"}},
+        })
+        self.assertFalse(res["result"]["isError"])
+        content = res["result"]["content"][0]["text"]
+        self.assertIn("STATUS: COMPLETED", content)
+
+    def test_tools_call_worker_mock_runner(self):
+        def mock_runner(prompt, model, workspace="inherit", cwd=None):
+            self.assertEqual(model, "codex-mini-latest")
+            self.assertEqual(workspace, "branch")
+            return 0, "STATUS: COMPLETED\nFILES_CHANGED: src/auth.py\nVERIFICATION: pytest ok\nNOTES: Fixed bug", ""
+
+        server = mcp.MitosisMCPServer(runner=mock_runner)
+        res = server.handle_request({
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "mitosis_worker",
+                "arguments": {"prompt": "Fix bug and run tests", "workspace": "branch"},
+            },
+        })
+        self.assertFalse(res["result"]["isError"])
+        content = res["result"]["content"][0]["text"]
+        self.assertIn("STATUS: COMPLETED", content)
+
+    def test_tools_call_parallel_batch(self):
+        recorded_models = []
+
+        def mock_runner(prompt, model, workspace="inherit", cwd=None):
+            recorded_models.append(model)
+            return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ok\nNOTES: done", ""
+
+        server = mcp.MitosisMCPServer(runner=mock_runner)
+        res = server.handle_request({
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "mitosis_invoke_subagent",
+                "arguments": {
+                    "tasks": [
+                        {"prompt": "Locate parse_token"},
+                        {"prompt": "Fix auth and run pytest", "workspace": "branch"},
+                    ]
+                },
+            },
+        })
+        self.assertFalse(res["result"]["isError"])
+        self.assertIn("gpt-5.6-luna", recorded_models)
+        self.assertIn("codex-mini-latest", recorded_models)
+
+    def test_report_validation_failure_marks_error(self):
+        def mock_runner(prompt, model, workspace="inherit", cwd=None):
+            return 0, "Non-standard report output", ""
+
+        server = mcp.MitosisMCPServer(runner=mock_runner)
+        res = server.handle_request({
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "mitosis_scout", "arguments": {"prompt": "Locate parse_token"}},
+        })
+        self.assertTrue(res["result"]["isError"])
+        self.assertIn("[Validation:", res["result"]["content"][0]["text"])
 
 
 if __name__ == "__main__":
