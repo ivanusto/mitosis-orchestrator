@@ -2,12 +2,12 @@
   "name": "mitosis-orchestrator",
   "displayName": "Mitosis Orchestrator",
   "version": "1.0.0",
-  "description": "Mitosis Orchestrator pins frontier models (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) as the primary orchestrator and routes every subagent to flash or flash_lite by context. Guards send_message, run_workflow and define_subagent, tracks branch worktrees until they are killed, and enforces a four-line subagent report format.",
+  "description": "Cross-model frontier orchestrator for Antigravity (agy): pins xAI Grok, Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, OpenAI GPT/o-series, DeepSeek, or Qwen as the primary master architect while dividing subagent workloads into flash (execution) and flash_lite (reconnaissance).",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "/orchestrate Decompose this task across flash-lite scouts and flash workers",
-    "Recon the codebase with flash-lite subagents and design an implementation plan with Mitosis Orchestrator on frontier models (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen)",
-    "Run parallel flash subagents to implement and test changes across modules"
+    "Recon the codebase in parallel with flash-lite-scout subagents and design the architecture on the primary orchestrator",
+    "Dispatch parallel flash-worker subagents to implement changes and run unit tests across modules"
   ],
   "license": "MIT"
 }
