@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -224,6 +225,7 @@ def execute_subagent_task(
 
     role = str(task.get("role") or role_type)
     cwd = task.get("cwd")
+    _eo._record_routing({}, decision, model, codex_tier_effort(decision.tier), "codex-mcp", role_type)
 
     rc, stdout, stderr = run_codex_exec(prompt, model, workspace=workspace, cwd=cwd, runner=runner, role_type=role_type)
     output = stdout.strip() if stdout else stderr.strip()
@@ -396,11 +398,22 @@ class MitosisMCPServer:
                 resp = _rpc_error(req.get("id"), -32603, f"Internal error: {type(exc).__name__}: {exc}")
             if resp is not None:
                 self._write(resp)
+                if req.get("method") == "tools/call":
+                    _flush_otel_async()
 
     @staticmethod
     def _write(resp: Dict[str, Any]) -> None:
         sys.stdout.write(json.dumps(resp) + "\n")
         sys.stdout.flush()
+
+
+def _flush_otel_async() -> None:
+    """Send queued OTel spans from a daemon thread so the response is never delayed."""
+    try:
+        if _eo._otel_enabled():
+            threading.Thread(target=_eo._flush_otel, daemon=True).start()
+    except Exception:
+        pass
 
 
 def _rpc_error(req_id: Any, code: int, message: str) -> Dict[str, Any]:

@@ -75,6 +75,9 @@ Environment variables:
                                         that lack one (agy invoke_subagent, Claude Code Agent)
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
                                         <artifactDirectoryPath>/mitosis_orchestrator_debug.log
+    MITOSIS_OTEL=1                      emit one OTel GenAI invoke_agent span per routing decision to
+                                        MITOSIS_OTEL_FILE (JSONL) and/or an OTLP/HTTP endpoint
+                                        (OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT); see scripts/mitosis_otel.py
     (All variables support legacy AGY_ARGON_* and AGY_ALLOW_NON_ARGON_PRIMARY fallbacks)
 """
 
@@ -1589,9 +1592,11 @@ class Decision(NamedTuple):
     source: str
     rule: str
     reason: str
+    model: Optional[str] = None
+    platform: str = ""
 
     def as_log(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "tier": self.tier,
             "type_override": self.type_override,
             "effort": self.effort,
@@ -1600,6 +1605,11 @@ class Decision(NamedTuple):
             "rule": self.rule,
             "reason": self.reason,
         }
+        if self.model:
+            out["model"] = self.model
+        if self.platform:
+            out["platform"] = self.platform
+        return out
 
 
 # Prior confidence per rule. Explicit signals are near certain; the prompt
@@ -1772,6 +1782,62 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     return done(_rule_decision("flash", None, "default", "default"))
 
 
+def _payload_session_id(payload: Dict[str, Any]) -> str:
+    for key in ("conversationId", "session_id", "thread_id", "thread-id", "turn_id"):
+        if payload.get(key):
+            return str(payload[key])
+    return ""
+
+
+def _record_routing(payload: Dict[str, Any], decision: Decision, model: Optional[str],
+                    effort: Optional[str], platform: str, agent_name: str) -> None:
+    """Record what was actually pinned (model, effort, platform) for the debug log and OTel.
+
+    Replaces `decision` in _RECENT_DECISIONS (matched by identity, appended when absent)
+    so the log shows the effort written into updatedInput, not the tier default.
+    """
+    final = decision._replace(model=model, effort=effort or decision.effort, platform=platform)
+    for i, d in enumerate(_RECENT_DECISIONS):
+        if d is decision:
+            _RECENT_DECISIONS[i] = final
+            break
+    else:
+        _RECENT_DECISIONS.append(final)
+        del _RECENT_DECISIONS[:-16]
+    try:
+        if _otel_enabled():
+            _load_sibling("mitosis_otel").queue({
+                "agent_name": agent_name,
+                "platform": platform,
+                "tier": final.tier,
+                "rule": final.rule,
+                "confidence": final.confidence,
+                "source": final.source,
+                "model": model,
+                "effort": effort,
+                "session_id": _payload_session_id(payload),
+            })
+    except Exception:
+        pass
+
+
+def _otel_enabled() -> bool:
+    """Cheap env check so mitosis_otel is only imported when telemetry is on."""
+    if not _env_flag("CLAUDE_MITOSIS_OTEL", "AGY_MITOSIS_OTEL", "CODEX_MITOSIS_OTEL", "MITOSIS_OTEL"):
+        return False
+    return bool(os.environ.get("MITOSIS_OTEL_FILE", "").strip()
+                or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
+                or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip())
+
+
+def _flush_otel() -> None:
+    if _otel_enabled():
+        try:
+            _load_sibling("mitosis_otel").flush()
+        except Exception:
+            pass
+
+
 def classify_subagent(subagent: Dict[str, Any]) -> Tuple[str, Optional[str], str]:
     """Return (model, type_override_or_None, reason); see decide_subagent."""
     decision = decide_subagent(subagent)
@@ -1808,7 +1874,10 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
         if not prompt:
             return {"decision": "deny", "reason": f"Subagent '{label}' has an empty Prompt."}
 
-        target_model, type_override, reason = classify_subagent(item)
+        decision = decide_subagent(item)
+        target_model, type_override, reason = decision.tier, decision.type_override, decision.reason
+        _record_routing(payload, decision, target_model, None, "agy",
+                        current_type or type_override or (SCOUT_TYPE if target_model == "flash_lite" else WORKER_TYPE))
         if current_model != target_model or "model" in item:
             item.pop("model", None)
             item["Model"] = target_model
@@ -1931,7 +2000,8 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         "Model": internal_model,
     }
 
-    target_tier, type_override, reason = classify_subagent(item)
+    decision = decide_subagent(item)
+    target_tier, type_override, reason = decision.tier, decision.type_override, decision.reason
     claude_model = claude_tier_model(target_tier)
 
     updated_input = copy.deepcopy(args)
@@ -1964,6 +2034,8 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         effort_note += ", REPORT FORMAT appended"
 
     target_type = type_override or subagent_type
+    _record_routing(payload, decision, claude_model, updated_input.get("effort") or claude_effort, "claude",
+                    target_type or (SCOUT_TYPE if target_tier == "flash_lite" else WORKER_TYPE))
     spawns = [{
         "role": description or target_type or tool_name.lower(),
         "type": target_type,
@@ -2379,9 +2451,11 @@ def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Di
         prompt = cleaned.strip() or cmd
 
     item = {"Prompt": prompt, "Role": "codex-subagent"}
-    tier, type_override, reason = classify_subagent(item)
+    decision = decide_subagent(item)
+    tier, type_override, reason = decision.tier, decision.type_override, decision.reason
     target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
+    _record_routing(payload, decision, target_model, codex_tier_effort(tier), "codex", target_type)
 
     if re.search(r"(?:-m|--model)\s+(\S+)", cmd):
         new_cmd = re.sub(r"(-m|--model)\s+\S+", f"-m {target_model}", cmd, count=1)
@@ -2427,7 +2501,8 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
         "Workspace": workspace,
         "TypeName": role,
     }
-    tier, type_override, reason = classify_subagent(item)
+    decision = decide_subagent(item)
+    tier, type_override, reason = decision.tier, decision.type_override, decision.reason
     target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
 
@@ -2437,6 +2512,7 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
     # scripts/setup-codex.py, and an unknown role makes Codex fail with "unknown agent_type".
     # Incoming flash-* names are accepted as aliases and rewritten to the built-in role.
     codex_role = CODEX_SCOUT_ROLE if tier == "flash_lite" else CODEX_WORKER_ROLE
+    _record_routing(payload, decision, target_model, codex_tier_effort(tier), "codex", codex_role)
     for key in ("type", "agent_type"):
         if key in updated_args:
             updated_args[key] = codex_role
@@ -2488,6 +2564,8 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             reason = "read-only scout"
         updated_args = copy.deepcopy(args)
         updated_args["model"] = target_model
+        _record_routing(payload, Decision(tier, None, _tier_effort(tier), 1.0, "rule", "scout-tool", reason),
+                        target_model, codex_tier_effort(tier), "codex", target_type)
         _record([{
             "role": str(args.get("role") or target_type),
             "type": target_type,
@@ -2507,6 +2585,9 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         active_branch = workspace in ("branch", "worktree")
         updated_args = copy.deepcopy(args)
         updated_args["model"] = target_model
+        _record_routing(payload, Decision("flash", None, _tier_effort("flash"), 1.0, "rule", "worker-tool",
+                                          "mitosis_worker tool"),
+                        target_model, codex_tier_effort("flash"), "codex", WORKER_TYPE)
         _record([{
             "role": str(args.get("role") or WORKER_TYPE),
             "type": WORKER_TYPE,
@@ -2527,8 +2608,11 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             for t in updated_tasks:
                 if not isinstance(t, dict):
                     continue
-                tier, _, reason = classify_subagent(t)
+                decision = decide_subagent(t)
+                tier, reason = decision.tier, decision.reason
                 model = codex_tier_model(tier)
+                _record_routing(payload, decision, model, codex_tier_effort(tier), "codex",
+                                SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
                 t["model"] = model
                 ws = str(t.get("workspace") or "inherit").strip().lower()
                 spawns.append({
@@ -2545,8 +2629,11 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             return _allow("Mitosis Orchestrator pinned tasks", updated_input=updated_args, payload=payload)
         prompt = str(args.get("prompt") or "").strip()
         if prompt:
-            tier, _, reason = classify_subagent(args)
+            decision = decide_subagent(args)
+            tier, reason = decision.tier, decision.reason
             model = codex_tier_model(tier)
+            _record_routing(payload, decision, model, codex_tier_effort(tier), "codex",
+                            SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
             updated_args = copy.deepcopy(args)
             updated_args["model"] = model
             _record([{
@@ -3140,6 +3227,7 @@ def main() -> None:
 
     sys.stdout.write(json.dumps(result) + "\n")
     sys.stdout.flush()
+    _flush_otel()  # after the response and after the locks are released
 
 
 if __name__ == "__main__":
