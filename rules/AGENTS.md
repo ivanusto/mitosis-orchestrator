@@ -61,6 +61,7 @@ Moderate-complexity analysis or scoped execution:
 
 Write every subagent prompt and follow-up instruction in this shape. Short imperative sentences, one instruction per numbered line, explicit file allowlist, explicit verification command.
 
+<!-- BEGIN GENERATED: report-format -->
 ```markdown
 TASK: <single-sentence objective>
 
@@ -75,9 +76,10 @@ REPORT FORMAT:
 Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):
 STATUS: COMPLETED | BLOCKED | FAILED
 FILES_CHANGED: <comma-separated paths or NONE>
-VERIFICATION: <one sentence stating the command run and exit result>
-NOTES: <summary (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>
+VERIFICATION: <one sentence stating the command run and its exit result>
+NOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>
 ```
+<!-- END GENERATED: report-format -->
 
 Scouts omit rules 3 to 5 and always report `FILES_CHANGED: NONE`. Subagent reports must follow the bounded report format:
 - Up to 10 compact bullet lines (`- ` or `* `) under `NOTES:` (total report length capped at ≤ 1,600 chars).

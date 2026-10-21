@@ -33,6 +33,7 @@ the budget.
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -41,25 +42,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-# USD per million tokens: (input, cache_write, cache_read, output)
-DEFAULT_PRICES: Dict[str, Tuple[float, float, float, float]] = {
-    "claude-fable-5-1": (10.0, 12.5, 0.25, 50.0),
-    "claude-mythos-5-1": (10.0, 12.5, 0.25, 50.0),
-    "claude-fable-5": (10.0, 12.5, 0.25, 50.0),
-    "claude-opus-5-5": (4.0, 5.0, 0.20, 20.0),
-    "claude-opus-5": (5.0, 6.25, 0.50, 25.0),
-    "claude-opus-4-8": (5.0, 6.25, 0.50, 25.0),
-    "claude-opus-4-7": (5.0, 6.25, 0.50, 25.0),
-    "claude-opus-4-6": (5.0, 6.25, 0.50, 25.0),
-    "claude-sonnet-5-5": (2.0, 2.5, 0.20, 10.0),
-    "claude-sonnet-5": (2.0, 2.5, 0.20, 10.0),
-    "claude-sonnet-4-6": (3.0, 3.75, 0.30, 15.0),
-    "claude-haiku-5-5": (0.10, 0.125, 0.01, 0.50),
-    "claude-haiku-4-5": (1.0, 1.25, 0.10, 5.0),
-}
+def _load_sibling(name: str) -> Any:
+    """Load scripts/<name>.py by file path (scripts/ is not on sys.path), cached in sys.modules."""
+    key = "_" + name
+    if key in sys.modules:
+        return sys.modules[key]
+    path = Path(__file__).resolve().with_name(name + ".py")
+    spec = importlib.util.spec_from_file_location(key, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[key] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(key, None)
+        raise
+    return module
+
+
+_GEN = _load_sibling("mitosis_generated")
+
+# USD per million tokens: (input, cache_write, cache_read, output); source: spec/models.toml
+DEFAULT_PRICES: Dict[str, Tuple[float, float, float, float]] = dict(_GEN.PRICES)
 
 # Short aliases used when a transcript records a bare tier name.
-ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+ALIASES = dict(_GEN.PRICE_ALIASES)
+CACHE_1H_WRITE_MULTIPLIER = _GEN.CACHE_1H_WRITE_MULTIPLIER
 
 USAGE_FIELDS = ("input", "cache_write", "cache_read", "output", "thinking")
 
@@ -215,7 +222,7 @@ def cost_usd(usage: Dict[str, int], price: Optional[Tuple[float, float, float, f
         return None
     p_in, p_cw, p_cr, p_out = price
     if cache_ttl == "1h":
-        p_cw = 2.0 * p_in
+        p_cw = CACHE_1H_WRITE_MULTIPLIER * p_in
     return (usage["input"] * p_in + usage["cache_write"] * p_cw + usage["cache_read"] * p_cr + usage["output"] * p_out) / 1_000_000
 
 

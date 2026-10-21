@@ -251,12 +251,14 @@ Zero-dependency Python 3.8+ standard library hook engine enforcing orchestration
 ### 2. Bounded 4-Header Subagent Report Contract
 All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`):
 
+<!-- BEGIN GENERATED: report-format -->
 ```markdown
 STATUS: COMPLETED | BLOCKED | FAILED
 FILES_CHANGED: <comma-separated paths or NONE>
-VERIFICATION: <one sentence stating the command run and exit result>
-NOTES: <concise summary (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>
+VERIFICATION: <one sentence stating the command run and its exit result>
+NOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>
 ```
+<!-- END GENERATED: report-format -->
 
 ### 3. 4-Phase `/orchestrate` Skill ([`skills/orchestrate/SKILL.md`](./skills/orchestrate/SKILL.md))
 Provides the structured `/orchestrate` workflow:

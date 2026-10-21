@@ -7,5 +7,6 @@
   },
   "repository": "https://github.com/ivanusto/mitosis-orchestrator",
   "license": "MIT",
+  "skills": "./skills/",
   "hooks": "./hooks/codex-hooks.json"
 }

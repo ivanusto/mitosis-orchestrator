@@ -258,12 +258,14 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ### 2. 有界四標頭子代理回報合約 (Bounded 4-Header Report Contract)
 所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結）：
 
+<!-- BEGIN GENERATED: report-format -->
 ```markdown
 STATUS: COMPLETED | BLOCKED | FAILED
 FILES_CHANGED: <以逗號分隔的檔案路徑或 NONE>
 VERIFICATION: <一句話說明執行的驗證命令與結果>
-NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED 須含 file:// log URI>
+NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILED 須含 file:// log URI>
 ```
+<!-- END GENERATED: report-format -->
 
 ### 3. `/orchestrate` 四階段編排技能 ([`skills/orchestrate/SKILL.md`](./skills/orchestrate/SKILL.md))
 1. **階段一：平行偵察 (Scout / Explorer Fan-Out)**：派發唯讀偵察子代理進行高速檔案與符號探索。

@@ -4,6 +4,8 @@ manifest or hook config points at exists.  Run: python -m unittest discover test
 
 import json
 import re
+import subprocess
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -85,3 +87,25 @@ class TestManifestPaths(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGeneratedInSync(unittest.TestCase):
+    def test_sync_check_passes(self):
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "sync-generated.py"), "--check"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def assert_same_except_name(self, a, b):
+        drop = lambda t: [ln for ln in t.splitlines() if not ln.startswith("name = ")]  # noqa: E731
+        self.assertEqual(drop(read(a)), drop(read(b)))
+
+    def test_explorer_matches_scout(self):
+        self.assert_same_except_name("codex-agents/explorer.toml", "codex-agents/flash-lite-scout.toml")
+
+    def test_worker_matches_flash_worker(self):
+        self.assert_same_except_name("codex-agents/worker.toml", "codex-agents/flash-worker.toml")
+
+    def test_agents_skill_copy_is_identical(self):
+        self.assertEqual(read(".agents/skills/orchestrate/SKILL.md"), read("skills/orchestrate/SKILL.md"))

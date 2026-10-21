@@ -88,15 +88,35 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
-DEFAULT_PRIMARY_MODEL = "Gemini 4 Argon (High)"
-DEFAULT_CODEX_PRIMARY_MODEL = "gpt-6.1-sol"
-DEFAULT_CODEX_WORKER_MODEL = "gpt-5.6-terra"
-DEFAULT_CODEX_SCOUT_MODEL = "gpt-5.6-luna"
-DEFAULT_CLAUDE_PRIMARY_MODEL = "opus"
-DEFAULT_CLAUDE_WORKER_MODEL = "sonnet"
-DEFAULT_CLAUDE_SCOUT_MODEL = "haiku"
-DEFAULT_CLAUDE_SCOUT_EFFORT = "low"
-DEFAULT_CLAUDE_WORKER_EFFORT = "medium"
+def _load_sibling(name: str) -> Any:
+    """Load scripts/<name>.py by file path (scripts/ is not on sys.path), cached in sys.modules."""
+    import importlib.util
+    key = "_" + name
+    if key in sys.modules:
+        return sys.modules[key]
+    path = Path(__file__).resolve().with_name(name + ".py")
+    spec = importlib.util.spec_from_file_location(key, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[key] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(key, None)
+        raise
+    return module
+
+
+_GEN = _load_sibling("mitosis_generated")
+
+DEFAULT_PRIMARY_MODEL = _GEN.DEFAULT_PRIMARY_MODEL
+DEFAULT_CODEX_PRIMARY_MODEL = _GEN.DEFAULT_CODEX_PRIMARY_MODEL
+DEFAULT_CODEX_WORKER_MODEL = _GEN.DEFAULT_CODEX_WORKER_MODEL
+DEFAULT_CODEX_SCOUT_MODEL = _GEN.DEFAULT_CODEX_SCOUT_MODEL
+DEFAULT_CLAUDE_PRIMARY_MODEL = _GEN.DEFAULT_CLAUDE_PRIMARY_MODEL
+DEFAULT_CLAUDE_WORKER_MODEL = _GEN.DEFAULT_CLAUDE_WORKER_MODEL
+DEFAULT_CLAUDE_SCOUT_MODEL = _GEN.DEFAULT_CLAUDE_SCOUT_MODEL
+DEFAULT_CLAUDE_SCOUT_EFFORT = _GEN.DEFAULT_CLAUDE_SCOUT_EFFORT
+DEFAULT_CLAUDE_WORKER_EFFORT = _GEN.DEFAULT_CLAUDE_WORKER_EFFORT
 CLAUDE_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 CLAUDE_PLUGIN_PREFIX = "mitosis-orchestrator"
 # Built-in Claude Code subagent types that the pinning policy must never rewrite.
@@ -115,6 +135,8 @@ ALLOWED_PRIMARY_MODELS = {
 }
 ALLOWED_SUBAGENT_MODELS = {"flash", "flash_lite"}
 SCOUT_TYPE = "flash-lite-scout"
+CODEX_SCOUT_ROLE = "explorer"
+CODEX_WORKER_ROLE = "worker"
 WORKER_TYPE = "flash-worker"
 STATE_FILENAME = "mitosis_orchestrator_state.json"
 
@@ -433,41 +455,28 @@ SAFE_TERMINATION_REASONS = {
     "MAX_TOKEN_BUDGET_EXCEEDED",
 }
 
-MAX_SUBAGENT_REPORT_CHARS = 1600
-MAX_REPORT_BULLET_LINES = 10
+MAX_SUBAGENT_REPORT_CHARS = _GEN.REPORT_MAX_CHARS
+MAX_REPORT_BULLET_LINES = _GEN.REPORT_MAX_BULLETS
 REPORT_BULLET_RE = re.compile(r"^[-*]\s+\S+")
 REPORT_LOG_URI_RE = re.compile(r"file://\S+\.log\b", re.IGNORECASE)
 REPORT_FENCE_RE = re.compile(r"^\s*`{3,}[\w-]*\s*$")
 CLAUDE_AGENT_ID_RE = re.compile(r"agentId\"?\s*[:=]\s*\"?([0-9a-f]{8,})", re.IGNORECASE)
+_REPORT_STATUS_ALT = "|".join(_GEN.REPORT_STATUS_VALUES)
 REPORT_LINE_PATTERNS = (
-    re.compile(r"^STATUS:\s*(?:COMPLETED|BLOCKED|FAILED)\b", re.IGNORECASE),
-    re.compile(r"^FILES_CHANGED:\s*\S+"),
-    re.compile(r"^VERIFICATION:\s*\S+"),
-    re.compile(r"^NOTES:\s*\S+"),
+    re.compile(r"^%s:\s*(?:%s)\b" % (_GEN.REPORT_HEADERS[0], _REPORT_STATUS_ALT), re.IGNORECASE),
+    re.compile(r"^%s:\s*\S+" % _GEN.REPORT_HEADERS[1]),
+    re.compile(r"^%s:\s*\S+" % _GEN.REPORT_HEADERS[2]),
+    re.compile(r"^%s:\s*\S+" % _GEN.REPORT_HEADERS[3]),
 )
 
 REPORT_FORMAT_HEADER = "REPORT FORMAT:"
-REPORT_FORMAT_HEADERS = ("STATUS:", "FILES_CHANGED:", "VERIFICATION:", "NOTES:")
+REPORT_FORMAT_HEADERS = tuple(h + ":" for h in _GEN.REPORT_HEADERS)
 REPORT_FORMAT_PHRASE_RE = re.compile(r"REPORT FORMAT", re.IGNORECASE)
 REPORT_FORMAT_SUPERSEDE = (
     "REPORT FORMAT (required by the orchestrator hook; this supersedes any other report format above):"
 )
-REPORT_FORMAT_SCOUT = (
-    "REPORT FORMAT:\n"
-    "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\n"
-    "STATUS: COMPLETED | BLOCKED | FAILED\n"
-    "FILES_CHANGED: NONE\n"
-    "VERIFICATION: <one sentence stating what was checked and the result>\n"
-    "NOTES: <findings (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>"
-)
-REPORT_FORMAT_WORKER = (
-    "REPORT FORMAT:\n"
-    "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\n"
-    "STATUS: COMPLETED | BLOCKED | FAILED\n"
-    "FILES_CHANGED: <comma-separated paths or NONE>\n"
-    "VERIFICATION: <one sentence stating the command run and exit result>\n"
-    "NOTES: <summary (and up to 10 `- ` bullets), or file:// log URI if BLOCKED/FAILED>"
-)
+REPORT_FORMAT_SCOUT = _GEN.REPORT_FORMAT_SCOUT
+REPORT_FORMAT_WORKER = _GEN.REPORT_FORMAT_WORKER
 
 
 # The caller's own report instructions ("REPORT FORMAT: STATUS/FILES/TESTS")
@@ -777,7 +786,7 @@ def validate_subagent_report(text: str) -> Optional[str]:
             f"({max_lines} lines total), got {len(lines)}."
         )
 
-    expected_prefixes = ("STATUS:", "FILES_CHANGED:", "VERIFICATION:", "NOTES:")
+    expected_prefixes = REPORT_FORMAT_HEADERS
     for idx, (pattern, prefix) in enumerate(zip(REPORT_LINE_PATTERNS, expected_prefixes), start=1):
         if not pattern.match(lines[idx - 1]):
             # `NOTES:` may be bare when bullet lines follow it.
@@ -1265,9 +1274,9 @@ CLAUDE_POLICY_NOTICE = claude_policy_notice()
 
 CODEX_POLICY_NOTICE = (
     "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
-    "location, git/log checks, single-file inspection) to `gpt-5.6-luna` "
-    "(`subagent_type: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
-    "research and scoped code edits to `gpt-5.6-terra` (`subagent_type: \"flash-worker\"`). "
+    f"location, git/log checks, single-file inspection) to `{DEFAULT_CODEX_SCOUT_MODEL}` "
+    "(`agent_type: \"explorer\"`) and multi-file research, test runs, web/docs "
+    f"research and scoped code edits to `{DEFAULT_CODEX_WORKER_MODEL}` (`agent_type: \"worker\"`). "
     "Never use `model: \"inherit\"` on subagents. "
     "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
 )
@@ -2240,10 +2249,13 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
 
     updated_args = copy.deepcopy(args)
     updated_args["model"] = target_model
+    # Built-in Codex roles always exist; flash-lite-scout / flash-worker only exist after
+    # scripts/setup-codex.py, and an unknown role makes Codex fail with "unknown agent_type".
+    # Incoming flash-* names are accepted as aliases and rewritten to the built-in role.
+    codex_role = CODEX_SCOUT_ROLE if tier == "flash_lite" else CODEX_WORKER_ROLE
     for key in ("type", "agent_type"):
-        # Codex role names installed by setup-codex.py: flash-lite-scout / flash-worker.
         if key in updated_args:
-            updated_args[key] = target_type
+            updated_args[key] = codex_role
     if _append_report_format_enabled() and not prompt_has_report_format(prompt):
         prompt_key = next(k for k in ("prompt", "instructions", "message") if str(args.get(k) or "").strip())
         updated_args[prompt_key] = append_report_format(prompt, tier)
@@ -2743,14 +2755,7 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-REPORT_BLOCK_REASON = (
-    "[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). "
-    "Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):\n"
-    "STATUS: COMPLETED | BLOCKED | FAILED\n"
-    "FILES_CHANGED: <comma-separated paths or NONE>\n"
-    "VERIFICATION: <one sentence stating the command run and its exit result>\n"
-    "NOTES: <one sentence or up to 10 '- ' bullets; include a file://.../*.log URI when BLOCKED or FAILED>"
-)
+REPORT_BLOCK_REASON = _GEN.REPORT_BLOCK_REASON
 
 
 def _is_plugin_agent_type(type_name: str) -> bool:

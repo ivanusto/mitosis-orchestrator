@@ -1,0 +1,40 @@
+# Single source of truth for the bounded four-header subagent report.
+# Edit this file, then run `python3 scripts/sync-generated.py`.
+
+headers = ["STATUS", "FILES_CHANGED", "VERIFICATION", "NOTES"]
+status_values = ["COMPLETED", "BLOCKED", "FAILED"]
+max_chars = 1600
+max_bullets = 10
+
+# Lead-in line the hook appends under "REPORT FORMAT:".
+hook_lead = "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):"
+# Lead-in text inside the agent definition files.
+agent_lead = "Return only these four headers (plus up to 10 compact `- ` bullet lines under NOTES if needed). No preamble, no closing remarks, total length <= 1,600 chars."
+# SubagentStop block message. It is later passed through str.format(error=...),
+# so any literal brace must be doubled.
+block_reason = """[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):
+STATUS: COMPLETED | BLOCKED | FAILED
+FILES_CHANGED: <comma-separated paths or NONE>
+VERIFICATION: <one sentence stating the command run and its exit result>
+NOTES: <one sentence or up to 10 '- ' bullets; include a file://.../*.log URI when BLOCKED or FAILED>"""
+
+[scout]
+files_changed = "NONE"
+verification = "<one sentence stating what you searched and how many hits>"
+notes = "<findings as file:// links, one sentence per hit or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>"
+
+[worker]
+files_changed = "<comma-separated paths or NONE>"
+verification = "<one sentence stating the command run and its exit result>"
+notes = "<one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>"
+
+# Traditional Chinese placeholder text for README.zh-TW.md.
+[zh.scout]
+files_changed = "NONE"
+verification = "<一句話說明搜尋範圍與命中數>"
+notes = "<以 file:// 連結列出發現，每筆命中一句話或最多 10 行 `- ` 清單；若 BLOCKED/FAILED 須含 file:// log URI>"
+
+[zh.worker]
+files_changed = "<以逗號分隔的檔案路徑或 NONE>"
+verification = "<一句話說明執行的驗證命令與結果>"
+notes = "<一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILED 須含 file:// log URI>"

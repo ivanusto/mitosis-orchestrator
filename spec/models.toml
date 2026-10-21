@@ -1,0 +1,63 @@
+# Single source of truth for model names, effort levels and prices.
+# Edit this file, then run `python3 scripts/sync-generated.py`.
+# Frontier detection regexes stay in scripts/enforce-orchestrator.py.
+
+[claude]
+primary = "opus"
+
+[claude.scout]
+model = "haiku"
+effort = "low"
+
+[claude.worker]
+model = "sonnet"
+effort = "medium"
+
+[codex]
+primary = "gpt-6.1-sol"
+
+[codex.scout]
+model = "gpt-5.6-luna"
+effort = "low"
+sandbox = "read-only"
+
+[codex.worker]
+model = "gpt-5.6-terra"
+effort = "medium"
+sandbox = "workspace-write"
+
+[agy]
+primary = "Gemini 4 Argon (High)"
+
+[agy.scout]
+model = "flash_lite"
+
+[agy.worker]
+model = "flash"
+
+# USD per million tokens: [input, cache_write_5m, cache_read, output]
+[prices]
+"claude-fable-5-1" = [10.0, 12.5, 0.25, 50.0]
+"claude-mythos-5-1" = [10.0, 12.5, 0.25, 50.0]
+"claude-fable-5" = [10.0, 12.5, 0.25, 50.0]
+"claude-opus-5-5" = [4.0, 5.0, 0.20, 20.0]
+"claude-opus-5" = [5.0, 6.25, 0.50, 25.0]
+"claude-opus-4-8" = [5.0, 6.25, 0.50, 25.0]
+"claude-opus-4-7" = [5.0, 6.25, 0.50, 25.0]
+"claude-opus-4-6" = [5.0, 6.25, 0.50, 25.0]
+"claude-sonnet-5-5" = [2.0, 2.5, 0.20, 10.0]
+"claude-sonnet-5" = [2.0, 2.5, 0.20, 10.0]
+"claude-sonnet-4-6" = [3.0, 3.75, 0.30, 15.0]
+"claude-haiku-5-5" = [0.10, 0.125, 0.01, 0.50]
+"claude-haiku-4-5" = [1.0, 1.25, 0.10, 5.0]
+
+# Short aliases used when a transcript records a bare tier name.
+[price_aliases]
+fable = "claude-fable-5-1"
+opus = "claude-opus-5-5"
+sonnet = "claude-sonnet-5-5"
+haiku = "claude-haiku-5-5"
+
+[cache]
+# 1h cache writes cost this multiple of the input price.
+one_hour_write_multiplier = 2.0

@@ -98,7 +98,7 @@ class CodexHooksTest(unittest.TestCase):
     def test_scout_typed_edit_is_rewritten_to_worker(self):
         upd = self.assert_allow(self.spawn(
             message="Edit app.py to rename main", agent_type="flash-lite-scout"))
-        self.assertEqual(upd["agent_type"], "flash-worker")
+        self.assertEqual(upd["agent_type"], "worker")
         self.assertEqual(upd["model"], WORKER)
 
     def test_bash_pre_tool_use_has_no_opinion(self):

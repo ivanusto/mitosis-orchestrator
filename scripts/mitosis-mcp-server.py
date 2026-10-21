@@ -21,11 +21,24 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Load enforce-orchestrator dynamically
-_SCRIPT_DIR = Path(__file__).resolve().parent
-_EO_PATH = _SCRIPT_DIR / "enforce-orchestrator.py"
-_spec = importlib.util.spec_from_file_location("enforce_orchestrator", _EO_PATH)
-_eo = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_eo)
+def _load_sibling(name: str) -> Any:
+    """Load scripts/<name>.py by file path (scripts/ is not on sys.path), cached in sys.modules."""
+    key = "_" + name
+    if key in sys.modules:
+        return sys.modules[key]
+    path = Path(__file__).resolve().with_name(name + ".py")
+    spec = importlib.util.spec_from_file_location(key, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[key] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(key, None)
+        raise
+    return module
+
+
+_eo = _load_sibling("enforce-orchestrator")
 
 classify_subagent = _eo.classify_subagent
 decide_subagent = _eo.decide_subagent
