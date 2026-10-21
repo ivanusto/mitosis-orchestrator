@@ -89,7 +89,7 @@ class TestJudgeTier(EnvCase):
         self.assertEqual(seen, [])
 
     def test_success_sends_key_model_and_timeout(self):
-        os.environ.update(MITOSIS_JUDGE_URL="http://judge.test/v1", MITOSIS_JUDGE_KEY="k",
+        os.environ.update(MITOSIS_JUDGE_URL="https://judge.test/v1", MITOSIS_JUDGE_KEY="k",
                           MITOSIS_JUDGE_MODEL="jev-x", MITOSIS_JUDGE_TIMEOUT="0.5")
         seen = []
         body = {"answers": {"tier": {"probabilities": {"scout": 0.9, "worker": 0.1}}}}
@@ -153,7 +153,7 @@ class TestJudgeLayer(EnvCase):
         self.assertEqual(stub.calls, [])
 
     def test_read_only_declaration_lowers_confidence_and_invites_judge(self):
-        prompt = "Read-only review: summarize the fixes listed in CHANGELOG.md."
+        prompt = "Read-only review: summarize fixes listed in CHANGELOG.md."
         os.environ.pop("MITOSIS_JUDGE_URL", None)
         d = eo.decide_subagent({"prompt": prompt})
         self.assertEqual((d.tier, d.rule, d.confidence), ("flash", "mutation", eo.READ_ONLY_CONFIDENCE))
@@ -162,7 +162,7 @@ class TestJudgeLayer(EnvCase):
         self.assertEqual((d.tier, d.source), ("flash_lite", "judge"))
 
     def test_judge_can_veto_scout_upgrade(self):
-        prompt = "Read-only: list the fixes mentioned in the last three commits."
+        prompt = "Read-only: list fixes mentioned in the last three commits."
         scout = "mitosis-orchestrator:flash-lite-scout"
         self.use(("flash_lite", 0.9))
         d = eo.decide_subagent({"prompt": prompt, "subagent_type": scout})

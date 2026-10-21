@@ -40,7 +40,7 @@ WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
 
 SERVER_NAME = "mitosis-mcp-server"
-SERVER_VERSION = "1.5.0"
+SERVER_VERSION = "1.5.1"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_DEFINITIONS = [
@@ -120,7 +120,8 @@ def build_codex_cmd(prompt: str, model: str, workspace: str = "inherit", role_ty
         cmd.append("--dangerously-bypass-approvals-and-sandbox")
     else:
         cmd.extend(["--sandbox", sandbox_for(role_type)])
-    cmd.append(prompt)
+    # "--" ends option parsing, so a prompt that starts with "-" stays a prompt.
+    cmd.extend(["--", prompt])
     return cmd
 
 
@@ -357,18 +358,33 @@ class MitosisMCPServer:
                     body = sys.stdin.read(length)
                     req = json.loads(body)
                 except Exception:
+                    self._write(_rpc_error(None, -32700, "Parse error"))
                     continue
             else:
                 try:
                     req = json.loads(line)
                 except Exception:
+                    self._write(_rpc_error(None, -32700, "Parse error"))
                     continue
 
-            if isinstance(req, dict):
+            if not isinstance(req, dict):
+                self._write(_rpc_error(None, -32600, "Invalid Request"))
+                continue
+            try:
                 resp = self.handle_request(req)
-                if resp is not None:
-                    sys.stdout.write(json.dumps(resp) + "\n")
-                    sys.stdout.flush()
+            except Exception as exc:  # one bad call must not take the server down
+                resp = _rpc_error(req.get("id"), -32603, f"Internal error: {type(exc).__name__}: {exc}")
+            if resp is not None:
+                self._write(resp)
+
+    @staticmethod
+    def _write(resp: Dict[str, Any]) -> None:
+        sys.stdout.write(json.dumps(resp) + "\n")
+        sys.stdout.flush()
+
+
+def _rpc_error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
 def main() -> None:

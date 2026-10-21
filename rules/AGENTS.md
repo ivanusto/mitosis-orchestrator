@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.4.1)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.5.1)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model — **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -27,7 +27,7 @@ Single-hop, read-only lookups:
 - `git status` / `git log` / log tail checks
 - High-fan-out reconnaissance where latency and cost matter
 
-Scouts have no write tools and no web mutation tools. Prompts containing mutation verbs (implement, refactor, edit, fix, patch, delete, ...) are automatically upgraded to execution workers by the policy.
+Scouts have no write tools and no web mutation tools. On Claude Code the scout has `Bash` for read-only checks; the hook allows only an allowlist of read-only commands (`git status/log/diff/show`, `ls`, `rg`, `wc`, `tail`, ...) and denies redirection. Prompts containing mutation verbs (implement, refactor, edit, fix, patch, delete, ...) are automatically upgraded to execution workers by the policy.
 
 ### B. Execution Worker (`flash` / `sonnet` / `gpt-5.6-terra`)
 Moderate-complexity analysis or scoped execution:

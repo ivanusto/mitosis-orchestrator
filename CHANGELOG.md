@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.1 — 2026-10-22
+
+### Security
+- **Claude Code permission prompts are no longer skipped.** With `*_MITOSIS_AUTO_ALLOW` unset (the default), the `PreToolUse` hook answered every `Bash`, `Read`, `Write`, `Edit` and `SendMessage` call with `permissionDecision: "allow"`, which Claude Code treats as "skip the permission prompt". It now returns `{}` (no verdict), so the user's own rules and prompts apply. A hook crash also returns `{}` instead of `allow`. `AUTO_ALLOW=1` keeps its documented in-workspace auto-approval. **Behaviour change:** sessions that ran without prompts only because of this bug will now ask.
+- The Claude scout gains `Bash` for `git status` / `git log` checks, which `rules/AGENTS.md` already assigned to it. The hook denies any scout command outside a read-only allowlist (`git` read subcommands, `ls`, `rg`, `wc`, `tail`, ...), any `>` redirection and any `$(...)`.
+- Judge: the bearer key (`MITOSIS_JUDGE_KEY`) is sent only over https or to loopback / private-network hosts (`MITOSIS_JUDGE_ALLOW_HTTP_KEY=1` lifts this); non-http(s) URLs are refused; redaction also masks JWTs, AWS access key ids and `user:pass@` in URLs.
+- State files: the session id is reduced to `[A-Za-z0-9_-]` before it becomes a path, and each writer uses its own temp file, so parallel hooks can no longer rename each other's half-written state into place.
+
+### Fixed (routing)
+- Chinese change requests (修改, 刪除, 重構, 改名, 升到, 加上, 幫 X 加 ...) routed to the scout because the vocabulary was English-only; Chinese heavy work (執行測試, 調查, 除錯, 跨模組) and lookups (在哪裡, 列出, 有沒有) are now recognised, with negations (不要修改, 請勿刪除) and noun uses (被修改的, 修正版, 安裝說明) excluded.
+- Everyday English imperatives at the start of a clause (add, bump, commit, push, install, set, change, update, write, ...) and `git commit/push/...` count as change requests; "run the test suite" upgrades a scout-typed call, since the scout cannot run it.
+- Mutation and heavy keywords used as nouns or paths no longer count: "the patch version", "the bug report template", "where is the test for x", "refactor/".
+- "Do not modify anything. Fix the typo" now keeps the fix at full confidence: an imperative after a read-only declaration wins. A keyword inside the declared scope ("Read-only: summarize fixes") still lowers confidence.
+- `is_frontier_tier` matches whole name segments, so "proxy", "product-o1x" and sub-30B checkpoints such as `deepseek-coder-1.3b` are not frontier.
+
+### Fixed (other)
+- MCP server: invalid JSON gets a `-32700` reply and a non-object a `-32600` reply instead of silence; a handler exception returns `-32603` instead of ending the server; the prompt follows `--` so one starting with `-` is not read as a `codex exec -m gpt-5.6-luna` option.
+- `setup-codex.py` no longer overwrites the first `config.toml.bak` (later runs write `.bak-YYYYmmdd-HHMMSS`), backs up a different `~/.codex/AGENTS.md` before replacing it, and writes `config.toml` atomically.
+- `SKILL.md` and `rules/AGENTS.md` said v1.4.1.
+
+### Added
+- `tests/routing_cases.jsonl` (120 labelled prompts, half Chinese) and `tests/test_routing_eval.py`: no task that needs a worker may reach a scout, accuracy at least 95 %. `python3 tests/test_routing_eval.py` prints the confusion matrices. 1.5.0 rules: 73/120 with 35 worker tasks sent to the scout; 1.5.1: 119/120 with none. The rules were tuned on this set, so it is a regression check, not an accuracy figure.
+- `tests/routing_holdout.jsonl`: 40 prompts written without seeing the rules or the first set. 1.5.0 rules: 21/40 with 11 worker tasks sent to the scout. First blind run of the 1.5.1 rules: 28/40 with 4. After adding soft requests ("should return None instead of raising", 改用, 整理成 docs/x.md): 32/40 with none; the remaining 8 errors send read-only questions that mention tests, builds or DEBUG to a worker, which costs more but does not fail. The test only requires zero worker tasks on the scout.
+- 229 tests (was 199).
+
 ## 1.5.0 — 2026-10-20
 
 ### Added

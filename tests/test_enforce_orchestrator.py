@@ -1090,8 +1090,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         os.environ["CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS"] = "1"
         call = self.tool("Read", {"file_path": str(self.project_dir / "test.log")})
         res = eo.handle_pre_tool_use(call)
-        self.assertEqual(res["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res, {})  # pass-through: no permission verdict
 
     def test_claude_notebook_read_log_hygiene(self):
         call = self.tool("NotebookRead", {"notebook_path": "transcript.jsonl"})
@@ -1103,8 +1102,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         for i in range(3):
             call = self.tool("Write", {"file_path": str(self.project_dir / f"f{i}.py")})
             res = eo.handle_pre_tool_use(call)
-            self.assertEqual(res["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-            self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+            self.assertEqual(res, {})  # pass-through: no permission verdict
         call_blocked = self.tool("Edit", {"file_path": str(self.project_dir / "f3.py")})
         res_blocked = eo.handle_pre_tool_use(call_blocked)
         self.assertEqual(res_blocked["hookSpecificOutput"]["hookEventName"], "PreToolUse")
@@ -1115,8 +1113,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         os.environ["CLAUDE_MITOSIS_MAX_DIRECT_EDITS"] = "1"
         call1 = self.tool("Write", {"file_path": str(self.project_dir / "a.py")})
         res1 = eo.handle_pre_tool_use(call1)
-        self.assertEqual(res1["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-        self.assertEqual(res1["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res1, {})  # pass-through: no permission verdict
         call2 = self.tool("Write", {"file_path": str(self.project_dir / "b.py")})
         res2 = eo.handle_pre_tool_use(call2)
         self.assertEqual(res2["hookSpecificOutput"]["hookEventName"], "PreToolUse")
@@ -1127,8 +1124,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         for i in range(5):
             call = self.tool("Write", {"file_path": str(self.project_dir / f"f{i}.py")})
             res = eo.handle_pre_tool_use(call)
-            self.assertEqual(res["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-            self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+            self.assertEqual(res, {})  # pass-through: no permission verdict
 
     def test_claude_bash_edit_then_test_runner_denied(self):
         write_call = self.tool("Write", {"file_path": str(self.project_dir / "calc.py")})
@@ -1145,8 +1141,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         eo.handle_pre_tool_use(write_call)
         bash_call = self.tool("Bash", {"command": "pytest tests/"})
         res = eo.handle_pre_tool_use(bash_call)
-        self.assertEqual(res["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res, {})  # pass-through: no permission verdict
 
     def test_claude_circuit_breaker(self):
         eo.handle_post_tool_use(dict(self.payload, tool_name="Bash", error="bash error 1"))
@@ -1169,8 +1164,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         st["consecutive_failures"] = 2
         eo.save_state(self.payload, st)
         res = eo.handle_pre_tool_use(self.tool("Bash", {"command": "ls"}))
-        self.assertEqual(res["hookSpecificOutput"]["hookEventName"], "PreToolUse")
-        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res, {})  # pass-through: no permission verdict
 
 
 class TestClaudeCodeWorkspaceGuard(ClaudeHookBase):
@@ -1699,18 +1693,18 @@ class TestClaudeCodeSendMessageGuard(ClaudeHookBase):
         out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": "Now fix the bug in parse_token and rerun."}))["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("mitosis-orchestrator:flash-worker", out["permissionDecisionReason"])
-        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": "Also look up where Settings is defined. Do not edit anything."}))["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "allow")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": "Also look up where Settings is defined. Do not edit anything."}))
+        self.assertEqual(out, {})
         steps = "1. open a\n2. open b\n3. open c\n4. open d\n"
         out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.SCOUT_ID, "message": steps}))["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
 
     def test_edit_task_to_worker_or_unknown_allowed(self):
         self.spawn_and_pair("mitosis-orchestrator:flash-worker", self.WORKER_ID, "Run the tests and fix failures.")
-        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.WORKER_ID, "message": "Fix the remaining failure too."}))["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "allow")
-        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": "someone-else", "message": "Fix it."}))["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "allow")
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.WORKER_ID, "message": "Fix the remaining failure too."}))
+        self.assertEqual(out, {})
+        out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": "someone-else", "message": "Fix it."}))
+        self.assertEqual(out, {})
         out = eo.handle_pre_tool_use(self.tool("SendMessage", {"to": self.WORKER_ID, "message": ""}))["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
 
@@ -1887,10 +1881,10 @@ class TestNegatedMutationAndSubagentCalls(ClaudeHookBase):
         sub = dict(self.payload, agent_id="agent-1", agent_type="mitosis-orchestrator:flash-worker")
         for i in range(4):
             res = eo.handle_pre_tool_use(dict(sub, tool_name="Edit", tool_input={"file_path": str(self.project_dir / f"f{i}.py")}))
-            self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+            self.assertEqual(res, {})
         res = eo.handle_pre_tool_use(dict(sub, tool_name="Bash", tool_input={"command": "python3 -m unittest discover -s tests"}))
-        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res, {})
         res = eo.handle_pre_tool_use(dict(sub, tool_name="Read", tool_input={"file_path": str(self.project_dir / "x.log")}))
-        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "allow")
+        self.assertEqual(res, {})
         # primary budget untouched by subagent edits
         self.assertEqual(eo.load_state(self.payload).get("turn_edited_files"), [])

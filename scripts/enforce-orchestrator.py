@@ -82,6 +82,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -174,11 +175,66 @@ MUTATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Everyday verbs that only ask for a change when they open a clause ("Add a
+# docstring", "...and push"); elsewhere they are usually nouns or prose.
+IMPERATIVE_VERBS = (
+    r"add|apply|bump|commit|push|install|uninstall|wire(?: up)?|set|change|update|upgrade|downgrade|"
+    r"write|create|move|revert|merge|rebase|format|deploy|publish|release|tag|adjust|tweak|convert|switch|port"
+)
+# Soft requests: "X should return None instead of raising", "could you make X use Y".
+SOFT_REQUEST_RE = re.compile(
+    r"\bshould (?:now )?(?:return|raise|accept|use|handle|default to)\b[^.\n]{0,80}\binstead\b|"
+    r"\b(?:could|can|would) you (?:please )?make\b|"
+    r"(?:應該|应该|應|改為|改为)(?:回傳|返回|丟出|抛出|使用)|不要再(?:丟|抛|拋)|改用|"
+    r"(?:更新|調整|调整)(?!紀錄|记录|日誌|日志|說明|说明|內容是|了什麼|了什么)|"
+    r"(?:整理|寫|写|輸出|输出)(?:成|到|進|进)\s*[\w./-]+\.(?:md|txt|json|ya?ml|csv|py)",
+    re.IGNORECASE,
+)
+IMPERATIVE_MUTATION_RE = re.compile(
+    r"(?:(?:^|[.;:!?\n])\s*(?:[-*]\s+|\d+[.)]\s+)?|\b(?:please|then|and|also|must|should|but|do)\s+)"
+    r"(?:" + IMPERATIVE_VERBS + r")\b",
+    re.IGNORECASE,
+)
+# Text ending at the start of a clause: an imperative may follow.
+CLAUSE_START_RE = re.compile(
+    r"(?:^|[.;:!?\n。；：！？，,])\s*(?:[-*]\s+|\d+[.)]\s+)?(?:(?:please|then|also|and|請|请|然後|然后|再)\s*)?$",
+    re.IGNORECASE,
+)
+GIT_MUTATION_RE = re.compile(
+    r"\bgit\s+(?:commit|push|add|rm|mv|reset|merge|rebase|cherry-pick|stash|tag|checkout\s+-b|switch\s+-c)\b",
+    re.IGNORECASE,
+)
+# Running tests, builds or benchmarks needs a worker shell, even on a scout-typed call.
+EXECUTION_RE = re.compile(
+    r"\b(?:run|rerun|re-run|execute)\s+(?:[\w./:-]+\s+){0,3}?"
+    r"(?:tests?|test suite|pytest|unittest|jest|vitest|builds?|benchmarks?|make|npm test|cargo test|go test)\b|"
+    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试|建置|編譯|编译|基準|基准)",
+    re.IGNORECASE,
+)
+
+# CJK has no word boundaries, so these run without \b. Traditional and Simplified forms.
+CJK_MUTATION_RE = re.compile(
+    r"修改|改寫|改写|重構|重构|新增|刪除|删除|刪掉|删掉|移除|拿掉|去掉|實作|實現|实现|修正|修好|修復|修复|修掉|"
+    r"改成|改為|改为|改名|換成|换成|寫入|写入|安裝|安装|提交|推送|更名|重新命名|替換|替换|取代|合併|合并|"
+    r"更動|更改|改動|改动|升到|升級|升级|降到|設為|设为|建立|新建|創建|创建|補上|补上|"
+    r"加(?:上|入|一|個|个|進|进|到)|加\s+[A-Za-z_]|(?:幫|帮|給|给|替)[^。？?！!]{0,30}?加"
+)
+# A Chinese verb used as a noun or adjective: 被修改的, 修正版, 安裝說明, 修復提交訊息.
+CJK_NOUN_BEFORE_RE = re.compile(r"(?:被|已|已經|已经|曾|曾經|曾经)\s*$")
+CJK_MUTATION_NOUN_AFTER_RE = re.compile(
+    r"^(?:的|過|过|版|紀錄|记录|訊息|信息|說明|说明|對照|对照|表|清單|清单|指南|流程|步驟|步骤|方式|方法|提交訊息|提交信息)"
+)
+# Negations ahead of a Chinese verb: 不要修改, 請勿刪除, 不需要任何改動.
+CJK_NEGATED_MUTATION_RE = re.compile(
+    r"(?:不要|不得|不可|不能|不准|不需要?|無須|无须|毋須|別|别|勿|請勿|请勿|禁止|切勿|避免)\s*(?:任何|去)?\s*"
+    r"(?:" + CJK_MUTATION_RE.pattern + r")"
+)
+
 # "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
 # Up to two words may sit between the negation and the verb, and "or"/"nor"
 # chains it, so "Do NOT git fetch/pull or modify" and "never delete or rename"
 # are prohibitions too. "and" is left out: "don't X and fix Y" asks for a fix.
-_MUTATION_ALT = MUTATION_RE.pattern[3:-3]
+_MUTATION_ALT = MUTATION_RE.pattern[3:-3] + "|" + IMPERATIVE_VERBS
 NEGATED_MUTATION_RE = re.compile(
     r"\b(?:do not|don't|dont|never|must not|mustn't|should not|shouldn't|without|not|no)\s+"
     r"(?:(?!\b(?:" + _MUTATION_ALT + r")\b)[\w/.-]+,?\s+){0,2}"
@@ -189,9 +245,85 @@ NEGATED_MUTATION_RE = re.compile(
 )
 
 
+def _blank(match: "re.Match[str]") -> str:
+    return " " * len(match.group(0))
+
+
 def _strip_negated_mutations(text: str) -> str:
-    """Remove negated mutation phrases so prohibitions do not read as tasks."""
-    return NEGATED_MUTATION_RE.sub(" ", text)
+    """Blank out negated mutation phrases so prohibitions do not read as tasks.
+
+    Lengths are preserved, so match offsets still point into the original text.
+    """
+    return CJK_NEGATED_MUTATION_RE.sub(_blank, NEGATED_MUTATION_RE.sub(_blank, text))
+
+
+# A determiner turns a mutation or heavy keyword into a noun: "the patch
+# version", "review the fixes", "the migration guide", "the bug report".
+DETERMINER_BEFORE_RE = re.compile(
+    r"\b(?:the|a|an|this|that|these|those|its|my|your|our|their|which|what)\s+$", re.IGNORECASE
+)
+# Nouns that make the preceding keyword a label: "bug report", "test file".
+LABEL_NOUN_AFTER_RE = re.compile(
+    r"^\s+(?:reports?|templates?|guides?|notes?|versions?|numbers?|names?|files?|folders?|"
+    r"director(?:y|ies)|docs?|ids?|labels?|logs?|loggers?|tickets?|issues?|config(?:uration)?s?|settings|"
+    r"scripts?|modules?)\b|"
+    r"^\s*(?:回報|回报|報告|报告|範本|模板|版本|檔案|文件|目錄|目录|名稱|名称|設定|设置|說明|说明|紀錄|记录)",
+    re.IGNORECASE,
+)
+
+
+# Keywords that double as nouns; only these may be read as labels by what follows.
+NOUNISH_KEYWORDS = {
+    "patch", "fix", "fixes", "migration", "test", "tests", "bug", "build", "integration",
+    "benchmark", "dependency", "dependencies", "trace", "documentation", "debug",
+}
+
+
+def _after_determiner(text: str, match: "re.Match[str]") -> bool:
+    return bool(DETERMINER_BEFORE_RE.search(text[max(0, match.start() - 12):match.start()]))
+
+
+def _before_label(text: str, match: "re.Match[str]") -> bool:
+    return match.group(0).lower() in NOUNISH_KEYWORDS and bool(LABEL_NOUN_AFTER_RE.match(text[match.end():]))
+
+
+def _is_noun_use(text: str, match: "re.Match[str]") -> bool:
+    return _after_determiner(text, match) or _before_label(text, match)
+
+
+def _is_path_part(text: str, match: "re.Match[str]") -> bool:
+    """'refactor/' or 'migrate.py' names a path, not a request."""
+    before = text[match.start() - 1:match.start()] if match.start() else ""
+    after = text[match.end():match.end() + 2]
+    return before in ("/", ".", "-", "_") or after.startswith("/") or bool(re.match(r"^\.\w", after))
+
+
+def find_mutations(text: str) -> List[Tuple[int, str]]:
+    """Return (offset, phrase) for every mutation request in text, in order.
+
+    Negated phrases ("do not edit", "不要修改") and noun uses ("the patch
+    version") do not count.
+    """
+    stripped = _strip_negated_mutations(text)
+    found: List[Tuple[int, str]] = []
+    for m in MUTATION_RE.finditer(stripped):
+        if not _is_noun_use(stripped, m) and not _is_path_part(stripped, m):
+            found.append((m.start(), m.group(0)))
+    for pattern in (IMPERATIVE_MUTATION_RE, GIT_MUTATION_RE, EXECUTION_RE, SOFT_REQUEST_RE):
+        for m in pattern.finditer(stripped):
+            found.append((m.start(), m.group(0).strip(" .;:!?\n")))
+    for m in CJK_MUTATION_RE.finditer(stripped):
+        if CJK_NOUN_BEFORE_RE.search(stripped[:m.start()]) or CJK_MUTATION_NOUN_AFTER_RE.match(stripped[m.end():]):
+            continue
+        found.append((m.start(), m.group(0).strip()))
+    found.sort()
+    return found
+
+
+def find_mutation(text: str) -> Optional[str]:
+    """First mutation phrase in text, or None."""
+    found = find_mutations(text)
+    return found[0][1] if found else None
 
 
 # Moderate-complexity work that needs flash even when read-only.
@@ -200,7 +332,8 @@ HEAVY_RE = re.compile(
     r"tests?|pytest|unittest|jest|vitest|go test|cargo test|npm test|"
     r"debug|bug|root[- ]cause|multi-file|across (?:files|modules|packages)|"
     r"call[- ]?graph|dependency|dependencies|trace|synthesi[sz]e|"
-    r"benchmark|build|compile|integration|deep[- ]dive|"
+    r"benchmark|build|compile|integration|deep[- ]dive|investigate|diagnose|profil(?:e|ing)|memory leak|"
+    r"race condition|on the web|from the web|search the web|web search|"
     r"search_web|read_url_content|documentation|docs? (?:for|on|about)"
     r")\b",
     re.IGNORECASE,
@@ -223,6 +356,46 @@ LITE_RE = re.compile(
     re.IGNORECASE,
 )
 
+CJK_HEAVY_RE = re.compile(
+    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试)|調查|调查|上網查|上网查|綜合|综合|記憶體洩漏|内存泄漏|效能分析|性能分析|剖析|"
+    r"除錯|偵錯|调试|根因|根本原因|編譯|编译|建置|構建|构建|基準測試|基准测试|效能測試|性能测试|"
+    r"跨(?:檔案|文件|模組|模块|套件|包)|多(?:檔案|文件)|呼叫圖|调用图|相依|依賴|依赖|追蹤|追踪|深入(?:分析|研究)|彙整|汇总|綜整|文件研究"
+)
+# 建置設定, 除錯用的 logger: the heavy word labels a thing to look up.
+CJK_HEAVY_NOUN_AFTER_RE = re.compile(
+    r"^(?:設定|设置|配置|用|的設定|腳本|脚本|範本|模板|紀錄|记录|報告|报告|檔|文件|目錄|目录)"
+)
+CJK_LITE_RE = re.compile(
+    r"在哪(?:裡|里|個|个)?|位於|位于|哪(?:個|个)(?:檔案|文件|函式|函数)|列出(?:檔案|文件|目錄|目录)|"
+    r"搜尋|搜索|查找|是否存在|有沒有|有没有|行號|行号|單一檔案|单一文件"
+)
+
+
+def find_heavy(text: str, lite_present: bool) -> Optional[str]:
+    """First heavy signal in text, or None.
+
+    A heavy keyword used as a noun ("the bug report template", "where is the
+    test for x") is a lookup topic, not heavy work: it is skipped when it names
+    a label or when the prompt also carries a lite signal.
+    """
+    for m in HEAVY_RE.finditer(text):
+        if _before_label(text, m):
+            continue
+        if lite_present and _after_determiner(text, m) and m.group(0).lower() in NOUNISH_KEYWORDS:
+            continue
+        return m.group(0)
+    for m in CJK_HEAVY_RE.finditer(text):
+        if not CJK_HEAVY_NOUN_AFTER_RE.match(text[m.end():]):
+            return m.group(0)
+    return None
+
+
+def find_lite(text: str) -> Optional[str]:
+    """First lite signal in text, or None."""
+    m = LITE_RE.search(text) or CJK_LITE_RE.search(text)
+    return m.group(0) if m else None
+
+
 # The caller declares the task read-only. Mutation and heavy keywords in such
 # prompts are usually the topic ("review the fixes", "plan the migration"),
 # so those rules lose their confidence and a judge may take over.
@@ -230,7 +403,7 @@ READ_ONLY_RE = re.compile(
     r"\bread[- ]?only\b|"
     r"\bdo(?: not|n't) (?:modify|edit|change|write|touch) (?:anything|any files?|the (?:repo|code|workspace))\b|"
     r"\bno (?:edits|writes|changes)\b|"
-    r"唯讀|只讀|不要(?:修改|改動|寫入)",
+    r"唯讀|只讀|只要讀取|只需讀取|僅讀取|不需修改|不要(?:修改|改動|更動|寫入)|只读|只要读取|不要(?:修改|改动|写入)",
     re.IGNORECASE,
 )
 READ_ONLY_CONFIDENCE = 0.6
@@ -449,6 +622,18 @@ def _allow(
     return res
 
 
+def _no_opinion(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Pass-through without a permission verdict.
+
+    Claude Code treats permissionDecision "allow" as "skip the permission
+    prompt", so a hook with nothing to say must return {} there. Antigravity
+    and Codex read a bare "allow" as no objection.
+    """
+    if payload and is_claude_code_payload(payload):
+        return {}
+    return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+
+
 def _deny(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if payload and is_claude_code_payload(payload):
         return {
@@ -587,27 +772,17 @@ def validate_subagent_report(text: str) -> Optional[str]:
 
 
 SMALL_TIER_RE = re.compile(r"(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])", re.IGNORECASE)
-FRONTIER_TOKENS = (
-    "argon",
-    "pro",
-    "ultra",
-    "claude",
-    "opus",
-    "sonnet",
-    "fable",
-    "mythos",
-    "grok",
-    "gpt-4",
-    "gpt-5",
-    "gpt-6",
-    "chatgpt-4o",
-    "o1",
-    "o3",
-    "o4",
-    "deepseek",
-    "qwen",
-    "qwq",
-)
+# Matched against whole name segments, so "pro" does not match "proxy" and
+# "o1" does not match "product-o1x". Family names match as segment prefixes
+# ("qwen3", "deepseek-v4").
+FRONTIER_SEGMENTS = {
+    "argon", "pro", "ultra", "claude", "opus", "sonnet", "fable", "mythos", "grok", "o1", "o3", "o4",
+}
+FRONTIER_FAMILY_PREFIXES = ("deepseek", "qwen", "qwq")
+FRONTIER_GPT_RE = re.compile(r"(?<![a-z0-9])(?:chat)?gpt-?[4-9]")
+# Open-weight checkpoints below this size are not frontier, whatever the family.
+PARAM_SIZE_RE = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)b(?![a-z0-9])")
+MIN_FRONTIER_PARAMS_B = 30.0
 
 
 def is_frontier_tier(model_name: str) -> bool:
@@ -617,7 +792,13 @@ def is_frontier_tier(model_name: str) -> bool:
         return False
     if SMALL_TIER_RE.search(normalized):
         return False
-    return any(token in normalized for token in FRONTIER_TOKENS)
+    sizes = [float(m.group(1)) for m in PARAM_SIZE_RE.finditer(normalized)]
+    if sizes and max(sizes) < MIN_FRONTIER_PARAMS_B:
+        return False
+    if FRONTIER_GPT_RE.search(normalized):
+        return True
+    segments = [seg for seg in re.split(r"[^a-z0-9]+", normalized) if seg]
+    return any(seg in FRONTIER_SEGMENTS or seg.startswith(FRONTIER_FAMILY_PREFIXES) for seg in segments)
 
 
 is_mitosis_tier = is_frontier_tier
@@ -737,6 +918,8 @@ def _state_file(payload: Dict[str, Any]) -> Optional[Path]:
         base = Path(artifact_dir)
     else:
         cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or payload.get("turn_id") or "default")
+        # The id comes from the payload; keep it a single safe path segment.
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", cid)[:128] or "default"
         base = Path(tempfile.gettempdir()) / "mitosis-orchestrator" / cid
     try:
         base.mkdir(parents=True, exist_ok=True)
@@ -763,13 +946,20 @@ def save_state(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
     path = _state_file(payload)
     if not path:
         return
+    # A unique temp name per writer: parallel hooks sharing one ".tmp" could
+    # rename each other's half-written file into place.
+    tmp = ""
     try:
-        tmp = path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
+        fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(state, fh, indent=2, sort_keys=True)
         os.replace(tmp, path)
     except OSError:
-        pass
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def sync_subagents_from_transcript(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
@@ -1269,10 +1459,26 @@ def _apply_judge(decision: Decision, prompt: str, scout_typed: bool, worker_type
                     f"{decision.reason}; judge chose {tier} ({confidence:.2f})")
 
 
+def _read_only_has_last_word(text: str, rule: str) -> bool:
+    """True when the prompt declares itself read-only and no change request follows.
+
+    "Do not modify anything. Fix the typo" ends on an imperative, so the later
+    instruction wins and the mutation keeps its confidence. A keyword inside a
+    clause ("Read-only: summarize fixes") is the topic and does not count.
+    """
+    declarations = list(READ_ONLY_RE.finditer(text))
+    if not declarations:
+        return False
+    if rule != "mutation":
+        return True
+    last = declarations[-1].end()
+    return not any(offset >= last and CLAUSE_START_RE.search(text[:offset]) for offset, _ in find_mutations(text))
+
+
 def decide_subagent(subagent: Dict[str, Any]) -> Decision:
     """Return the routing Decision for a subagent spec: rules first, then the optional judge."""
     decision, prompt, scout_typed, worker_name = _decide_by_rules(subagent)
-    if READ_ONLY_RE.search(prompt) and decision.rule in ("mutation", "heavy"):
+    if decision.rule in ("mutation", "heavy") and _read_only_has_last_word(prompt, decision.rule):
         decision = decision._replace(confidence=min(decision.confidence, READ_ONLY_CONFIDENCE),
                                      reason=f"{decision.reason}; prompt declares read-only")
     decision = _apply_judge(decision, prompt, scout_typed, worker_name)
@@ -1316,9 +1522,9 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     def done(decision: Decision) -> Tuple[Decision, str, bool, str]:
         return decision, text, scout_typed, worker_name
 
-    mutation = MUTATION_RE.search(_strip_negated_mutations(text))
-    heavy = HEAVY_RE.search(text)
-    lite = LITE_RE.search(text)
+    mutation = find_mutation(text)
+    lite = find_lite(text)
+    heavy = find_heavy(text, lite is not None)
 
     if bare_type == WORKER_TYPE:
         return done(_rule_decision("flash", None, "worker-type", "flash-worker type"))
@@ -1326,20 +1532,20 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         if bare_type == SCOUT_TYPE:
             upgrade_type = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
             return done(_rule_decision("flash", upgrade_type, "mutation",
-                                  f"mutation verb '{mutation.group(0)}' on read-only scout; upgraded to flash-worker"))
-        return done(_rule_decision("flash", None, "mutation", f"mutation verb '{mutation.group(0)}'"))
+                                  f"mutation verb '{mutation}' on read-only scout; upgraded to flash-worker"))
+        return done(_rule_decision("flash", None, "mutation", f"mutation verb '{mutation}'"))
     if bare_type == SCOUT_TYPE:
         return done(_rule_decision("flash_lite", None, "scout-type", "flash-lite-scout type"))
     if workspace in ("branch", "share"):
         return done(_rule_decision("flash", None, "workspace", f"Workspace '{workspace}' implies writes"))
     if heavy:
-        return done(_rule_decision("flash", None, "heavy", f"heavy signal '{heavy.group(0)}'"))
+        return done(_rule_decision("flash", None, "heavy", f"heavy signal '{heavy}'"))
     if bare_type == "self":
         return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))
     if requested in ALLOWED_SUBAGENT_MODELS:
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
     if lite and len(prompt) <= 600:
-        return done(_rule_decision("flash_lite", None, "lite", f"lite signal '{lite.group(0)}'"))
+        return done(_rule_decision("flash_lite", None, "lite", f"lite signal '{lite}'"))
     if len(prompt) > 450:
         return done(_rule_decision("flash", None, "long-prompt", "long prompt"))
     if len(prompt) <= 320:
@@ -1562,19 +1768,19 @@ def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[
 
     info = state.get("subagents", {}).get(recipient)
     if not info or info.get("model") != "flash_lite":
-        return _allow("Mitosis Orchestrator: pass-through.", payload=payload) if is_claude else {"decision": "allow"}
+        return _no_opinion(payload) if is_claude else {"decision": "allow"}
 
-    mutation = MUTATION_RE.search(_strip_negated_mutations(message))
+    mutation = find_mutation(message)
     rule_count = len(NUMBERED_RULE_RE.findall(message))
     if mutation or rule_count > 3:
-        why = f"mutation verb '{mutation.group(0)}'" if mutation else f"{rule_count} numbered steps"
+        why = f"mutation verb '{mutation}'" if mutation else f"{rule_count} numbered steps"
         reason = (
             f"Recipient '{recipient}' is a flash_lite '{info.get('type') or SCOUT_TYPE}' "
             f"subagent ({why}). Do not send code changes or multi-step (>3 rules) tasks to "
             f"a scout. Use {_delegation_hint(payload, 'flash')} instead."
         )
         return _deny(reason, payload) if is_claude else {"decision": "deny", "reason": reason}
-    return _allow("Mitosis Orchestrator: pass-through.", payload=payload) if is_claude else {"decision": "allow"}
+    return _no_opinion(payload) if is_claude else {"decision": "allow"}
 
 
 def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint: str = "") -> Optional[Dict[str, Any]]:
@@ -1816,6 +2022,73 @@ def _within_roots(target: Any, roots: List[Path]) -> bool:
     return False
 
 
+# Commands a Claude Code scout may run through Bash. Anything else (and any
+# output redirection) is denied, so a read-only scout stays read-only.
+SCOUT_READ_ONLY_COMMANDS = {
+    "ls", "cat", "head", "tail", "wc", "rg", "grep", "egrep", "fgrep", "find", "stat", "file",
+    "du", "df", "pwd", "which", "tree", "sort", "cut", "jq", "basename",
+    "dirname", "realpath", "readlink", "echo", "date", "uname", "nl", "diff", "cmp", "md5sum",
+    "sha256sum",
+}
+SCOUT_GIT_SUBCOMMANDS = {
+    "status", "log", "show", "diff", "blame", "branch", "rev-parse", "ls-files", "ls-tree",
+    "grep", "describe", "shortlog", "reflog", "remote", "tag", "config",
+}
+SCOUT_FORBIDDEN_ARGS = {
+    "find": {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"},
+    "sort": {"-o", "--output"},
+    "tree": {"-o"},
+    "diff": {"--output"},
+    "log": {"--output"},
+    "show": {"--output"},
+    "branch": {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy", "--set-upstream-to", "-u"},
+    "tag": {"-d", "--delete", "-a", "-s", "-f"},
+    "remote": {"add", "remove", "rm", "rename", "set-url", "prune", "set-head"},
+    "config": {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e", "--global", "--system"},
+    "reflog": {"delete", "expire"},
+}
+_SCOUT_SEGMENT_SPLIT_RE = re.compile(r"\|\||&&|[|;\n]")
+_SCOUT_HARMLESS_REDIRECT_RE = re.compile(r"\d?>\s*/dev/null|2>&1")
+
+
+def scout_command_is_read_only(command: str) -> Tuple[bool, str]:
+    """Check a scout's Bash command against the read-only allowlist."""
+    cleaned = _SCOUT_HARMLESS_REDIRECT_RE.sub(" ", command)
+    if re.search(r"[<>`]|\$\(", cleaned):
+        return False, "redirection or command substitution"
+    for segment in _SCOUT_SEGMENT_SPLIT_RE.split(cleaned):
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            return False, "unparseable command"
+        while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+            words = words[1:]
+        if not words:
+            continue
+        prog = os.path.basename(words[0])
+        if prog == "git":
+            sub = next((w for w in words[1:] if not w.startswith("-")), "")
+            if sub not in SCOUT_GIT_SUBCOMMANDS:
+                return False, f"git {sub or '(none)'} is not read-only"
+            if sub == "config" and not any(w in ("--get", "--get-all", "--list", "-l", "--get-regexp") for w in words):
+                return False, "git config without --get/--list"
+            bad = {w for w in words[2:] for f in SCOUT_FORBIDDEN_ARGS.get(sub, set())
+                   if w == f or (f.startswith("--") and w.startswith(f + "="))}
+            if sub == "branch" and len([w for w in words[2:] if not w.startswith("-")]) > 0 and not bad:
+                bad = {"<create>"}
+            if sub == "tag" and len([w for w in words[2:] if not w.startswith("-")]) > 0 and "-l" not in words and "--list" not in words:
+                bad = bad or {"<create>"}
+            if bad:
+                return False, f"git {sub} {sorted(bad)[0]} changes the repository"
+            continue
+        if prog not in SCOUT_READ_ONLY_COMMANDS:
+            return False, f"'{prog}' is not on the scout allowlist"
+        forbidden = SCOUT_FORBIDDEN_ARGS.get(prog, set())
+        if any(w in forbidden or any(w.startswith(f) for f in forbidden if f.startswith("--")) for w in words[1:]):
+            return False, f"'{prog}' with a writing option"
+    return True, ""
+
+
 def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tuple[bool, str]:
     """Return (ok, reason). ok is False when the command names a path outside the
     roots or matches a pattern that should always be confirmed by a human."""
@@ -1941,11 +2214,11 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return _deny("mitosis_scout prompt cannot be empty.", payload)
-        mutation = MUTATION_RE.search(_strip_negated_mutations(prompt))
+        mutation = find_mutation(prompt)
         if mutation:
             target_model = DEFAULT_CODEX_WORKER_MODEL
             target_type = WORKER_TYPE
-            reason = f"mutation verb '{mutation.group(0)}' upgraded scout to worker"
+            reason = f"mutation verb '{mutation}' upgraded scout to worker"
         else:
             target_model = DEFAULT_CODEX_SCOUT_MODEL
             target_type = SCOUT_TYPE
@@ -2025,7 +2298,7 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             return _allow(f"Mitosis Orchestrator pinned subagent: {model} ({reason})", updated_input=updated_args, payload=payload)
         return _deny("mitosis_invoke_subagent requires tasks or prompt.", payload)
 
-    return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+    return _no_opinion(payload)
 
 
 def handle_codex_notify(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2067,18 +2340,18 @@ def handle_codex_notify(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or CLAUDE_MITOSIS_AUTO_ALLOW=1 / CODEX_MITOSIS_AUTO_ALLOW=1)
     # to let project-scoped file and command tools skip the permission prompt.
-    # When unset or for tools without path arguments, return an explicit "allow" pass-through.
+    # When unset or for tools without path arguments, pass through without a verdict.
     if not _env_flag("CODEX_MITOSIS_AUTO_ALLOW", "CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
-        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+        return _no_opinion(payload)
     roots = allowed_roots(payload)
     if not roots:
-        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+        return _no_opinion(payload)
 
     if tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
         cwd = str(_get(args, "cwd", "Cwd", default="") or payload.get("cwd") or "")
         cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "")
         if not cmd:
-            return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+            return _no_opinion(payload)
         if cwd and not _within_roots(cwd, roots):
             return _ask("Mitosis Orchestrator: Cwd is outside the workspace.", payload=payload)
         ok, why = command_stays_in_workspace(cmd, cwd, roots)
@@ -2089,7 +2362,7 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
     if tool_name == "apply_patch":
         targets = _extract_apply_patch_files(args)
         if not targets:
-            return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+            return _no_opinion(payload)
         outside = [t for t in targets if not _within_roots(t, roots)]
         if outside:
             return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.", payload=payload)
@@ -2105,7 +2378,7 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
         if isinstance(value, list):
             targets.extend(v for v in value if isinstance(v, str) and v)
     if not targets:
-        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+        return _no_opinion(payload)
     outside = [t for t in targets if not _within_roots(t, roots)]
     if outside:
         return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.", payload=payload)
@@ -2119,7 +2392,7 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
 def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, args = _extract_tool_call(payload)
     if not tool_name:
-        return _allow("Mitosis Orchestrator: pass-through.", payload=payload)
+        return _no_opinion(payload)
 
     state = load_state(payload)
 
@@ -2159,6 +2432,19 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "").strip()
         if re.search(r"\bcodex\s+exec\b", cmd):
             return _handle_codex_exec_command(payload, tool_name, args, cmd)
+
+    # A Claude Code scout has Bash for git/log checks only.
+    if tool_name == "Bash" and is_claude_code_payload(payload):
+        agent_type = str(payload.get("agent_type") or "").split(":")[-1].strip().lower()
+        if agent_type == SCOUT_TYPE:
+            cmd = str(args.get("command") or "")
+            ok, why = scout_command_is_read_only(cmd)
+            if not ok:
+                return _deny(
+                    f"[Mitosis Orchestrator] {SCOUT_TYPE} runs read-only commands only ({why}). "
+                    "Report the finding and let the orchestrator hand changes to flash-worker.",
+                    payload,
+                )
 
     # Primary agent guards (context hygiene and fast-path budget)
     if is_primary_agent(payload, state):
@@ -2563,7 +2849,7 @@ def main() -> None:
     try:
         result = handler(payload) if handler else {}
     except Exception as exc:  # never break the agent loop because of the guard
-        result = _allow("Mitosis Orchestrator: pass-through.", payload=payload) if mode in ("stop", "pre-tool-use") else {}
+        result = _no_opinion(payload) if mode in ("stop", "pre-tool-use") else {}
         sys.stderr.write(f"[mitosis-orchestrator] {mode} hook error: {exc!r}\n")
     _debug_log(payload, mode, result)
 

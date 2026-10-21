@@ -18,9 +18,11 @@ The prompt leaves the machine, so it is cut to MAX_STATE_CHARS and obvious
 secrets, addresses and home directories are masked first.
 """
 
+import ipaddress
 import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
@@ -45,6 +47,9 @@ TIER_OF = {"scout": "flash_lite", "worker": "flash"}
 
 _REDACTIONS = [
     (re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghs|github_pat|xox[abp])[-_][A-Za-z0-9_-]{8,}"), "<secret>"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "<jwt>"),
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "<secret>"),
+    (re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+@"), "<cred>@"),
     (re.compile(r"\b[A-Fa-f0-9]{32,}\b"), "<hex>"),
     (re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}"), "<blob>"),
     (re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b"), "<email>"),
@@ -99,15 +104,35 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def _key_may_travel(parsed: urllib.parse.ParseResult) -> bool:
+    """Send the bearer key over https, or over plain http only inside the LAN.
+
+    MITOSIS_JUDGE_ALLOW_HTTP_KEY=1 lifts the restriction for other http hosts.
+    """
+    if parsed.scheme == "https" or os.environ.get("MITOSIS_JUDGE_ALLOW_HTTP_KEY", "").strip() == "1":
+        return True
+    host = parsed.hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private or addr.is_link_local
+
+
 def judge_tier(prompt: str, opener: Any = None) -> Optional[Tuple[str, float]]:
     """Ask the configured judge for a tier. None when unset, failing or unsure."""
     url = os.environ.get("MITOSIS_JUDGE_URL", "").strip()
     if not url:
         return None
     payload = build_request(prompt, os.environ.get("MITOSIS_JUDGE_MODEL", "").strip() or DEFAULT_MODEL)
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None
     headers = {"Content-Type": "application/json"}
     key = os.environ.get("MITOSIS_JUDGE_KEY", "").strip()
-    if key:
+    if key and _key_may_travel(parsed):
         headers["Authorization"] = f"Bearer {key}"
     request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
     try:

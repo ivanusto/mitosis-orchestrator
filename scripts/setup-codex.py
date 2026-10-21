@@ -2,7 +2,9 @@
 """Mitosis Orchestrator setup script for OpenAI Codex CLI (>= 0.134).
 
 Installs Mitosis agent roles, rules, profiles, and the MCP server into $CODEX_HOME (default ~/.codex):
-1. Backs up $CODEX_HOME/config.toml to $CODEX_HOME/config.toml.bak
+1. Backs up $CODEX_HOME/config.toml to $CODEX_HOME/config.toml.bak (a timestamped
+   .bak-YYYYmmdd-HHMMSS once that exists, so the first backup is never overwritten)
+   and a replaced $CODEX_HOME/AGENTS.md the same way
 2. Copies rules/AGENTS.md to $CODEX_HOME/AGENTS.md
 3. Installs codex-agents/*.toml role files into $CODEX_HOME/agents/
 4. Installs codex-config/*.config.toml profile files into $CODEX_HOME/
@@ -21,6 +23,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -39,6 +42,14 @@ def plugin_version(repo_root: Path) -> str:
             return str(json.load(f).get("version") or "unknown")
     except (OSError, ValueError):
         return "unknown"
+
+
+def _backup_path(preferred: Path) -> Path:
+    """The preferred .bak name, or a timestamped sibling once that exists."""
+    if not preferred.exists():
+        return preferred
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return preferred.with_name(f"{preferred.name}-{stamp}")
 
 
 def _toml_string(value: str) -> str:
@@ -91,7 +102,7 @@ def setup_codex(
 
     # 1. Back up config.toml
     config_file = codex_home / "config.toml"
-    backup_file = codex_home / "config.toml.bak"
+    backup_file = _backup_path(codex_home / "config.toml.bak")
     if config_file.exists():
         shutil.copy2(config_file, backup_file)
         print(f"[OK] Backed up {config_file} -> {backup_file}")
@@ -102,6 +113,11 @@ def setup_codex(
     target_agents_md = codex_home / "AGENTS.md"
     if not source_agents_md.exists():
         raise FileNotFoundError(f"Source rules/AGENTS.md not found at {source_agents_md}")
+    if target_agents_md.exists() and target_agents_md.read_bytes() != source_agents_md.read_bytes():
+        agents_backup = _backup_path(codex_home / "AGENTS.md.bak")
+        shutil.copy2(target_agents_md, agents_backup)
+        print(f"[OK] Backed up {target_agents_md} -> {agents_backup}")
+        installed_files.append(agents_backup)
     shutil.copy2(source_agents_md, target_agents_md)
     print(f"[OK] Copied {source_agents_md} -> {target_agents_md}")
     installed_files.append(target_agents_md)
@@ -146,8 +162,10 @@ def setup_codex(
 
     updated_content = update_or_append_mcp_server(existing_content, str(mcp_script), interpreter)
     tomllib.loads(updated_content)
-    with open(config_file, "w", encoding="utf-8") as f:
+    tmp_config = config_file.with_name(config_file.name + ".mitosis-tmp")
+    with open(tmp_config, "w", encoding="utf-8") as f:
         f.write(updated_content)
+    os.replace(tmp_config, config_file)
     print(f"[OK] Configured [mcp_servers.mitosis] in {config_file}")
     installed_files.append(config_file)
 

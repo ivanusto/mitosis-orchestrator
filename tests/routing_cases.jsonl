@@ -1,0 +1,120 @@
+{"id": "en-mutation-01", "prompt": "Add a --dry-run flag to scripts/sync.py and update the README usage section.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-02", "prompt": "Bump the version in plugin.json to 1.5.1 and add an entry to CHANGELOG.md.", "expected": "flash", "lang": "en", "category": "mutation", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-mutation-03", "prompt": "Rename the function parse_hdr to parse_header across src/ and fix all call sites.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-04", "prompt": "Wire up the new retry middleware in server/app.py.", "expected": "flash", "lang": "en", "category": "mutation", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-mutation-05", "prompt": "Commit and push the current changes to origin/main with the message \"fix: handle empty config\".", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-06", "prompt": "Install pytest-asyncio and add it to requirements-dev.txt.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-07", "prompt": "Refactor utils/paths.py to use pathlib instead of os.path.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-08", "prompt": "Please do the following:\n- Create docs/ARCHITECTURE.md\n- Add a link to it in README.md\n- Delete the stale docs/old_arch.txt", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-09", "prompt": "Delete the unused file src/legacy/compat_shim.ts. Then remove its import from index.ts.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-mutation-10", "prompt": "Change the default timeout in config.yaml from 30 to 60 seconds. Make sure the docstring in settings.py matches.", "expected": "flash", "lang": "en", "category": "mutation"}
+{"id": "en-heavy-01", "prompt": "Run the full test suite with pytest -x and report which tests fail.", "expected": "flash", "lang": "en", "category": "heavy", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-heavy-02", "prompt": "Debug why the login endpoint returns 500 when the session cookie is missing.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-03", "prompt": "Find the root cause of the flaky test_upload_retry test; rerun it 50 times if needed.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-04", "prompt": "Trace how a request flows from gateway/router.go through auth, cache and the db layer, and write up the call graph.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-05", "prompt": "Run the benchmark in bench/throughput.py before and after the change and compare the numbers.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-06", "prompt": "Research how three popular Python libraries implement rate limiting, reading their docs and source, and synthesize a comparison.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-07", "prompt": "Build the Docker image and tell me why the build fails at step 7.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-08", "prompt": "Investigate the memory leak in worker.js: profile it and identify which module keeps holding references.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-09", "prompt": "Compare the release notes of the last five vite versions on the web and summarize the breaking changes that affect our config.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-heavy-10", "prompt": "Run npm run lint and npm run build, then diagnose the errors across all packages.", "expected": "flash", "lang": "en", "category": "heavy"}
+{"id": "en-lookup-01", "prompt": "Where is the function load_settings defined?", "expected": "flash_lite", "lang": "en", "category": "lookup", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-lookup-02", "prompt": "List the files in the tests/ directory.", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-03", "prompt": "Show the last 5 commits with git log.", "expected": "flash_lite", "lang": "en", "category": "lookup", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-lookup-04", "prompt": "Tail the last 40 lines of logs/server.log.", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-05", "prompt": "Read src/auth/token.py and summarize what it does.", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-06", "prompt": "Is there a Dockerfile in the repo root?", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-07", "prompt": "Grep for TODO in src/ and list the matches.", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-08", "prompt": "What does CACHE_TTL default to in config/defaults.json?", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-09", "prompt": "Run git status and tell me which files are modified.", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-lookup-10", "prompt": "How many lines is main.rs?", "expected": "flash_lite", "lang": "en", "category": "lookup"}
+{"id": "en-noun-trap-01", "prompt": "What is the patch version in plugin.json?", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-02", "prompt": "Find the bug report template in .github/.", "expected": "flash_lite", "lang": "en", "category": "noun-trap", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-noun-trap-03", "prompt": "Where is the test for parse_header?", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-04", "prompt": "Summarize the migration guide in docs/MIGRATING.md.", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-05", "prompt": "Which file contains the build configuration for the frontend?", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-06", "prompt": "What does the fix commit message in the latest git log entry say?", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-07", "prompt": "Locate the install instructions section in README.md.", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-08", "prompt": "List the files under the refactor/ folder.", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-09", "prompt": "What is the name of the debug logger module?", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-noun-trap-10", "prompt": "Is there a rename mapping table in docs/glossary.md? Just read it and tell me.", "expected": "flash_lite", "lang": "en", "category": "noun-trap"}
+{"id": "en-negated-01", "prompt": "Do not edit anything. Locate where RateLimiter is instantiated.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-02", "prompt": "Read-only task: show me the contents of .env.example without changing it.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-03", "prompt": "Don't modify any files. Which tests import fixtures/db.py?", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-04", "prompt": "Without making any changes, list the exported symbols in index.ts.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-05", "prompt": "No commits, no edits. Just tell me the current branch and the last commit message.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-06", "prompt": "Please don't run anything or change files; read the Makefile and tell me the available targets.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-07", "prompt": "Do not create files. Find the line in setup.cfg that sets python_requires.", "expected": "flash_lite", "lang": "en", "category": "negated"}
+{"id": "en-negated-08", "prompt": "Do not touch tests. Fix the typo in README.md (\"recieve\" -> \"receive\").", "expected": "flash", "lang": "en", "category": "negated"}
+{"id": "en-negated-09", "prompt": "Don't change the public API. Rename the private helper _tmp_buf to _scratch_buf in codec.py.", "expected": "flash", "lang": "en", "category": "negated"}
+{"id": "en-negated-10", "prompt": "Leave the docs alone, but do update the version in package.json to 2.3.0.", "expected": "flash", "lang": "en", "category": "negated"}
+{"id": "en-short-ambiguous-01", "prompt": "Where is main()?", "expected": "flash_lite", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-02", "prompt": "ls src/", "expected": "flash_lite", "lang": "en", "category": "short-ambiguous", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "en-short-ambiguous-03", "prompt": "git log -3", "expected": "flash_lite", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-04", "prompt": "Show config.toml", "expected": "flash_lite", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-05", "prompt": "What's in .gitignore?", "expected": "flash_lite", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-06", "prompt": "Fix the failing test", "expected": "flash", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-07", "prompt": "Run the tests", "expected": "flash", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-08", "prompt": "Commit and push", "expected": "flash", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-09", "prompt": "Delete the dist/ folder", "expected": "flash", "lang": "en", "category": "short-ambiguous"}
+{"id": "en-short-ambiguous-10", "prompt": "Add logging to api.py", "expected": "flash", "lang": "en", "category": "short-ambiguous"}
+{"id": "zh-mutation-01", "prompt": "在 scripts/sync.py 新增 --dry-run 參數，並更新 README 的使用說明。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-02", "prompt": "把 plugin.json 的版本號升到 1.5.1，並在 CHANGELOG.md 加一筆紀錄。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-03", "prompt": "將 parse_hdr 全部改名為 parse_header，並修正所有呼叫處。", "expected": "flash", "lang": "zh", "category": "mutation", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "zh-mutation-04", "prompt": "重構 utils/paths.py，改用 pathlib 取代 os.path。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-05", "prompt": "請依序處理：\n- 新增 docs/ARCHITECTURE.md\n- 在 README.md 加上連結\n- 刪除過時的 docs/old_arch.txt", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-06", "prompt": "修正 login handler 在 session 為空時的 NullPointerException，並補一個單元測試。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-07", "prompt": "把 config.yaml 的 timeout 預設值從 30 改成 60。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-08", "prompt": "實作 cache 層的 TTL 淘汰機制，寫在 src/cache/ttl.py。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-09", "prompt": "提交目前的變更並推送到 origin/main，commit 訊息用「fix: 處理空設定」。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-mutation-10", "prompt": "安装 pytest-asyncio 并加入 requirements-dev.txt。", "expected": "flash", "lang": "zh", "category": "mutation"}
+{"id": "zh-heavy-01", "prompt": "執行完整測試套件並回報失敗的案例。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-02", "prompt": "除錯：為什麼缺少 session cookie 時 /login 會回 500？", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-03", "prompt": "找出 test_upload_retry 不穩定的根因，必要時重跑 50 次。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-04", "prompt": "跨模組追蹤請求從 gateway/router.go 經過 auth、cache 到 db 層的流程，整理成呼叫圖。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-05", "prompt": "跑 bench/throughput.py 的基準測試，比較修改前後的數字。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-06", "prompt": "研究三個主流函式庫如何實作 rate limiting，閱讀文件與原始碼後整理比較表。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-07", "prompt": "建置 Docker image，並說明為何在第 7 步失敗。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-08", "prompt": "調查 worker.js 的記憶體洩漏，找出哪個模組持有參考。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-09", "prompt": "查閱 vite 最近五個版本的 release notes，彙整會影響我們設定的破壞性變更。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-heavy-10", "prompt": "Run pytest 然後 debug tests/test_api.py 的 timeout，找出 root cause。", "expected": "flash", "lang": "zh", "category": "heavy"}
+{"id": "zh-lookup-01", "prompt": "load_settings 函式定義在哪裡？", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-02", "prompt": "列出 tests/ 目錄下的檔案。", "expected": "flash_lite", "lang": "zh", "category": "lookup", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "zh-lookup-03", "prompt": "顯示最近 5 筆 git log。", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-04", "prompt": "看一下 logs/server.log 最後 40 行。", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-05", "prompt": "讀 src/auth/token.py 並摘要它的功能。", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-06", "prompt": "repo 根目錄有沒有 Dockerfile？", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-07", "prompt": "在 src/ 搜尋 TODO 並列出結果。", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-08", "prompt": "config/defaults.json 裡 CACHE_TTL 的預設值是多少？", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-09", "prompt": "git status 顯示哪些檔案被修改了？", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-lookup-10", "prompt": "main.rs 有幾行？", "expected": "flash_lite", "lang": "zh", "category": "lookup"}
+{"id": "zh-noun-trap-01", "prompt": "修正版的版本號是多少？請看 plugin.json。", "expected": "flash_lite", "lang": "zh", "category": "noun-trap", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "zh-noun-trap-02", "prompt": "測試檔放在哪個目錄？", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-03", "prompt": "找出 .github/ 裡的 bug 回報範本。", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-04", "prompt": "摘要 docs/MIGRATING.md 的遷移指南。", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-05", "prompt": "前端的建置設定在哪個檔案？", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-06", "prompt": "最新一筆 git log 的修復提交訊息寫了什麼？", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-07", "prompt": "README.md 的安裝說明在第幾節？", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-08", "prompt": "列出 refactor/ 資料夾下的檔案。", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-09", "prompt": "除錯用的 logger 模組叫什麼名字？", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-noun-trap-10", "prompt": "docs/glossary.md 有沒有重新命名對照表？只要讀取並回答。", "expected": "flash_lite", "lang": "zh", "category": "noun-trap"}
+{"id": "zh-negated-01", "prompt": "不要修改任何檔案，找出 RateLimiter 在哪裡被實例化。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-02", "prompt": "唯讀任務：顯示 .env.example 的內容，不要更動。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-03", "prompt": "請勿改動檔案。哪些測試有 import fixtures/db.py？", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-04", "prompt": "不做任何變更，列出 index.ts 匯出的符號。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-05", "prompt": "不要提交也不要編輯，只告訴我目前分支和最後一筆 commit 訊息。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-06", "prompt": "不要執行任何指令或改檔案，讀 Makefile 並告訴我有哪些 target。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-07", "prompt": "不要新增檔案。找出 setup.cfg 中設定 python_requires 的那一行。", "expected": "flash_lite", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-08", "prompt": "不要動測試。修正 README.md 的錯字（「recieve」改成「receive」）。", "expected": "flash", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-09", "prompt": "不要更動公開 API，把 codec.py 裡私有函式 _tmp_buf 改名為 _scratch_buf。", "expected": "flash", "lang": "zh", "category": "negated"}
+{"id": "zh-negated-10", "prompt": "文件先不用管，但請把 package.json 的版本改成 2.3.0。", "expected": "flash", "lang": "zh", "category": "negated"}
+{"id": "zh-short-ambiguous-01", "prompt": "main() 在哪？", "expected": "flash_lite", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-02", "prompt": "列出 src/", "expected": "flash_lite", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-03", "prompt": "git log -3", "expected": "flash_lite", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-04", "prompt": "看 config.toml", "expected": "flash_lite", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-05", "prompt": ".gitignore 有什麼？", "expected": "flash_lite", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-06", "prompt": "修好失敗的測試", "expected": "flash", "lang": "zh", "category": "short-ambiguous", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "zh-short-ambiguous-07", "prompt": "跑測試", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-08", "prompt": "提交並推送", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-09", "prompt": "刪掉 dist/", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
+{"id": "zh-short-ambiguous-10", "prompt": "幫 api.py 加 log", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}

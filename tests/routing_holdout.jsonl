@@ -1,0 +1,40 @@
+{"id": "h-en-01", "prompt": "Where is the retry backoff for the S3 uploader configured? Just give me the file and line, do not edit anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-02", "prompt": "Context: we are migrating to pnpm. List every package.json under packages/ that still has a 'preinstall' script.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-03", "prompt": "What does `parse_cursor()` in src/api/pagination.py return when the cursor is empty? Read-only question.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-04", "prompt": "Check git log for the last 5 commits touching deploy/helm/values.yaml and tell me who changed the replica count.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-05", "prompt": "How many test files under tests/integration mention `fixture_db`? Use rg and wc, report the number only.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-06", "prompt": "Is there any place that patches `requests.Session` in our test suite? I only need file paths.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-07", "prompt": "Which module defines the `FeatureFlag` enum, and what are its members?", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-08", "prompt": "Look at git diff HEAD~1 and summarize in two sentences what changed in .github/workflows/build.yml. Don't modify anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-09", "prompt": "What Node version does the Dockerfile in services/gateway pin?", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-10", "prompt": "Read docs/CONTRIBUTING.md and tell me what the policy is for fixing flaky tests before deploy.", "expected": "flash_lite", "lang": "en"}
+{"id": "h-en-11", "prompt": "Could you make the config loader in cfg/loader.py use tomllib instead of the toml package? Update imports and requirements too.", "expected": "flash", "lang": "en"}
+{"id": "h-en-12", "prompt": "`get_user()` in app/users.py should return None instead of raising KeyError when the id is missing. Adjust the callers in app/handlers/ accordingly.", "expected": "flash", "lang": "en"}
+{"id": "h-en-13", "prompt": "Run pytest -x tests/unit and tell me why test_rate_limit fails.", "expected": "flash", "lang": "en"}
+{"id": "h-en-14", "prompt": "Rename the `Order.total_cents` field to `amount_cents` across the repo, including migrations and docs.", "expected": "flash", "lang": "en"}
+{"id": "h-en-15", "prompt": "Context: we are migrating to pnpm. Replace the npm commands in scripts/ci/*.sh and regenerate the lockfile.", "expected": "flash", "lang": "en"}
+{"id": "h-en-16", "prompt": "The nightly build job times out right after the cache step. Find the root cause and apply a fix in .gitlab-ci.yml.", "expected": "flash", "lang": "en"}
+{"id": "h-en-17", "prompt": "Research the top three Python libraries for OpenTelemetry tracing from their docs and write a comparison into docs/tracing.md.", "expected": "flash", "lang": "en"}
+{"id": "h-en-18", "prompt": "Add a unit test for `slugify()` covering unicode input, then run it to confirm it passes.", "expected": "flash", "lang": "en"}
+{"id": "h-en-19", "prompt": "Commit the staged changes with the message 'chore: bump deps' and push to origin/feature/deps.", "expected": "flash", "lang": "en"}
+{"id": "h-en-20", "prompt": "Drop the deprecated v1 endpoints from routes/legacy.ts and remove the tests that cover them.", "expected": "flash", "lang": "en"}
+{"id": "h-zh-01", "prompt": "請找出 `RateLimiter` 類別定義在哪個檔案，只回報路徑與行號，不要改任何檔案。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-02", "prompt": "部署腳本 deploy/rollout.sh 裡有用到哪些環境變數？請列出來即可。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-03", "prompt": "git log 最近三筆動到 src/auth/ 的 commit 是誰提交的，訊息是什麼？", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-04", "prompt": "README 裡提到的測試指令是什麼？只要回答原文，不需要執行。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-05", "prompt": "專案裡有幾個檔案 import 了 `legacy_utils`？用 rg 計數後回報數字。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-06", "prompt": "config/settings.py 的 DEBUG 預設值是什麼？", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-07", "prompt": "請讀 docs/migration.md，說明修改資料庫 schema 前要先做哪些步驟。只摘要，不要動手。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-08", "prompt": "tests/ 目錄下有哪些檔案是以 test_payment 開頭？", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-09", "prompt": "看一下 git diff main...HEAD --stat，告訴我這個分支改了多少個檔案。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-10", "prompt": "build.gradle 目前指定的 Java 版本是多少？順便說明 patch 版本有沒有被鎖定。", "expected": "flash_lite", "lang": "zh"}
+{"id": "h-zh-11", "prompt": "讓 `fetch_orders` 改用 httpx 的 async client，並更新相關 import。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-12", "prompt": "跑一下 pytest tests/api，如果失敗請找出根本原因。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-13", "prompt": "utils/date.py 裡的 `parse_date` 遇到空字串時應該回傳 None，不要再丟例外。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-14", "prompt": "請在 Dockerfile 加入非 root 使用者，然後重新 build 確認容器可以正常啟動。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-15", "prompt": "將 `UserDTO` 重新命名為 `AccountDTO`，全專案同步修改。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-16", "prompt": "安裝 ruff 並設定 pyproject.toml，之後對整個 src/ 跑一次並修正所有警告。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-17", "prompt": "上網查 Postgres 17 與 16 的差異，綜合官方文件與幾篇部落格，整理成 docs/pg17.md。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-18", "prompt": "CI 的部署步驟偶爾逾時，請排查原因並修好 .github/workflows/deploy.yml。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-19", "prompt": "新增 `calc_tax` 的單元測試，涵蓋負數與零，並執行確認通過。", "expected": "flash", "lang": "zh"}
+{"id": "h-zh-20", "prompt": "請把目前的修改 commit，訊息寫 fix: handle empty cursor，然後 push 到 origin。", "expected": "flash", "lang": "zh"}
