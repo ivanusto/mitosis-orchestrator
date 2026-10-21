@@ -173,5 +173,134 @@ class TestCli(CostReportBase):
         self.assertEqual(rc, 2)
 
 
+class TestSavingsCcusageRouting(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "-home-me-proj"
+        self.project.mkdir()
+        self.sid = "aaaaaaaa-2222-4333-8444-555555555555"
+        write_jsonl(self.project / f"{self.sid}.jsonl", [
+            assistant("claude-opus-5-5", "p1", 1000, 0, 0, 1000, ts="2026-10-19T10:00:00.000Z"),
+        ])
+        subs = self.project / self.sid / "subagents"
+        write_jsonl(subs / "agent-h.jsonl", [assistant("claude-haiku-5-5", "h1", 1_000_000, 0, 0, 100_000, ts="2026-10-19T10:01:00.000Z")])
+        write_jsonl(subs / "agent-s.jsonl", [
+            assistant("claude-sonnet-5-5", "s1", 500_000, 100_000, 0, 100_000, ts="2026-10-19T10:02:03.456Z"),
+            assistant("claude-mystery-9", "m1", 5, 0, 0, 5, ts="2026-10-19T10:02:04.000Z"),
+        ])
+        self.summary = cr.summarize(cr.collect_session(self.project, self.sid), cr.DEFAULT_PRICES)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_main(self, *argv):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = cr.main(["--project", str(self.project), *argv])
+        self.assertEqual(rc, 0)
+        return buf.getvalue()
+
+    def test_savings_math(self):
+        sv = self.summary["savings"]
+        self.assertEqual(sv["primary_model"], "claude-opus-5-5")
+        self.assertAlmostEqual(sv["actual_usd"], 0.024 + 0.15 + 2.25, places=9)
+        self.assertAlmostEqual(sv["counterfactual_usd"], 0.024 + 6.0 + 4.5, places=9)
+        self.assertAlmostEqual(sv["savings_usd"], 8.1, places=9)
+        self.assertAlmostEqual(sv["savings_pct"], 8.1 / 10.524 * 100, places=6)
+        text = self.run_main("--debug-log", str(Path(self.tmp.name) / "none.log"))
+        self.assertIn("Savings vs all-frontier (same tokens on claude-opus-5-5): $8.10 (77.0%)", text)
+        self.assertIn("different number of tokens", text)
+        self.assertIn("no price for: claude-mystery-9", text)
+        self.assertNotIn("Routing", text)
+
+    def test_primary_tie_breaks_on_price(self):
+        rows = [
+            {"model": "claude-haiku-5-5", "role": "primary", "turns": 1, "usd": 1.0},
+            {"model": "claude-opus-5-5", "role": "primary", "turns": 1, "usd": 1.0},
+        ]
+        self.assertEqual(cr.compute_savings(rows, cr.DEFAULT_PRICES)["primary_model"], "claude-opus-5-5")
+        rows[0]["turns"] = 2
+        self.assertEqual(cr.compute_savings(rows, cr.DEFAULT_PRICES)["primary_model"], "claude-haiku-5-5")
+        self.assertIsNone(cr.compute_savings([], cr.DEFAULT_PRICES))
+
+    def test_ccusage_shape(self):
+        data = json.loads(self.run_main("--format", "ccusage"))
+        self.assertEqual(set(data), {"sessions", "totals"})
+        sess = data["sessions"][0]
+        self.assertEqual(
+            list(sess),
+            ["sessionId", "inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens", "totalTokens",
+             "totalCost", "lastActivity", "firstActivity", "modelsUsed", "modelBreakdowns", "projectPath"],
+        )
+        self.assertEqual(sess["inputTokens"], 1000 + 1_000_000 + 500_000 + 5)
+        self.assertEqual(sess["cacheCreationTokens"], 100_000)
+        self.assertEqual(sess["totalTokens"], sess["inputTokens"] + sess["outputTokens"] + sess["cacheCreationTokens"] + sess["cacheReadTokens"])
+        self.assertEqual(sess["lastActivity"], "2026-10-19T10:02:04.000Z")
+        self.assertEqual(sess["firstActivity"], "2026-10-19T10:00:00.000Z")
+        self.assertEqual(sess["projectPath"], "-home-me-proj")
+        names = {b["modelName"]: b for b in sess["modelBreakdowns"]}
+        self.assertEqual(set(names), {"claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-mystery-9"})
+        self.assertTrue(names["claude-mystery-9"]["missingPricing"])
+        self.assertNotIn("missingPricing", names["claude-haiku-5-5"])
+        self.assertEqual(set(names["claude-haiku-5-5"]), {"modelName", "inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens", "cost"})
+        self.assertEqual(data["totals"]["unpricedModels"], ["claude-mystery-9"])
+        self.assertEqual(data["totals"]["totalTokens"], sess["totalTokens"])
+        self.assertAlmostEqual(data["totals"]["totalCost"], sess["totalCost"], places=9)
+
+    def test_ccusage_merges_roles_and_sorts_by_cost(self):
+        other = "bbbbbbbb-2222-4333-8444-555555555555"
+        write_jsonl(self.project / f"{other}.jsonl", [assistant("claude-haiku-5-5", "x", 10, 0, 0, 10)])
+        write_jsonl(self.project / self.sid / "subagents" / "agent-o.jsonl", [assistant("claude-opus-5-5", "o1", 10, 0, 0, 10)])
+        data = json.loads(self.run_main("--last", "2", "--format", "ccusage"))
+        self.assertEqual([x["sessionId"] for x in data["sessions"]], [self.sid, other])
+        opus = [b for b in data["sessions"][0]["modelBreakdowns"] if b["modelName"] == "claude-opus-5-5"]
+        self.assertEqual(len(opus), 1)
+        self.assertEqual(opus[0]["inputTokens"], 1010)
+        self.assertNotIn("unpricedModels", json.loads(self.run_main("--session", other, "--format", "ccusage"))["totals"])
+
+    def test_json_alias_and_savings_key(self):
+        data = json.loads(self.run_main("--json"))
+        self.assertEqual(data, json.loads(self.run_main("--format", "json")))
+        self.assertEqual(data[0]["savings"]["primary_model"], "claude-opus-5-5")
+        self.assertEqual(set(data[0]["savings"]), {"primary_model", "actual_usd", "counterfactual_usd", "savings_usd", "savings_pct"})
+        self.assertIsNone(data[0]["routing"])
+
+    def test_routing_stats(self):
+        log = Path(self.tmp.name) / "debug.log"
+        lines = [
+            json.dumps({"decisions": [
+                {"tier": "flash_lite", "rule": "scout", "source": "rule", "confidence": 0.9},
+                {"tier": "flash", "rule": "impl", "source": "judge", "confidence": 0.8},
+            ]}),
+            "{not json",
+            json.dumps({"mode": "x"}),
+            json.dumps({"decisions": [
+                {"tier": "flash", "rule": "impl", "source": "default", "confidence": 0.4},
+                {"tier": "flash", "rule": "impl", "source": "judge", "confidence": 0.6},
+            ]}),
+        ]
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        r = cr.routing_stats([log])
+        self.assertEqual(r["decisions"], 4)
+        self.assertEqual(r["tiers"]["flash"]["count"], 3)
+        self.assertAlmostEqual(r["tiers"]["flash_lite"]["pct"], 25.0)
+        self.assertEqual(r["rules"], {"impl": 3, "scout": 1})
+        self.assertEqual(r["sources"], {"default": 1, "judge": 2, "rule": 1})
+        self.assertAlmostEqual(r["judge_hit_rate"], 2 / 3)
+        self.assertAlmostEqual(r["mean_confidence"]["flash"], 0.6)
+        self.assertAlmostEqual(r["mean_confidence"]["flash_lite"], 0.9)
+        text = self.run_main("--debug-log", str(log))
+        self.assertIn("Routing", text)
+        self.assertIn("judge decisions / decisions with source judge or default", text)
+        data = json.loads(self.run_main("--json", "--debug-log", str(log)))
+        self.assertEqual(data[0]["routing"]["decisions"], 4)
+        self.assertNotIn("routing", json.loads(self.run_main("--format", "ccusage", "--debug-log", str(log))))
+
+    def test_routing_absent_without_log(self):
+        self.assertIsNone(cr.routing_stats([]))
+        self.assertIsNone(cr.routing_stats([Path(self.tmp.name) / "missing.log"]))
+        self.assertEqual(cr.sanitise_sid("a/b.c" + "x" * 200), ("a_b_c" + "x" * 200)[:128])
+
+
 if __name__ == "__main__":
     unittest.main()

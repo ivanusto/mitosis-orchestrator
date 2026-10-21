@@ -10,6 +10,8 @@ then estimates USD from a built-in list-price table.
     python3 scripts/mitosis-cost-report.py --session <id>  # one or more explicit session ids
     python3 scripts/mitosis-cost-report.py --project ~/.claude/projects/-home-me-repo --json
     python3 scripts/mitosis-cost-report.py --prices my-prices.json
+    python3 scripts/mitosis-cost-report.py --format ccusage    # same shape as `ccusage session --json`
+    python3 scripts/mitosis-cost-report.py --debug-log hook.log  # add routing stats from the hook debug log
 
 Transcript layout (Claude Code 2.1.x):
     ~/.claude/projects/<encoded cwd>/<session_id>.jsonl                 primary agent
@@ -38,7 +40,8 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -226,6 +229,51 @@ def cost_usd(usage: Dict[str, int], price: Optional[Tuple[float, float, float, f
     return (usage["input"] * p_in + usage["cache_write"] * p_cw + usage["cache_read"] * p_cr + usage["output"] * p_out) / 1_000_000
 
 
+def compute_savings(
+    rows: List[Dict[str, Any]],
+    prices: Dict[str, Tuple[float, float, float, float]],
+    subagent_cache_ttl: str = "5m",
+) -> Optional[Dict[str, Any]]:
+    """Actual cost vs the same tokens with every subagent row re-priced on the primary model.
+
+    Primary model = most primary-role turns (ties: highest price). Rows without a
+    known price are excluded from both sides. Returns None without a priced primary.
+    """
+    turns: Dict[str, int] = {}
+    for r in rows:
+        if r["role"] == "primary":
+            turns[r["model"]] = turns.get(r["model"], 0) + r["turns"]
+    if not turns:
+        return None
+
+    def rank(model: str) -> Tuple[int, float, float]:
+        price = price_for(model, prices) or (0.0, 0.0, 0.0, 0.0)
+        return (turns[model], price[3], price[0])
+
+    primary_model = max(turns, key=rank)
+    primary_price = price_for(primary_model, prices)
+    if primary_price is None:
+        return None
+    actual = 0.0
+    counterfactual = 0.0
+    for r in rows:
+        if r["usd"] is None:
+            continue
+        actual += r["usd"]
+        if r["role"] == "subagent":
+            counterfactual += cost_usd(r, primary_price, subagent_cache_ttl) or 0.0
+        else:
+            counterfactual += r["usd"]
+    saved = counterfactual - actual
+    return {
+        "primary_model": primary_model,
+        "actual_usd": actual,
+        "counterfactual_usd": counterfactual,
+        "savings_usd": saved,
+        "savings_pct": (saved / counterfactual * 100.0) if counterfactual else 0.0,
+    }
+
+
 def summarize(
     session: Dict[str, Any],
     prices: Dict[str, Tuple[float, float, float, float]],
@@ -252,6 +300,7 @@ def summarize(
     total_tokens = {r: sum(v for k, v in totals[r].items() if k != "thinking") for r in totals}
     all_tokens = total_tokens["primary"] + total_tokens["subagent"]
     all_usd = totals_usd["primary"] + totals_usd["subagent"]
+    savings = compute_savings(rows, prices, subagent_cache_ttl)
     return {
         "session_id": session["session_id"],
         "project_dir": session["project_dir"],
@@ -267,6 +316,7 @@ def summarize(
         "primary_usd_share": (totals_usd["primary"] / all_usd) if all_usd else None,
         "unknown_models": unknown,
         "cache_ttl": {"primary": primary_cache_ttl, "subagent": subagent_cache_ttl},
+        "savings": savings,
     }
 
 
@@ -311,8 +361,23 @@ def render_text(summary: Dict[str, Any]) -> str:
         f"  TOTAL USD {_fmt_usd(summary['total_usd'])}   primary share: "
         f"{'n/a' if share_t is None else f'{share_t:.0%}'} of tokens, {'n/a' if share_u is None else f'{share_u:.0%}'} of USD"
     )
+    sv = summary.get("savings")
+    if sv:
+        lines.append(f"  Savings vs all-frontier (same tokens on {sv['primary_model']}): ${sv['savings_usd']:,.2f} ({sv['savings_pct']:.1f}%)")
+        lines.append(f"    caveat: a frontier model may use a different number of tokens; actual ${sv['actual_usd']:,.2f} vs counterfactual ${sv['counterfactual_usd']:,.2f}.")
     if summary["unknown_models"]:
-        lines.append(f"  (no price for: {', '.join(summary['unknown_models'])}; pass --prices to add them)")
+        lines.append(f"  (no price for: {', '.join(summary['unknown_models'])}; excluded from savings; pass --prices to add them)")
+    routing = summary.get("routing")
+    if routing:
+        lines.append("  Routing (hook debug log)")
+        lines.append(f"    decisions: {routing['decisions']}")
+        tiers = routing["tiers"]
+        lines.append("    tiers: " + (", ".join(f"{t} {v['count']} ({v['pct']:.1f}%)" for t, v in tiers.items()) or "n/a"))
+        lines.append("    rules: " + (", ".join(f"{k} {v}" for k, v in routing["rules"].items()) or "n/a"))
+        lines.append("    sources: " + (", ".join(f"{k} {v}" for k, v in routing["sources"].items()) or "n/a"))
+        hr = routing["judge_hit_rate"]
+        lines.append(f"    judge hit rate (judge decisions / decisions with source judge or default): {'n/a' if hr is None else f'{hr:.1%}'}")
+        lines.append("    mean confidence per tier: " + (", ".join(f"{t} {c:.2f}" for t, c in routing["mean_confidence"].items()) or "n/a"))
     return "\n".join(lines)
 
 
@@ -325,6 +390,115 @@ def render_comparison(summaries: List[Dict[str, Any]]) -> str:
             f"{_fmt_usd(s['totals_usd']['primary']):>13}{_fmt_usd(s['totals_usd']['subagent']):>14}{_fmt_usd(s['total_usd']):>11}"
         )
     return "\n".join(lines)
+
+
+def sanitise_sid(sid: str) -> str:
+    """Same sanitising as the hook: keep [A-Za-z0-9_-], cut to 128 chars."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:128] or "default"
+
+
+def default_debug_logs(sid: str) -> List[Path]:
+    cid = sanitise_sid(sid)
+    candidates = [
+        Path(tempfile.gettempdir()) / "mitosis-orchestrator" / cid / "mitosis_orchestrator_debug.log",
+        Path(os.path.expanduser("~")) / "mitosis-judge" / "logs" / f"{sid}.log",
+    ]
+    return [c for c in candidates if c.is_file()]
+
+
+def routing_stats(paths: List[Path]) -> Optional[Dict[str, Any]]:
+    """Aggregate routing decisions from hook debug logs; None when there are none."""
+    decisions: List[Dict[str, Any]] = []
+    for path in paths:
+        for rec in iter_records(path):
+            items = rec.get("decisions")
+            if isinstance(items, list):
+                decisions += [d for d in items if isinstance(d, dict)]
+    if not decisions:
+        return None
+    n = len(decisions)
+    tier_counts: Dict[str, int] = {}
+    conf: Dict[str, List[float]] = {}
+    rules: Dict[str, int] = {}
+    sources: Dict[str, int] = {}
+    for d in decisions:
+        tier = str(d.get("tier") or "unknown")
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        c = d.get("confidence")
+        if isinstance(c, (int, float)) and not isinstance(c, bool):
+            conf.setdefault(tier, []).append(float(c))
+        if d.get("rule"):
+            rules[str(d["rule"])] = rules.get(str(d["rule"]), 0) + 1
+        src = str(d.get("source") or "unknown")
+        sources[src] = sources.get(src, 0) + 1
+    eligible = sources.get("judge", 0) + sources.get("default", 0)
+    return {
+        "logs": [str(p) for p in paths],
+        "decisions": n,
+        "tiers": {t: {"count": c, "pct": c / n * 100.0} for t, c in sorted(tier_counts.items())},
+        "rules": dict(sorted(rules.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "sources": dict(sorted(sources.items())),
+        "judge_eligible": eligible,
+        "judge_hit_rate": (sources.get("judge", 0) / eligible) if eligible else None,
+        "mean_confidence": {t: sum(v) / len(v) for t, v in sorted(conf.items())},
+    }
+
+
+def _iso_ms(value: Optional[str]) -> Optional[str]:
+    ts = _parse_ts(value)
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone(timezone.utc)
+    return ts.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ts.microsecond // 1000:03d}Z"
+
+
+def ccusage_report(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Shape of `ccusage session --json`, built from summarize() output."""
+    sessions = []
+    for s in summaries:
+        agg: Dict[str, Dict[str, Any]] = {}
+        for r in s["rows"]:
+            b = agg.setdefault(r["model"], {"modelName": r["model"], "inputTokens": 0, "outputTokens": 0,
+                                            "cacheCreationTokens": 0, "cacheReadTokens": 0, "cost": 0.0, "_unpriced": False})
+            b["inputTokens"] += r["input"]
+            b["outputTokens"] += r["output"]
+            b["cacheCreationTokens"] += r["cache_write"]
+            b["cacheReadTokens"] += r["cache_read"]
+            if r["usd"] is None:
+                b["_unpriced"] = True
+            else:
+                b["cost"] += r["usd"]
+        breakdowns = []
+        for b in sorted(agg.values(), key=lambda x: -x["cost"]):
+            if b.pop("_unpriced"):
+                b["missingPricing"] = True
+            breakdowns.append(b)
+        item = {
+            "sessionId": s["session_id"],
+            "inputTokens": sum(b["inputTokens"] for b in breakdowns),
+            "outputTokens": sum(b["outputTokens"] for b in breakdowns),
+            "cacheCreationTokens": sum(b["cacheCreationTokens"] for b in breakdowns),
+            "cacheReadTokens": sum(b["cacheReadTokens"] for b in breakdowns),
+        }
+        item["totalTokens"] = item["inputTokens"] + item["outputTokens"] + item["cacheCreationTokens"] + item["cacheReadTokens"]
+        item["totalCost"] = s["total_usd"]
+        item["lastActivity"] = _iso_ms(s["end"])
+        item["firstActivity"] = _iso_ms(s["start"])
+        item["modelsUsed"] = sorted(agg)
+        item["modelBreakdowns"] = breakdowns
+        item["projectPath"] = Path(s["project_dir"]).name or None
+        if item["totalTokens"] > 0:
+            sessions.append(item)
+    sessions.sort(key=lambda x: -x["totalCost"])
+    totals: Dict[str, Any] = {k: sum(x[k] for x in sessions) for k in
+                              ("inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens", "totalTokens")}
+    totals["totalCost"] = sum(x["totalCost"] for x in sessions)
+    unpriced = sorted({b["modelName"] for x in sessions for b in x["modelBreakdowns"] if b.get("missingPricing")})
+    if unpriced:
+        totals["unpricedModels"] = unpriced
+    return {"sessions": sessions, "totals": totals}
 
 
 def list_sessions(project_dir: Path) -> List[str]:
@@ -341,7 +515,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--prices", help="JSON file overriding the built-in price table")
     ap.add_argument("--primary-cache-ttl", choices=CACHE_TTLS, default="1h", help="cache-write rate for the primary agent (default 1h, as Claude Code bills it)")
     ap.add_argument("--subagent-cache-ttl", choices=CACHE_TTLS, default="5m", help="cache-write rate for subagents (default 5m)")
-    ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    ap.add_argument("--format", choices=("text", "json", "ccusage"), default="text", help="output format (default text; ccusage mimics `ccusage session --json`)")
+    ap.add_argument("--json", action="store_true", help="alias for --format json")
+    ap.add_argument("--debug-log", action="append", default=[], help="hook debug log for the routing section (repeatable; default: auto-detect per session)")
     args = ap.parse_args(argv)
 
     project_dir = Path(os.path.expanduser(args.project)) if args.project else default_project_dir()
@@ -357,7 +533,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         summarize(collect_session(project_dir, sid), prices, args.primary_cache_ttl, args.subagent_cache_ttl)
         for sid in sessions
     ]
-    if args.json:
+    fmt = "json" if args.json else args.format
+    if fmt == "ccusage":
+        print(json.dumps(ccusage_report(summaries), indent=2))
+        return 0
+    for s in summaries:
+        logs = [Path(os.path.expanduser(p)) for p in args.debug_log] or default_debug_logs(s["session_id"])
+        s["routing"] = routing_stats([p for p in logs if p.is_file()])
+    if fmt == "json":
         print(json.dumps(summaries, indent=2))
         return 0
     print("\n\n".join(render_text(s) for s in summaries))
