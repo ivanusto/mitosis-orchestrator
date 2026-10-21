@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CODEX_MITOSIS_* tier model and effort overrides.
-Run: python -m gpt-5.6-luna discover tests"""
+Run: python -m unittest discover tests"""
 
 import importlib.util
 import os

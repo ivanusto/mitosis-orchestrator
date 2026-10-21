@@ -1031,7 +1031,7 @@ def codex_tier_model(tier: str) -> str:
     """Codex model for a subagent tier, honouring CODEX_MITOSIS_{SCOUT,WORKER}_MODEL.
 
     Values that do not match CODEX_MODEL_RE are ignored, because the model is later
-    spliced into a shell command by the codex exec -m gpt-5.6-luna pinning path.
+    spliced into a shell command by the codex exec pinning path.
     """
     if tier == "flash_lite":
         default, env_name = DEFAULT_CODEX_SCOUT_MODEL, "CODEX_MITOSIS_SCOUT_MODEL"
@@ -2556,19 +2556,219 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
     return True, ""
 
 
-def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any], cmd: str) -> Dict[str, Any]:
-    matches = re.findall(r"""(?:"([^"]*)"|'([^']*)')""", cmd)
-    prompt = ""
-    for m in reversed(matches):
-        candidate = (m[0] or m[1]).strip()
-        if candidate and len(candidate) > 2 and not candidate.startswith("-"):
-            prompt = candidate
+_HEREDOC_RE = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|([A-Za-z_][A-Za-z0-9_]*))")
+_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_REDIRECT_RE = re.compile(r"^[0-9&]*[<>]")
+# `codex exec` options that take a separate value, so that value is not the prompt.
+_CODEX_VALUE_OPTS = frozenset((
+    "-c", "--config", "-i", "--image", "-s", "--sandbox", "-p", "--profile", "-C", "--cd",
+    "-m", "--model", "--color", "-o", "--output-last-message", "--output-schema",
+    "--add-dir", "--local-provider", "--enable", "--disable",
+))
+
+
+def _split_simple_commands(cmd: str) -> List[Tuple[int, int]]:
+    """(start, end) spans of the simple commands in a shell command line.
+
+    Splits at unquoted ; & | ( ) and newlines, skips here-document bodies and comments."""
+    spans: List[Tuple[int, int]] = []
+    n = len(cmd)
+    i = 0
+    seg = 0
+    quote = ""
+    pending: List[Tuple[str, bool]] = []
+    while i < n:
+        ch = cmd[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|()"):
+            nl = cmd.find("\n", i)
+            i = n if nl < 0 else nl
+            continue
+        if ch == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+            m = _HEREDOC_RE.match(cmd, i)
+            if m:
+                word = m.group(2) or m.group(3) or m.group(4)
+                pending.append((word, m.group(1) == "-"))
+                i = m.end()
+                continue
+        if ch == "\n":
+            spans.append((seg, i))
+            i += 1
+            while pending:
+                word, strip = pending.pop(0)
+                while i < n:
+                    nl = cmd.find("\n", i)
+                    line = cmd[i:] if nl < 0 else cmd[i:nl]
+                    i = n if nl < 0 else nl + 1
+                    if (line.lstrip("\t") if strip else line) == word:
+                        break
+            seg = i
+            continue
+        if ch == "&" and ((i > 0 and cmd[i - 1] in "<>") or cmd.startswith("&>", i)):
+            i += 1
+            continue
+        if ch in ";&|()":
+            spans.append((seg, i))
+            i += 1
+            seg = i
+            continue
+        i += 1
+    spans.append((seg, n))
+    return [(s, e) for s, e in spans if s < e and cmd[s:e].strip()]
+
+
+def _tokenize_with_spans(text: str, base: int) -> Optional[List[Tuple[int, int, str]]]:
+    """Shell words of one simple command as (start, end, value), offsets relative to the
+    whole command. None when the quoting is unbalanced."""
+    toks: List[Tuple[int, int, str]] = []
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] in " \t\r\n":
+            i += 1
+            continue
+        start = i
+        buf: List[str] = []
+        while i < n and text[i] not in " \t\r\n":
+            ch = text[i]
+            if ch == "\\":
+                if i + 1 >= n:
+                    return None
+                buf.append(text[i + 1])
+                i += 2
+            elif ch == "'":
+                j = text.find("'", i + 1)
+                if j < 0:
+                    return None
+                buf.append(text[i + 1:j])
+                i = j + 1
+            elif ch == '"':
+                j = i + 1
+                while j < n and text[j] != '"':
+                    if text[j] == "\\" and j + 1 < n and text[j + 1] in '"\\$`':
+                        buf.append(text[j + 1])
+                        j += 2
+                        continue
+                    buf.append(text[j])
+                    j += 1
+                if j >= n:
+                    return None
+                i = j + 1
+            else:
+                buf.append(ch)
+                i += 1
+        toks.append((base + start, base + i, "".join(buf)))
+    return toks
+
+
+def _parse_codex_exec(cmd: str) -> Optional[Dict[str, Any]]:
+    """Find a real `codex exec` invocation in a shell command line, or None.
+
+    Returns {"prompt", "edit": (start, end, replacement-kind)} where edit locates the
+    model value to replace or the insertion point after `exec`."""
+    for s, e in _split_simple_commands(cmd):
+        try:
+            shlex.split(cmd[s:e], posix=True)
+        except ValueError:
+            continue
+        toks = _tokenize_with_spans(cmd[s:e], s)
+        if not toks:
+            continue
+        k = 0
+        while k < len(toks):
+            val = toks[k][2]
+            base = os.path.basename(val)
+            if _ASSIGN_RE.match(val) or base in ("env", "nohup", "time", "sudo", "exec", "command"):
+                k += 1
+                continue
             break
-    if not prompt:
-        cleaned = re.sub(r"\bcodex\s+exec\b", "", cmd)
-        cleaned = re.sub(r"-(?:m|c|i|s|p|C|-model|-config|-sandbox|-cd)\s+\S+", "", cleaned)
-        cleaned = re.sub(r"--\S+", "", cleaned)
-        prompt = cleaned.strip() or cmd
+        if k >= len(toks):
+            continue
+        if os.path.basename(toks[k][2]) == "npx":
+            k += 1
+            while k < len(toks) and toks[k][2].startswith("-"):
+                k += 1
+            if k >= len(toks) or toks[k][2] not in ("codex", "@openai/codex"):
+                continue
+        elif os.path.basename(toks[k][2]) != "codex":
+            continue
+        if k + 1 >= len(toks) or toks[k + 1][2] != "exec":
+            continue
+        exec_tok = toks[k + 1]
+        rest = toks[k + 2:]
+        model_edit: Optional[Tuple[int, int, str]] = None
+        prompt_parts: List[str] = []
+        j = 0
+        while j < len(rest):
+            ts, te, val = rest[j]
+            if _REDIRECT_RE.match(val):
+                j += 1 if re.search(r"[<>]\S", val) else 2
+                continue
+            if val == "--":
+                prompt_parts = [t[2] for t in rest[j + 1:]]
+                break
+            if val in ("-m", "--model"):
+                if j + 1 < len(rest) and model_edit is None:
+                    model_edit = (rest[j + 1][0], rest[j + 1][1], "value")
+                j += 2
+                continue
+            if val.startswith("--model="):
+                if model_edit is None:
+                    model_edit = (ts + len("--model="), te, "value")
+                j += 1
+                continue
+            if val.startswith("-m") and not val.startswith("--") and len(val) > 2:
+                if model_edit is None:
+                    model_edit = (ts, te, "short")
+                j += 1
+                continue
+            if val in _CODEX_VALUE_OPTS:
+                j += 2
+                continue
+            if val.startswith("-") and len(val) > 1:
+                j += 1
+                continue
+            prompt_parts = [val]
+            break
+        return {
+            "prompt": " ".join(prompt_parts).strip(),
+            "model_edit": model_edit,
+            "insert_at": exec_tok[1],
+        }
+    return None
+
+
+def _rewrite_codex_exec_model(cmd: str, parsed: Dict[str, Any], target_model: str) -> str:
+    edit = parsed["model_edit"]
+    if edit is None:
+        at = parsed["insert_at"]
+        return cmd[:at] + " -m " + shlex.quote(target_model) + cmd[at:]
+    start, end, kind = edit
+    replacement = shlex.quote(target_model)
+    if kind == "short":
+        replacement = "-m " + replacement
+    return cmd[:start] + replacement + cmd[end:]
+
+
+def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any], cmd: str) -> Dict[str, Any]:
+    parsed = _parse_codex_exec(cmd)
+    if parsed is None:
+        return _allow(payload=payload)
+    prompt = parsed["prompt"]
 
     item = {"Prompt": prompt, "Role": "codex-subagent"}
     decision = decide_subagent(item)
@@ -2577,10 +2777,7 @@ def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Di
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
     _record_routing(payload, decision, target_model, codex_tier_effort(tier), "codex", target_type)
 
-    if re.search(r"(?:-m|--model)\s+(\S+)", cmd):
-        new_cmd = re.sub(r"(-m|--model)\s+\S+", f"-m {target_model}", cmd, count=1)
-    else:
-        new_cmd = re.sub(r"\bcodex\s+exec\b", f"codex exec -m {target_model}", cmd, count=1)
+    new_cmd = _rewrite_codex_exec_model(cmd, parsed, target_model)
 
     active_branch = "--worktree" in cmd
     spawns = [{
@@ -2907,7 +3104,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
         cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "").strip()
-        if re.search(r"\bcodex\s+exec\b", cmd):
+        if re.search(r"\bcodex\s+exec\b", cmd) and _parse_codex_exec(cmd) is not None:
             return _handle_codex_exec_command(payload, tool_name, args, cmd)
 
     # A Claude Code scout has Bash for git/log checks only.

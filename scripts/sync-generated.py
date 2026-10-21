@@ -178,7 +178,7 @@ def build_agent_outputs(models: dict, report: dict) -> Dict[str, str]:
         p = cx[role]
         out["codex-config/mitosis-" + role + ".config.toml"] = (
             "# Mitosis Orchestrator " + what + " profile for OpenAI Codex CLI (>= 0.134).\n"
-            "# Usage: codex exec -m gpt-5.6-luna --profile mitosis-" + role + ' "' + cmd + '"\n'
+            "# Usage: codex exec --profile mitosis-" + role + ' "' + cmd + '"\n'
             "# Installed to $CODEX_HOME/mitosis-" + role + ".config.toml by scripts/setup-codex.py.\n"
             "# Generated from spec/models.toml; edit the spec and run scripts/sync-generated.py.\n"
             'model = "' + p["model"] + '"\n'
