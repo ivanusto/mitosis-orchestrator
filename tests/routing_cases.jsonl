@@ -118,3 +118,46 @@
 {"id": "zh-short-ambiguous-08", "prompt": "提交並推送", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
 {"id": "zh-short-ambiguous-09", "prompt": "刪掉 dist/", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
 {"id": "zh-short-ambiguous-10", "prompt": "幫 api.py 加 log", "expected": "flash", "lang": "zh", "category": "short-ambiguous"}
+{"id": "v7-tool-run-01", "prompt": "Execute mypy over the api/ package and tell me how many errors it prints per module.", "expected": "flash", "lang": "en", "category": "tool-run"}
+{"id": "v7-tool-run-02", "prompt": "跑一下 pylint，把警告數量按檔案統計給我。", "expected": "flash", "lang": "zh", "category": "tool-run"}
+{"id": "v7-tool-run-03", "prompt": "Typecheck packages/web and list the files that fail.", "expected": "flash", "lang": "en", "category": "tool-run"}
+{"id": "v7-tool-run-04", "prompt": "Run clippy on crates/core and group the warnings by lint name.", "expected": "flash", "lang": "en", "category": "tool-run"}
+{"id": "v7-tool-run-05", "prompt": "跑 flake8 檢查 app/，列出違規數量。", "expected": "flash", "lang": "zh", "category": "tool-run"}
+{"id": "v7-tool-run-06", "prompt": "lint src/ and fix what it reports", "expected": "flash", "lang": "en", "category": "tool-run"}
+{"id": "v7-tool-run-07", "prompt": "Please run the nightly sync job against the staging bucket and report the row counts.", "expected": "flash", "lang": "en", "category": "tool-run"}
+{"id": "v7-repro-01", "prompt": "Reproduce the flaky login timeout by running the e2e suite in a loop, then find which step hangs.", "expected": "flash", "lang": "en", "category": "repro"}
+{"id": "v7-repro-02", "prompt": "The report generator drops the last page sometimes. Reproduce it by executing jobs/report.py on data/q3.json twice and find out why.", "expected": "flash", "lang": "en", "category": "repro"}
+{"id": "v7-repro-03", "prompt": "重現這個當機：用 sample.bin 跑一次 decoder，然後找出原因。", "expected": "flash", "lang": "zh", "category": "repro"}
+{"id": "v7-indirect-01", "prompt": "It'd be great if the CLI printed a helpful hint when the config file is missing.", "expected": "flash", "lang": "en", "category": "indirect-request"}
+{"id": "v7-indirect-02", "prompt": "I wish the importer skipped blank lines instead of aborting.", "expected": "flash", "lang": "en", "category": "indirect-request"}
+{"id": "v7-indirect-03", "prompt": "The session middleware should return 401 for expired cookies rather than redirecting.", "expected": "flash", "lang": "en", "category": "indirect-request"}
+{"id": "v7-indirect-04", "prompt": "如果匯出功能在資料超過 10 萬列時能分批處理就好了。", "expected": "flash", "lang": "zh", "category": "indirect-request"}
+{"id": "v7-indirect-05", "prompt": "可以幫忙處理一下登入頁在手機上跑版的問題嗎？", "expected": "flash", "lang": "zh", "category": "indirect-request"}
+{"id": "v7-indirect-06", "prompt": "能不能讓 /health 端點多回傳版本號？", "expected": "flash", "lang": "zh", "category": "indirect-request"}
+{"id": "v7-indirect-07", "prompt": "Can we make the cache TTL configurable?", "expected": "flash", "lang": "en", "category": "indirect-request"}
+{"id": "v7-noun-guard-01", "prompt": "Which tests fail? Run the suite and tell me.", "expected": "flash", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-guard-02", "prompt": "Why does the checkout test keep failing? Run it five times and report.", "expected": "flash", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-guard-03", "prompt": "Apply the new migration to the staging db.", "expected": "flash", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-guard-04", "prompt": "把這個 refactor 做完。", "expected": "flash", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-guard-05", "prompt": "請修改 README 並說明改了什麼。", "expected": "flash", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-guard-06", "prompt": "Fix the bug in tests/helpers.py", "expected": "flash", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-guard-07", "prompt": "Which tests fail when you run the suite?", "expected": "flash", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-01", "prompt": "What does the lint job in ci.yml run?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-02", "prompt": "Which rules does .eslintrc.json enable for TypeScript files?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-03", "prompt": "Where does the lint config live?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-04", "prompt": "Where is the mypy config for this repo? Don't run it, just point me to the file.", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-05", "prompt": "Which tests under tests/e2e/ exercise the checkout flow? List file paths only.", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-06", "prompt": "settings/prod.py 的 DEBUG 預設值是什麼？", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-07", "prompt": "Is there a place that mocks `boto3.client` in our test suite? Paths only.", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-08", "prompt": "What does the build step in release.yml publish, and to which registry? Just read the file.", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-09", "prompt": "請讀 docs/upgrade.md，說明升級資料庫前要先做哪些步驟，不要動手。", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-10", "prompt": "Which migration file added the orders.archived column, and what did the later migration change?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-11", "prompt": "PR #77 的 fix 改了哪些檔案？用 git show 看就好。", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-12", "prompt": "那個 patch 為什麼不能直接套用？看一下 git log 解釋即可，先不要改。", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-13", "prompt": "tests/ 目錄下有幾個檔案？", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-14", "prompt": "How many scripts in benchmark/ import numpy?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-15", "prompt": "build.gradle 裡 compileSdk 是多少？", "expected": "flash_lite", "lang": "zh", "category": "noun-use"}
+{"id": "v7-noun-use-16", "prompt": "Who reviewed the fix for the timezone bug in 2.3?", "expected": "flash_lite", "lang": "en", "category": "noun-use"}
+{"id": "v7-noun-use-17", "prompt": "Would it be better to cache at the edge? Explain the tradeoffs, read-only.", "expected": "flash_lite", "lang": "en", "category": "indirect-request"}
+{"id": "v7-noun-use-18", "prompt": "這個函式可以怎麼改比較好？只要說明，不要動手。", "expected": "flash_lite", "lang": "zh", "category": "indirect-request"}
+{"id": "v7-noun-use-19", "prompt": "Which steps reproduce the crash according to ISSUE-142.md? Summarize them.", "expected": "flash_lite", "lang": "en", "category": "repro"}

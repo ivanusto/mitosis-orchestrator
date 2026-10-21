@@ -217,12 +217,22 @@ MUTATION_RE = re.compile(
 # docstring", "...and push"); elsewhere they are usually nouns or prose.
 IMPERATIVE_VERBS = (
     r"add|apply|bump|commit|push|install|uninstall|wire(?: up)?|set|change|update|upgrade|downgrade|"
-    r"write|create|move|revert|merge|rebase|format|deploy|publish|release|tag|adjust|tweak|convert|switch|port"
+    r"write|create|move|revert|merge|rebase|format|deploy|publish|release|tag|adjust|tweak|convert|switch|port|lint|typecheck|type-check|reformat"
 )
 # Soft requests: "X should return None instead of raising", "could you make X use Y".
 SOFT_REQUEST_RE = re.compile(
     r"\bshould (?:now )?(?:return|raise|accept|use|handle|default to)\b[^.\n]{0,80}\binstead\b|"
     r"\b(?:could|can|would) you (?:please )?make\b|"
+    r"\bcan we (?:please )?make\b|\bmake it so\b|\bi wish\b|"
+    r"(?:\bit|\bthat|\bthis)?(?:'d|\s+would)\s+be\s+(?:so\s+|really\s+|much\s+)?"
+    r"(?:nice|great|better|good|ideal|awesome|helpful|cool|useful|preferable)\s+(?:if|to)\b|"
+    r"(?:^|[.;!\n])\s*(?:also,?\s+|and\s+)?(?:the|this|that|our|my|your|each|every)\s+[\w ./-]{1,40}?"
+    r"\bshould (?:now |also |really )?(?:handle|return|accept|support|reject|retry|validate|log|raise|throw|use)\b|"
+    r"(?:如果|要是|若能)[^。？?！!]{0,60}?就好了|"
+    r"(?:能不能|可不可以|可以|能否|是否可以|可否|能)(?:(?!怎麼|怎么|如何|哪)[^。？?！!]){0,30}?"
+    r"(?:改|處理|处理|修|加|支援|支持|調整|调整|優化|优化)|"
+    r"(?:能不能|可不可以|能否|可否)\s*(?:讓|让|把|將|将|幫|帮|多|增加|提供|開放|开放)|"
+    r"(?:幫忙|帮忙|麻煩你?|麻烦你?|幫我|帮我)(?:處理|处理)|"
     r"(?:應該|应该|應|改為|改为)(?:回傳|返回|丟出|抛出|使用)|不要再(?:丟|抛|拋)|改用|"
     r"(?:更新|調整|调整)(?!紀錄|记录|日誌|日志|說明|说明|內容是|了什麼|了什么)|"
     r"(?:整理|寫|写|輸出|输出)(?:成|到|進|进)\s*[\w./-]+\.(?:md|txt|json|ya?ml|csv|py)",
@@ -242,11 +252,20 @@ GIT_MUTATION_RE = re.compile(
     r"\bgit\s+(?:commit|push|add|rm|mv|reset|merge|rebase|cherry-pick|stash|tag|checkout\s+-b|switch\s+-c)\b",
     re.IGNORECASE,
 )
+# Linters, type checkers and formatters: running them needs a shell.
+_CHECKER_ALT = (r"(?:eslint|ruff|flake8|pylint|mypy|pyright|tsc|prettier|black|golangci-lint|clippy|"
+                r"shellcheck|rubocop|stylelint|lint(?:ing|er)?|type-?check(?:ing|er)?)")
 # Running tests, builds or benchmarks needs a worker shell, even on a scout-typed call.
 EXECUTION_RE = re.compile(
     r"\b(?:run|rerun|re-run|execute)\s+(?:[\w./:-]+\s+){0,3}?"
     r"(?:tests?|test suite|pytest|unittest|jest|vitest|builds?|benchmarks?|make|npm test|cargo test|go test)\b|"
-    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试|建置|編譯|编译|基準|基准)",
+    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试|建置|編譯|编译|基準|基准)|"
+    r"\b(?:run|rerun|re-run|execute)\s+(?:[\w./:-]+\s+){0,3}?" + _CHECKER_ALT + r"\b|"
+    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?" + _CHECKER_ALT + r"\b|"
+    r"\b(?:reproduce|repro)\b[^.?!\n]{0,60}?\b(?:running|run|executing|execute)\b|"
+    r"(?:重現|重现|復現|复现)[^。？?！!]{0,20}?(?:跑|執行|执行|運行|运行)|"
+    r"(?:^|[.;:!?\n]|\b(?:please|then|and|also)\s)\s*(?:re-?run|run|execute)\s+(?:(?:the|this|that|our|it|your|a)\s+)?"
+    r"(?:[\w./-]+\s+){0,2}?(?:pipeline|scripts?|jobs?|workflow|etl|cron|binary|program)\b",
     re.IGNORECASE,
 )
 
@@ -258,9 +277,10 @@ CJK_MUTATION_RE = re.compile(
     r"加(?:上|入|一|個|个|進|进|到)|加\s+[A-Za-z_]|(?:幫|帮|給|给|替)[^。？?！!]{0,30}?加"
 )
 # A Chinese verb used as a noun or adjective: 被修改的, 修正版, 安裝說明, 修復提交訊息.
-CJK_NOUN_BEFORE_RE = re.compile(r"(?:被|已|已經|已经|曾|曾經|曾经)\s*$")
+# "說明修改 X 前要..." asks to explain the change, not to make it.
+CJK_NOUN_BEFORE_RE = re.compile(r"(?:被|已|已經|已经|曾|曾經|曾经|說明|说明|解釋|解释|介紹|介绍|了解)\s*$")
 CJK_MUTATION_NOUN_AFTER_RE = re.compile(
-    r"^(?:的|過|过|版|紀錄|记录|訊息|信息|說明|说明|對照|对照|表|清單|清单|指南|流程|步驟|步骤|方式|方法|提交訊息|提交信息)"
+    r"^(?:的|過|过|版|紀錄|记录|訊息|信息|說明|说明|對照|对照|表|清單|清单|指南|流程|步驟|步骤|方式|方法|提交訊息|提交信息|原因|理由|目的|動機|动机)"
 )
 # Negations ahead of a Chinese verb: 不要修改, 請勿刪除, 不需要任何改動.
 CJK_NEGATED_MUTATION_RE = re.compile(
@@ -297,15 +317,36 @@ def _strip_negated_mutations(text: str) -> str:
 
 # A determiner turns a mutation or heavy keyword into a noun: "the patch
 # version", "review the fixes", "the migration guide", "the bug report".
+_ADJ = (r"(?:later|earlier|previous|next|last|first|latest|recent|same|old|new|original|upstream|final|"
+        r"actual|proposed|suggested|relevant|flaky|failing|broken|existing)")
 DETERMINER_BEFORE_RE = re.compile(
-    r"\b(?:the|a|an|this|that|these|those|its|my|your|our|their|which|what)\s+$", re.IGNORECASE
+    r"\b(?:the|a|an|this|that|these|those|its|my|your|our|their|which|what)\s+(?:" + _ADJ + r"\s+)*$",
+    re.IGNORECASE,
+)
+# In a question the determiner may sit up to two words back: "does the Android release build use".
+LOOSE_DETERMINER_BEFORE_RE = re.compile(
+    r"\b(?:the|a|an|this|that|these|those|its|my|your|our|their|which|what)\s+(?:[\w-]+\s+){0,2}$", re.IGNORECASE
+)
+# Chinese determiners before an English noun: "那個 patch", "PR #812 的 fix", "哪些 migration".
+CJK_DETERMINER_BEFORE_RE = re.compile(r"(?:的|那個|那个|這個|这个|該|该|此|這些|这些|那些|哪個|哪个|哪些|哪幾個|哪几个)\s*$")
+# Questions: a leading question word in any clause, or a question mark.
+QUESTION_RE = re.compile(
+    r"[?？]|(?:^|[.;!\n])\s*(?:which|what|how many|how much|why|where|does|do|is|are|can|did)\b|"
+    r"哪些|哪個|哪个|什麼|什么|為什麼|为什么|多少|有沒有|有没有|是否|嗎|吗",
+    re.IGNORECASE,
+)
+# Running something is an execution signal: a noun-use skip must not hide it.
+EXECUTION_SIGNAL_RE = re.compile(
+    r"\b(?:run|rerun|re-run|running|execute|executing)\b|actually run|you'll need to run|跑|執行|执行|運行|运行",
+    re.IGNORECASE,
 )
 # Nouns that make the preceding keyword a label: "bug report", "test file".
 LABEL_NOUN_AFTER_RE = re.compile(
     r"^\s+(?:reports?|templates?|guides?|notes?|versions?|numbers?|names?|files?|folders?|"
     r"director(?:y|ies)|docs?|ids?|labels?|logs?|loggers?|tickets?|issues?|config(?:uration)?s?|settings|"
     r"scripts?|modules?)\b|"
-    r"^\s*(?:回報|回报|報告|报告|範本|模板|版本|檔案|文件|目錄|目录|名稱|名称|設定|设置|說明|说明|紀錄|记录)",
+    r"^\s*(?:回報|回报|報告|报告|範本|模板|版本|檔案|文件|目錄|目录|名稱|名称|設定值|设定值|設定|设置|說明|说明|紀錄|记录|"
+    r"預設值|默认值|參數|参数)",
     re.IGNORECASE,
 )
 
@@ -317,8 +358,11 @@ NOUNISH_KEYWORDS = {
 }
 
 
-def _after_determiner(text: str, match: "re.Match[str]") -> bool:
-    return bool(DETERMINER_BEFORE_RE.search(text[max(0, match.start() - 12):match.start()]))
+def _after_determiner(text: str, match: "re.Match[str]", loose: bool = False) -> bool:
+    before = text[max(0, match.start() - 30):match.start()]
+    if DETERMINER_BEFORE_RE.search(before) or (loose and LOOSE_DETERMINER_BEFORE_RE.search(before)):
+        return True
+    return match.group(0).lower() in NOUNISH_KEYWORDS and bool(CJK_DETERMINER_BEFORE_RE.search(before))
 
 
 def _before_label(text: str, match: "re.Match[str]") -> bool:
@@ -409,23 +453,38 @@ CJK_LITE_RE = re.compile(
 )
 
 
-def find_heavy(text: str, lite_present: bool) -> Optional[str]:
-    """First heavy signal in text, or None.
+def find_heavy_ex(text: str, lite_present: bool) -> Tuple[Optional[str], bool]:
+    """First heavy signal in text as (phrase, noun_like), or (None, False).
 
-    A heavy keyword used as a noun ("the bug report template", "where is the
-    test for x") is a lookup topic, not heavy work: it is skipped when it names
-    a label or when the prompt also carries a lite signal.
+    A heavy keyword that names a path part ("tests/", "build.gradle"), a
+    label ("the bug report template") or a topic in a lookup ("where is the
+    test for x", "which tests import y?") is skipped. A question skips
+    determiner uses only when nothing in it asks to run anything. A heavy hit
+    that still follows a determiner is returned with noun_like=True; a plain
+    hit is preferred over a noun-like one.
     """
+    question = bool(QUESTION_RE.search(text)) and not EXECUTION_SIGNAL_RE.search(text) \
+        and not TEST_RUNNER_RE.search(text)
+    noun_like: Optional[str] = None
     for m in HEAVY_RE.finditer(text):
-        if _before_label(text, m):
+        if _before_label(text, m) or _is_path_part(text, m):
             continue
-        if lite_present and _after_determiner(text, m) and m.group(0).lower() in NOUNISH_KEYWORDS:
+        nounish = m.group(0).lower() in NOUNISH_KEYWORDS
+        if nounish and (lite_present or question) and _after_determiner(text, m, loose=question):
             continue
-        return m.group(0)
+        if nounish and _after_determiner(text, m):
+            noun_like = noun_like or m.group(0)
+            continue
+        return m.group(0), False
     for m in CJK_HEAVY_RE.finditer(text):
         if not CJK_HEAVY_NOUN_AFTER_RE.match(text[m.end():]):
-            return m.group(0)
-    return None
+            return m.group(0), False
+    return (noun_like, True) if noun_like else (None, False)
+
+
+def find_heavy(text: str, lite_present: bool) -> Optional[str]:
+    """First heavy signal in text, or None (see find_heavy_ex)."""
+    return find_heavy_ex(text, lite_present)[0]
 
 
 def find_lite(text: str) -> Optional[str]:
@@ -441,7 +500,7 @@ READ_ONLY_RE = re.compile(
     r"\bread[- ]?only\b|"
     r"\bdo(?: not|n't) (?:modify|edit|change|write|touch) (?:anything|any files?|the (?:repo|code|workspace))\b|"
     r"\bno (?:edits|writes|changes)\b|"
-    r"唯讀|只讀|只要讀取|只需讀取|僅讀取|不需修改|不要(?:修改|改動|更動|寫入)|只读|只要读取|不要(?:修改|改动|写入)",
+    r"唯讀|只讀|只要讀取|只需讀取|僅讀取|不需修改|不要(?:修改|改動|更動|寫入|動手|动手)|先不要改|只读|只要读取|不要(?:修改|改动|写入)",
     re.IGNORECASE,
 )
 READ_ONLY_CONFIDENCE = 0.6
@@ -1620,6 +1679,7 @@ RULE_CONFIDENCE = {
     "scout-type": 0.95,
     "workspace": 0.95,
     "heavy": 0.9,
+    "heavy-noun": 0.75,
     "self-type": 0.95,
     "explicit-model": 0.95,
     "lite": 0.85,
@@ -1630,7 +1690,7 @@ RULE_CONFIDENCE = {
 
 # Rules a judge may overrule when their confidence is low. Type, workspace and
 # explicit-model rules state the caller's intent and are never sent to a judge.
-JUDGEABLE_RULES = {"mutation", "heavy", "lite", "long-prompt", "short-prompt", "default"}
+JUDGEABLE_RULES = {"mutation", "heavy", "heavy-noun", "lite", "long-prompt", "short-prompt", "default"}
 
 # Decisions made during this process, read by _debug_log. Hooks are one-shot
 # processes; the cap keeps the long-running MCP server from growing it.
@@ -1707,7 +1767,7 @@ def _read_only_has_last_word(text: str, rule: str) -> bool:
 def decide_subagent(subagent: Dict[str, Any]) -> Decision:
     """Return the routing Decision for a subagent spec: rules first, then the optional judge."""
     decision, prompt, scout_typed, worker_name = _decide_by_rules(subagent)
-    if decision.rule in ("mutation", "heavy") and _read_only_has_last_word(prompt, decision.rule):
+    if decision.rule in ("mutation", "heavy", "heavy-noun") and _read_only_has_last_word(prompt, decision.rule):
         decision = decision._replace(confidence=min(decision.confidence, READ_ONLY_CONFIDENCE),
                                      reason=f"{decision.reason}; prompt declares read-only")
     decision = _apply_judge(decision, prompt, scout_typed, worker_name)
@@ -1753,7 +1813,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
 
     mutation = find_mutation(text)
     lite = find_lite(text)
-    heavy = find_heavy(text, lite is not None)
+    heavy, heavy_noun = find_heavy_ex(text, lite is not None)
 
     if bare_type == WORKER_TYPE:
         return done(_rule_decision("flash", None, "worker-type", "flash-worker type"))
@@ -1768,6 +1828,8 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     if workspace in ("branch", "share"):
         return done(_rule_decision("flash", None, "workspace", f"Workspace '{workspace}' implies writes"))
     if heavy:
+        if heavy_noun:
+            return done(_rule_decision("flash", None, "heavy-noun", f"heavy signal '{heavy}' used like a noun"))
         return done(_rule_decision("flash", None, "heavy", f"heavy signal '{heavy}'"))
     if bare_type == "self":
         return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))

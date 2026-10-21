@@ -107,6 +107,62 @@ class TestDecision(unittest.TestCase):
             self.assertLess(eo.RULE_CONFIDENCE[rule], eo.RULE_CONFIDENCE["lite"])
 
 
+class TestHeavyNounUse(unittest.TestCase):
+    def test_find_heavy_ex_reports_noun_like_hits(self):
+        self.assertEqual(eo.find_heavy_ex("Review the tests for the parser.", False), ("tests", True))
+        self.assertEqual(eo.find_heavy_ex("Debug why the login test fails.", False), ("Debug", False))
+        self.assertEqual(eo.find_heavy("Debug why the login test fails.", False), "Debug")
+
+    def test_paths_labels_and_questions_are_not_heavy(self):
+        for prompt in (
+            "How many files are in tests/unit/?",
+            "build.gradle 裡 compileSdk 是多少？",
+            "settings.py 的 DEBUG 預設值是什麼？",
+            "Which tests import fixtures/db.py?",
+            "What does the Android release build use?",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(eo.find_heavy(prompt, False))
+
+    def test_question_with_execution_signal_stays_heavy(self):
+        for prompt in ("Which tests fail when you run the suite?", "Which tests fail? Run pytest.", "哪些測試會失敗？請跑測試確認"):
+            with self.subTest(prompt=prompt):
+                self.assertIsNotNone(eo.find_heavy(prompt, False))
+
+    def test_noun_like_heavy_gets_lower_confidence(self):
+        d = eo.decide_subagent(sub("Review the tests for the parser and list gaps."))
+        self.assertEqual((d.tier, d.rule, d.confidence), ("flash", "heavy-noun", 0.75))
+        self.assertLess(d.confidence, 0.9)
+
+    def test_mutation_noun_uses(self):
+        for prompt in ("Which later migration touches orders?", "PR #812 的 fix 改了哪些檔案？", "那個 patch 是誰寫的？",
+                       "請讀 docs/x.md，說明修改 schema 前的步驟"):
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(eo.find_mutation(prompt))
+        self.assertIsNotNone(eo.find_mutation("把這個 refactor 做完。"))
+
+
+class TestLintReproAndIndirectRequests(unittest.TestCase):
+    def test_requests_that_need_a_worker(self):
+        for prompt in (
+            "Run eslint on src/ and report the errors.", "跑一下 lint", "Typecheck packages/web.", "lint src/",
+            "Reproduce it by running the pipeline twice.", "重現 bug，跑一次 decoder",
+            "It would be nice if the endpoint returned 413.", "I wish the importer skipped blanks.",
+            "如果 API 能回 401 就好了", "可以幫忙處理一下嗎？", "能不能讓 /health 多回傳版本號？",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertIsNotNone(eo.find_mutation(prompt))
+
+    def test_lookups_stay_read_only(self):
+        for prompt in (
+            "What does the lint job in ci.yml run?", "Where does the lint config live?",
+            "Would it be better to cache at the edge?", "這個函式可以怎麼改比較好？",
+            "Which steps reproduce the crash according to ISSUE-142.md?",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(eo.find_mutation(prompt))
+
+
 class HookBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

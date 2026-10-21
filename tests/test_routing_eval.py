@@ -104,8 +104,14 @@ class TestRoutingHoldout(unittest.TestCase):
 
 class TestRoutingHoldoutV2(unittest.TestCase):
     """40 more prompts, written by a subagent that never saw scripts/ or the
-    earlier sets. v1.6.0 scored 25/40 with 4 worker tasks sent to the scout.
-    Only the format is enforced here, so the set can be scored without tuning to it."""
+    earlier sets. v1.6.0 baseline: 25/40 with 4 worker tasks sent to the scout.
+    It is now training data, used for tuning in v1.7.0, so it is no longer blind."""
+
+    def test_no_worker_task_reaches_a_scout(self):
+        cases = load(HOLDOUT_V2)
+        matrix, misses = evaluate(cases)
+        failing = [m for m in misses if m[1] == "flash"]
+        self.assertEqual(failing, [], report("routing_holdout_v2", cases, matrix, misses))
 
     def test_dataset_is_well_formed(self):
         cases = load(HOLDOUT_V2)
