@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests, routing eval and packaging checks
+        run: python -m unittest discover -s tests -v
+      - name: Routing confusion matrix
+        if: matrix.python == '3.12'
+        run: |
+          {
+            echo '### Routing eval (rule layer, judge off)'
+            echo '```'
+            python tests/test_routing_eval.py 2>/dev/null | sed '/^\.*$/,$d'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ruff==0.17.1 vermin==1.9.2
+      - name: ruff (correctness rules from pyproject.toml)
+        run: ruff check --output-format github scripts tests
+      - name: Hook scripts stay Python 3.8 compatible
+        run: >-
+          vermin --no-tips --violations -t=3.8-
+          scripts/enforce-orchestrator.py scripts/mitosis-mcp-server.py scripts/mitosis_judge.py
+          scripts/mitosis-cost-report.py scripts/smoke-claude.py
+
+  hooks-py38:
+    # Hooks run under whatever python3 the user has; 3.8 is the documented floor.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - name: Hook answers a Claude Code Bash call without a verdict
+        run: |
+          out=$(echo '{"hook_event_name":"PreToolUse","session_id":"ci","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+                | python scripts/enforce-orchestrator.py pre-tool-use)
+          echo "$out"
+          test "$out" = "{}"
+      - name: Hook pins an untyped Agent call
+        run: |
+          out=$(echo '{"hook_event_name":"PreToolUse","session_id":"ci","tool_name":"Agent","tool_input":{"prompt":"Locate parse_token in src/","description":"lookup"}}' \
+                | python scripts/enforce-orchestrator.py pre-tool-use)
+          echo "$out"
+          echo "$out" | python -c 'import json,sys; d=json.load(sys.stdin)["hookSpecificOutput"]["updatedInput"]; assert d["model"] == "haiku", d'
+      - name: MCP server answers tools/list
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | python scripts/mitosis-mcp-server.py \
+            | python -c 'import json,sys; assert "tools" in json.loads(sys.stdin.readline())["result"]'

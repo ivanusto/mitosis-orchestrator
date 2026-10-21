@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.6.0 — 2026-10-22
+
+### Added
+- Codex plugin hooks: `.codex-plugin/plugin.json` points Codex 0.128+ at `hooks/codex-hooks.json` (SessionStart, UserPromptSubmit, PreToolUse on `spawn_agent|Bash|Edit|Write|mcp__mitosis__.*`, PostToolUse, SubagentStop, Stop), and `.agents/plugins/marketplace.json` lets `codex plugin marketplace add <repo>` + `codex plugin add mitosis-orchestrator@mitosis-orchestrator` install it. The manifest's `hooks` entry replaces Codex's default `hooks/hooks.json`, so Codex no longer picks up the Claude Code hook file. Codex requires hook trust: untrusted plugin hooks are skipped silently; review them in `/hooks` once, or pass `--dangerously-bypass-hook-trust` to `codex exec -m gpt-5.6-luna` for throwaway runs.
+- Codex `spawn_agent` calls are pinned like Claude `Agent` calls: allow + `updatedInput.model` (`gpt-5.6-luna` scouts, `gpt-5.6-terra` workers), `agent_type` rewritten to `flash-lite-scout` / `flash-worker` when present, and the four-header REPORT FORMAT appended to the message.
+- CI (`.github/workflows/ci.yml`): unit tests on Python 3.11, 3.12 and 3.13 with the routing confusion matrix in the job summary; ruff (correctness rules) and vermin (hook scripts stay Python 3.8 compatible); a Python 3.8 job that pipes sample hook payloads through the scripts.
+- `pyproject.toml` (tooling config only, no runtime dependencies) and `tests/test_packaging.py`: every manifest, `SERVER_VERSION`, `SKILL.md`, `rules/AGENTS.md`, `pyproject.toml` and the top CHANGELOG entry must carry the same version, agent paths keep the `./` prefix Claude Code needs, and every hook command points at an existing script and a known mode.
+- `evals/`: four `claude plugin eval` cases (scout lookup, worker fix, orchestrate skill, edit request aimed at the scout). First run on opus: 3 of 4 passed for 0.62 USD; the failing grader expected a Skill tool call that a typed `/orchestrate` never makes, fixed in the case prompt, after which that case passed all three graders (0.20 USD). Needs `bubblewrap` and `socat` on Linux because the cases grant Bash.
+
+### Fixed
+- Codex plugin hook payloads carry `hook_event_name: "PreToolUse"` like Claude Code, so the script treated them as Claude Code and answered in the wrong shape. A `turn_id` (or `--platform=codex`) now marks them as Codex, and they are answered with Claude-style `hookSpecificOutput`: deny for blocks and for `ask` (Codex fails a hook that answers ask), allow only with `updatedInput`, `{}` otherwise.
+- Codex SessionStart judged the primary from `~/.codex/config.toml` even when the hook payload names the live `model`; it now uses the payload. A subagent's own UserPromptSubmit (Codex sends `agent_id`) no longer resets the primary's per-turn edit budget or warns about the subagent's model.
+- MCP server: an explicit `model` on a task bypassed routing entirely, so any model (including a frontier one) ran unpinned. The router now always decides; an explicit model may only raise a task to the worker model, otherwise it is ignored and the reason says so.
+- ruff: unused imports and variables in the hook, MCP server and cost report.
+
+### Notes
+- End-to-end on Codex 0.163 (throwaway `CODEX_HOME`, plugin installed through `.agents/plugins/marketplace.json`, `--dangerously-bypass-hook-trust`): every hook fired without errors; with a gpt-5.6-luna primary, the `spawn_agent` rewrite to gpt-5.6-terra took effect (the subagent's SubagentStop payload and rollout both report terra, effort low), so Codex honours `updatedInput.model`; the subagent answered in the four-header format. That run also showed a lookup routed to the worker because the primary's own `REPORT FORMAT ... TESTS:` block tripped the heavy rule: routing now ignores a trailing REPORT FORMAT block (`strip_report_format`).
+- 246 tests (was 229).
+
 ## 1.5.1 — 2026-10-22
 
 ### Security

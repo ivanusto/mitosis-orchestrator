@@ -11,11 +11,9 @@ in parallel via ThreadPoolExecutor, and validates the 4-header report.
 """
 
 import concurrent.futures
-import copy
 import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -40,7 +38,7 @@ WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
 
 SERVER_NAME = "mitosis-mcp-server"
-SERVER_VERSION = "1.5.1"
+SERVER_VERSION = "1.6.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_DEFINITIONS = [
@@ -193,14 +191,21 @@ def execute_subagent_task(
     workspace = str(task.get("workspace") or task.get("isolation") or "inherit").strip().lower()
     explicit_model = str(task.get("model") or "").strip()
 
-    decision = None
-    if explicit_model:
-        model = explicit_model
-        role_type = WORKER_TYPE if model == DEFAULT_CODEX_WORKER_MODEL else SCOUT_TYPE
-        reason = "explicit model"
-    else:
-        model, role_type, decision = decide_task(task)
-        reason = decision.reason
+    # The router always decides. An explicit model may only move a task up to
+    # the worker tier: a scout model cannot take a task that needs writes, and
+    # any other model (a frontier one, a typo) would escape the pinning.
+    model, role_type, decision = decide_task(task)
+    reason = decision.reason
+    explicit = False
+    if explicit_model and explicit_model != model:
+        if explicit_model == DEFAULT_CODEX_WORKER_MODEL:
+            model, role_type, explicit = explicit_model, WORKER_TYPE, True
+            reason = f"explicit model '{explicit_model}' honoured"
+        else:
+            reason = f"{reason}; explicit model '{explicit_model}' ignored"
+    elif explicit_model:
+        explicit = True
+        reason = f"explicit model '{explicit_model}' matches the decision"
 
     role = str(task.get("role") or role_type)
     cwd = task.get("cwd")
@@ -216,8 +221,8 @@ def execute_subagent_task(
         "model": model,
         "type": role_type,
         "reason": reason,
-        "confidence": decision.confidence if decision else 1.0,
-        "decision_source": decision.source if decision else "explicit",
+        "confidence": 1.0 if explicit else decision.confidence,
+        "decision_source": "explicit" if explicit else decision.source,
         "workspace": workspace,
         "returncode": rc,
         "output": output,

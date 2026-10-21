@@ -1,5 +1,7 @@
 # Mitosis Orchestrator (`mitosis-orchestrator`)
 
+[![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="./assets/logo.svg" width="108" height="108" alt="Mitosis Orchestrator Logo" />
 </p>
@@ -166,7 +168,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.5.1)
+agy plugin list            # mitosis-orchestrator (enabled, 1.6.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -217,6 +219,17 @@ codex exec --profile mitosis-scout "Locate where parse_token is defined"
 6. **完整性驗證**：校驗所有 TOML 並確認檔案存在。
 
 MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代理使用 `--sandbox workspace-write`；只有設定 `MITOSIS_CODEX_YOLO=1` 才會改用 `--dangerously-bypass-approvals-and-sandbox`。
+
+### 外掛 hook（Codex 0.128 以上）
+
+Codex 也可以把 hook 當成外掛載入：
+
+```bash
+codex plugin marketplace add <path-to-repo>
+codex plugin add mitosis-orchestrator@mitosis-orchestrator
+```
+
+請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
 
 ---
 
@@ -293,12 +306,20 @@ NOTES: <精簡摘要（可含最多 10 行 `- ` 清單）；若 BLOCKED/FAILED �
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 229 個測試（hook、判斷器、成本報表、路由評測）
+python3 -m unittest discover -s tests -v     # 246 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
 ```
+
+### 評測
+
+```bash
+claude plugin eval . --trust-plugin --scaffold --runs 1 --ablation none --max-cost-usd 3 --allow-tools Bash Write Edit
+```
+
+此評測會消耗實際 token（opus 每次約 0.6 美元），在 Linux 上需要 `bubblewrap` 與 `socat`。
 
 詳細版本更新紀錄請參閱 [CHANGELOG.md](./CHANGELOG.md)。
 

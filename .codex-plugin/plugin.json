@@ -1,0 +1,11 @@
+{
+  "name": "mitosis-orchestrator",
+  "version": "1.6.0",
+  "description": "Frontier primary agent with subagents pinned to gpt-5.6-luna scouts and gpt-5.6-terra workers, enforced by lifecycle hooks.",
+  "author": {
+    "name": "ivanusto"
+  },
+  "repository": "https://github.com/ivanusto/mitosis-orchestrator",
+  "license": "MIT",
+  "hooks": "./hooks/codex-hooks.json"
+}

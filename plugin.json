@@ -1,7 +1,7 @@
 {
   "name": "mitosis-orchestrator",
   "displayName": "Mitosis Orchestrator",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Cross-model frontier orchestrator with unified 3-platform support (Google Antigravity agy, Anthropic Claude Code, OpenAI Codex CLI): pins frontier reasoning models (Gemini 4 Argon, Claude Opus/Sonnet, GPT-6.1-sol/GPT-5.6-sol/o3, Grok, DeepSeek, Qwen) as primary architects while dividing subagent workloads into execution workers (flash / sonnet / gpt-5.6-terra) and reconnaissance scouts (flash_lite / haiku / gpt-5.6-luna).",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [

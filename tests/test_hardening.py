@@ -148,6 +148,12 @@ class TestRoutingVocabulary(unittest.TestCase):
         d = self.tier("Read-only review: summarize fixes listed in CHANGELOG.md.")
         self.assertEqual(d.confidence, eo.READ_ONLY_CONFIDENCE)
 
+    def test_callers_report_format_block_is_not_the_task(self):
+        # Seen live on Codex: the primary's own "REPORT FORMAT ... TESTS:" made a lookup heavy.
+        prompt = "Find where main is defined in this directory and report the file name.\n\nREPORT FORMAT\nSTATUS:\nSUMMARY:\nFILES:\nTESTS:"
+        self.assertEqual(self.tier(prompt).tier, "flash_lite")
+        self.assertEqual(self.tier("Run the tests. Report format: STATUS only.").tier, "flash")
+
     def test_send_message_to_scout_uses_new_vocabulary(self):
         self.assertEqual(eo.find_mutation("請順便修改 parser.py"), "修改")
         self.assertIsNone(eo.find_mutation("Also check the patch notes"))
@@ -253,6 +259,21 @@ class TestMcpServerRobustness(unittest.TestCase):
         self.assertEqual(replies[1]["error"]["code"], -32600)
         self.assertEqual(replies[2]["id"], 7)
         self.assertIn("tools", replies[2]["result"])
+
+    def test_explicit_model_cannot_escape_pinning(self):
+        seen = []
+
+        def runner(prompt, model, workspace="inherit", cwd=None):
+            seen.append(model)
+            return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ok\nNOTES: ok", ""
+
+        res = mcp.execute_subagent_task({"prompt": "Locate parse_token", "model": "gpt-6-astra"}, runner=runner)
+        self.assertEqual((res["model"], res["decision_source"]), (mcp.DEFAULT_CODEX_SCOUT_MODEL, "rule"))
+        self.assertIn("ignored", res["reason"])
+        res = mcp.execute_subagent_task({"prompt": "Edit parser.py to fix the crash", "model": mcp.DEFAULT_CODEX_SCOUT_MODEL},
+                                        runner=runner)
+        self.assertEqual((res["model"], res["type"]), (mcp.DEFAULT_CODEX_WORKER_MODEL, mcp.WORKER_TYPE))
+        self.assertEqual(seen, [mcp.DEFAULT_CODEX_SCOUT_MODEL, mcp.DEFAULT_CODEX_WORKER_MODEL])
 
     def test_dash_prompt_stays_positional(self):
         cmd = mcp.build_codex_cmd("--help me", "gpt-5.6-terra")

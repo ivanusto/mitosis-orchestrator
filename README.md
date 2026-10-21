@@ -1,5 +1,7 @@
 # Mitosis Orchestrator (`mitosis-orchestrator`)
 
+[![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="./assets/logo.svg" width="108" height="108" alt="Mitosis Orchestrator Logo" />
 </p>
@@ -159,7 +161,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.5.1)
+agy plugin list            # mitosis-orchestrator (enabled, 1.6.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -210,6 +212,17 @@ The installer is idempotent and performs, in order:
 6. **Validates** every TOML file and verifies all mounted files exist.
 
 The MCP server runs scouts with `--sandbox read-only` and workers with `--sandbox workspace-write`. Set `MITOSIS_CODEX_YOLO=1` only if you deliberately want `--dangerously-bypass-approvals-and-sandbox`.
+
+### Plugin hooks (Codex 0.128+)
+
+Codex can also load the hooks as a plugin:
+
+```bash
+codex plugin marketplace add <path-to-repo>
+codex plugin add mitosis-orchestrator@mitosis-orchestrator
+```
+
+Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently. `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
 
 ---
 
@@ -287,12 +300,20 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 229 tests (hooks, judge, cost report, routing eval)
+python3 -m unittest discover -s tests -v     # 246 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session
 ```
+
+### Evals
+
+```bash
+claude plugin eval . --trust-plugin --scaffold --runs 1 --ablation none --max-cost-usd 3 --allow-tools Bash Write Edit
+```
+
+This costs real tokens (about 0.6 USD per run on opus) and needs `bubblewrap` and `socat` on Linux.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 

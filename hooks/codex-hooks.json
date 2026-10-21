@@ -1,0 +1,67 @@
+{
+  "description": "Lifecycle hooks for OpenAI Codex CLI (0.128+ plugin hooks) enforcing Mitosis Orchestrator multi-tier delegation policy.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" session-start --platform=codex"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-invocation --platform=codex"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "spawn_agent|Bash|Edit|Write|mcp__mitosis__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-tool-use --platform=codex"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "spawn_agent|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use --platform=codex"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" subagent-stop --platform=codex"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" stop --platform=codex"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -125,6 +125,10 @@ def is_codex_payload(payload: Dict[str, Any]) -> bool:
         return False
     if payload.get("client") == "codex" or payload.get("platform") == "codex":
         return True
+    # Codex >= 0.128 plugin hooks speak Claude Code's protocol (same event names
+    # and keys) but add turn_id, which Claude Code never sends.
+    if payload.get("turn_id") is not None:
+        return True
     # Claude Code Stop / SubagentStop payloads also carry `last_assistant_message`;
     # a Claude hook event name settles it before the key-based heuristics below.
     if str(payload.get("hook_event_name") or "") in CLAUDE_HOOK_EVENTS:
@@ -147,6 +151,11 @@ def is_codex_payload(payload: Dict[str, Any]) -> bool:
     ):
         return True
     return False
+
+
+def is_codex_hook_payload(payload: Dict[str, Any]) -> bool:
+    """Codex plugin hook (hooks/codex-hooks.json): Claude Code's protocol, Codex's tools."""
+    return is_codex_payload(payload) and str(payload.get("hook_event_name") or "") in CLAUDE_HOOK_EVENTS
 
 
 def is_claude_code_payload(payload: Dict[str, Any]) -> bool:
@@ -461,6 +470,16 @@ REPORT_FORMAT_WORKER = (
 )
 
 
+# The caller's own report instructions ("REPORT FORMAT: STATUS/FILES/TESTS")
+# describe the answer, not the task, so routing ignores them.
+REPORT_FORMAT_TAIL_RE = re.compile(r"(?:^|\n|[.!?]\s+)[ \t]*(?:#+\s*|\*\*)?REPORT FORMAT\b.*\Z", re.IGNORECASE | re.DOTALL)
+
+
+def strip_report_format(prompt: str) -> str:
+    """Drop a trailing REPORT FORMAT block, if any, before classification."""
+    return REPORT_FORMAT_TAIL_RE.sub("", prompt or "").strip()
+
+
 def prompt_has_report_format(prompt: str) -> bool:
     """True only when the prompt carries all four canonical headers; an ad-hoc
     'REPORT FORMAT:' with other headers does not count (SubagentStop would reject it)."""
@@ -601,6 +620,15 @@ def _allow(
         if updated_input is not None:
             out["updatedInput"] = updated_input
         return {"hookSpecificOutput": out}
+    if payload and is_codex_hook_payload(payload):
+        # Codex applies updatedInput only alongside "allow". A bare allow would
+        # skip Codex's own approval, so pass-through stays silent.
+        if updated_input is None and not overrides:
+            return {}
+        out = {"hookEventName": "PreToolUse", "permissionDecision": "allow", "permissionDecisionReason": reason}
+        if updated_input is not None:
+            out["updatedInput"] = updated_input
+        return {"hookSpecificOutput": out}
     if payload and is_codex_payload(payload):
         res: Dict[str, Any] = {
             "decision": "allow",
@@ -635,7 +663,7 @@ def _no_opinion(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 
 def _deny(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if payload and is_claude_code_payload(payload):
+    if payload and (is_claude_code_payload(payload) or is_codex_hook_payload(payload)):
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -664,6 +692,8 @@ def _ask(reason: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any
         }
     if payload and is_codex_payload(payload):
         # Codex hooks honour allow/deny only; "ask" is treated as a failed hook.
+        if is_codex_hook_payload(payload):
+            return _deny(reason, payload)
         return {
             "decision": "deny",
             "reason": reason,
@@ -1245,8 +1275,18 @@ CODEX_POLICY_NOTICE = (
 
 def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     p = payload or {}
-    status, model = check_primary_model_settings(p)
     target_file = "config.toml" if (is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ) else "settings.json"
+    if is_codex_hook_payload(p) and p.get("model"):
+        # Codex plugin hooks report the live model; config.toml may name another.
+        model, target_file = str(p["model"]), "the session"
+        if is_frontier_tier(model):
+            status = "ok"
+        elif _env_flag("CODEX_MITOSIS_ALLOW_NON_PRIMARY", "AGY_MITOSIS_ALLOW_NON_PRIMARY"):
+            status = "silenced"
+        else:
+            status = "warn"
+    else:
+        status, model = check_primary_model_settings(p)
     if status == "ok":
         note = f"Primary model is '{model}'."
     elif status == "pinned":
@@ -1262,6 +1302,13 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
     else:
         note = f"{target_file} not found; the live model is checked on every turn instead."
 
+    if is_codex_hook_payload(p):
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+            },
+        }
     if is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ:
         return {
             "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
@@ -1290,6 +1337,10 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # A subagent's own prompt (Codex sends UserPromptSubmit with agent_id) is
+    # neither a new primary turn nor a primary model to check.
+    if payload.get("agent_id"):
+        return {}
     state = load_state(payload)
     state["turn_edited_files"] = []
     state["consecutive_failures"] = 0
@@ -1328,6 +1379,8 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "not a frontier model. Tell the user to switch Model Selection to "
         "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
     )
+    if is_codex_hook_payload(payload):
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": warn_text}}
     if is_codex_payload(payload):
         return {
             "additionalContext": warn_text,
@@ -1512,7 +1565,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         bare_type = bare_type.strip().lower()
 
     role = str(_get(subagent, "Role", "role", default="")).strip()
-    prompt = str(_get(subagent, "Prompt", "prompt", default="")).strip()
+    prompt = strip_report_format(str(_get(subagent, "Prompt", "prompt", default="")).strip())
     workspace = str(_get(subagent, "Workspace", "workspace", default="inherit")).strip().lower()
     requested = str(_get(subagent, "Model", "model", default="")).strip().lower()
     text = f"{role}\n{prompt}"
@@ -1857,7 +1910,7 @@ def workflow_model_violations(script: str) -> List[str]:
         if not m:
             violations.append(f"agent() call #{n} has no model= argument")
             continue
-        literal, ident = m.group(1), m.group(2)
+        literal = m.group(1)
         if literal is not None and literal.strip().lower() not in ALLOWED_SUBAGENT_MODELS:
             violations.append(f"agent() call #{n} uses model={literal!r}")
         # A bare identifier (variable) is accepted; it cannot be checked statically.
@@ -2171,7 +2224,7 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
     prompt = str(args.get("prompt") or args.get("instructions") or args.get("message") or "").strip()
     if not prompt:
         return _deny(f"{tool_name} prompt cannot be empty.", payload)
-    role = str(args.get("role") or args.get("type") or args.get("name") or "").strip()
+    role = str(args.get("role") or args.get("agent_type") or args.get("type") or args.get("name") or "").strip()
     workspace = str(args.get("workspace") or args.get("isolation") or "inherit").strip().lower()
     if workspace == "worktree":
         workspace = "branch"
@@ -2187,8 +2240,13 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
 
     updated_args = copy.deepcopy(args)
     updated_args["model"] = target_model
-    if "type" in updated_args:
-        updated_args["type"] = target_type
+    for key in ("type", "agent_type"):
+        # Codex role names installed by setup-codex.py: flash-lite-scout / flash-worker.
+        if key in updated_args:
+            updated_args[key] = target_type
+    if _append_report_format_enabled() and not prompt_has_report_format(prompt):
+        prompt_key = next(k for k in ("prompt", "instructions", "message") if str(args.get(k) or "").strip())
+        updated_args[prompt_key] = append_report_format(prompt, tier)
 
     spawns = [{
         "role": role or target_type,
@@ -2264,7 +2322,6 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             for t in updated_tasks:
                 if not isinstance(t, dict):
                     continue
-                p = str(t.get("prompt") or "").strip()
                 tier, _, reason = classify_subagent(t)
                 model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
                 t["model"] = model
@@ -2393,6 +2450,9 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, args = _extract_tool_call(payload)
     if not tool_name:
         return _no_opinion(payload)
+    # Codex plugin hooks name MCP tools mcp__<server>__<tool>.
+    if tool_name.startswith("mcp__mitosis__"):
+        tool_name = tool_name[len("mcp__mitosis__"):]
 
     state = load_state(payload)
 
@@ -2827,7 +2887,10 @@ EVENT_NAME_TO_MODE = {
 
 
 def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("{") else None
+    # hooks/codex-hooks.json passes --platform=codex: Codex SessionStart carries no turn_id.
+    platform = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--platform=")), "")
+    argv = [a for a in sys.argv if not a.startswith("--platform=")]
+    mode = argv[1] if len(argv) > 1 and not argv[1].startswith("{") else None
     try:
         raw = sys.stdin.read()
         if not raw.strip() and len(sys.argv) > 1 and sys.argv[-1].startswith("{"):
@@ -2837,6 +2900,8 @@ def main() -> None:
             payload = {}
     except Exception:
         payload = {}
+    if platform:
+        payload["platform"] = platform
 
     if not mode:
         ev = payload.get("hook_event_name") or payload.get("event") or payload.get("type")
