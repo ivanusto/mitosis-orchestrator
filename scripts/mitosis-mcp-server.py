@@ -46,6 +46,8 @@ validate_subagent_report = _eo.validate_subagent_report
 DEFAULT_CODEX_PRIMARY_MODEL = _eo.DEFAULT_CODEX_PRIMARY_MODEL
 DEFAULT_CODEX_WORKER_MODEL = _eo.DEFAULT_CODEX_WORKER_MODEL
 DEFAULT_CODEX_SCOUT_MODEL = _eo.DEFAULT_CODEX_SCOUT_MODEL
+codex_tier_model = _eo.codex_tier_model
+codex_tier_effort = _eo.codex_tier_effort
 MUTATION_RE = _eo.MUTATION_RE
 WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
@@ -57,7 +59,7 @@ PROTOCOL_VERSION = "2024-11-05"
 TOOLS_DEFINITIONS = [
     {
         "name": "mitosis_invoke_subagent",
-        "description": "Fan-out one or more subagent tasks in parallel via OpenAI Codex CLI, classifying each into scout (gpt-5.6-luna, read-only sandbox) or worker (gpt-5.6-terra, workspace-write sandbox) and validating bounded 4-header reports.",
+        "description": f"Fan-out one or more subagent tasks in parallel via OpenAI Codex CLI, classifying each into scout ({codex_tier_model('flash_lite')}, read-only sandbox) or worker ({codex_tier_model('flash')}, workspace-write sandbox) and validating bounded 4-header reports.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -81,7 +83,7 @@ TOOLS_DEFINITIONS = [
     },
     {
         "name": "mitosis_scout",
-        "description": "Execute a read-only single-hop reconnaissance subagent using gpt-5.6-luna. If mutation verbs are detected, automatically upgraded to worker.",
+        "description": f"Execute a read-only single-hop reconnaissance subagent using {codex_tier_model('flash_lite')}. If mutation verbs are detected, automatically upgraded to worker.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -93,7 +95,7 @@ TOOLS_DEFINITIONS = [
     },
     {
         "name": "mitosis_worker",
-        "description": "Execute a scoped execution subagent for multi-file research, test execution, or code edits using gpt-5.6-terra (workspace-write sandbox).",
+        "description": f"Execute a scoped execution subagent for multi-file research, test execution, or code edits using {codex_tier_model('flash')} (workspace-write sandbox).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -170,10 +172,10 @@ def decide_task(task: Dict[str, Any]) -> Tuple[str, str, Any]:
     """Route a task dictionary to (model, role_type, Decision)."""
     decision = decide_subagent(task)
     if decision.tier == "flash_lite":
-        model = DEFAULT_CODEX_SCOUT_MODEL
+        model = codex_tier_model("flash_lite")
         role_type = decision.type_override or SCOUT_TYPE
     else:
-        model = DEFAULT_CODEX_WORKER_MODEL
+        model = codex_tier_model("flash")
         role_type = decision.type_override or WORKER_TYPE
     return model, role_type, decision
 
@@ -211,7 +213,7 @@ def execute_subagent_task(
     reason = decision.reason
     explicit = False
     if explicit_model and explicit_model != model:
-        if explicit_model == DEFAULT_CODEX_WORKER_MODEL:
+        if explicit_model == codex_tier_model("flash"):
             model, role_type, explicit = explicit_model, WORKER_TYPE, True
             reason = f"explicit model '{explicit_model}' honoured"
         else:

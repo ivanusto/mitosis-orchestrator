@@ -112,6 +112,8 @@ DEFAULT_PRIMARY_MODEL = _GEN.DEFAULT_PRIMARY_MODEL
 DEFAULT_CODEX_PRIMARY_MODEL = _GEN.DEFAULT_CODEX_PRIMARY_MODEL
 DEFAULT_CODEX_WORKER_MODEL = _GEN.DEFAULT_CODEX_WORKER_MODEL
 DEFAULT_CODEX_SCOUT_MODEL = _GEN.DEFAULT_CODEX_SCOUT_MODEL
+DEFAULT_CODEX_SCOUT_EFFORT = _GEN.DEFAULT_CODEX_SCOUT_EFFORT
+DEFAULT_CODEX_WORKER_EFFORT = _GEN.DEFAULT_CODEX_WORKER_EFFORT
 DEFAULT_CLAUDE_PRIMARY_MODEL = _GEN.DEFAULT_CLAUDE_PRIMARY_MODEL
 DEFAULT_CLAUDE_WORKER_MODEL = _GEN.DEFAULT_CLAUDE_WORKER_MODEL
 DEFAULT_CLAUDE_SCOUT_MODEL = _GEN.DEFAULT_CLAUDE_SCOUT_MODEL
@@ -726,8 +728,8 @@ def _delegation_hint(payload: Optional[Dict[str, Any]], tier: str) -> str:
         )
     if payload and is_codex_payload(payload):
         if tier == "flash_lite":
-            return f"`spawn_agent` with `agent_type: \"explorer\"` ({DEFAULT_CODEX_SCOUT_MODEL})"
-        return f"`spawn_agent` with `agent_type: \"worker\"` ({DEFAULT_CODEX_WORKER_MODEL})"
+            return f"`spawn_agent` with `agent_type: \"explorer\"` ({codex_tier_model('flash_lite')})"
+        return f"`spawn_agent` with `agent_type: \"worker\"` ({codex_tier_model('flash')})"
     if tier == "flash_lite":
         return f"`{SCOUT_TYPE}` (TypeName='{SCOUT_TYPE}', Model='flash_lite')"
     return f"`{WORKER_TYPE}` (TypeName='{WORKER_TYPE}', Model='flash')"
@@ -898,6 +900,42 @@ def claude_tier_effort(tier: str) -> Optional[str]:
         default, env_name = DEFAULT_CLAUDE_WORKER_EFFORT, "CLAUDE_MITOSIS_WORKER_EFFORT"
     override = _get_env(env_name).lower()
     return override if override in CLAUDE_EFFORT_LEVELS else default
+
+
+CODEX_EFFORT_LEVELS = CLAUDE_EFFORT_LEVELS | {"minimal"}
+CODEX_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+
+
+def valid_codex_model(value: Optional[str]) -> bool:
+    """True when value is safe to embed in a shell command and a TOML string."""
+    return bool(value) and CODEX_MODEL_RE.match(value or "") is not None
+
+
+# These CODEX_MITOSIS_* names are read straight from os.environ on purpose and have no
+# AGY_ form: _get_env expands AGY_MITOSIS_X into CLAUDE_MITOSIS_X as well, so an
+# AGY_MITOSIS_SCOUT_MODEL would become CLAUDE_MITOSIS_SCOUT_MODEL=haiku and leak into Codex.
+def codex_tier_model(tier: str) -> str:
+    """Codex model for a subagent tier, honouring CODEX_MITOSIS_{SCOUT,WORKER}_MODEL.
+
+    Values that do not match CODEX_MODEL_RE are ignored, because the model is later
+    spliced into a shell command by the codex exec -m gpt-5.6-luna pinning path.
+    """
+    if tier == "flash_lite":
+        default, env_name = DEFAULT_CODEX_SCOUT_MODEL, "CODEX_MITOSIS_SCOUT_MODEL"
+    else:
+        default, env_name = DEFAULT_CODEX_WORKER_MODEL, "CODEX_MITOSIS_WORKER_MODEL"
+    override = os.environ.get(env_name, "").strip()
+    return override if valid_codex_model(override) else default
+
+
+def codex_tier_effort(tier: str) -> str:
+    """Codex reasoning effort for a subagent tier, honouring CODEX_MITOSIS_{SCOUT,WORKER}_EFFORT."""
+    if tier == "flash_lite":
+        default, env_name = DEFAULT_CODEX_SCOUT_EFFORT, "CODEX_MITOSIS_SCOUT_EFFORT"
+    else:
+        default, env_name = DEFAULT_CODEX_WORKER_EFFORT, "CODEX_MITOSIS_WORKER_EFFORT"
+    override = os.environ.get(env_name, "").strip().lower()
+    return override if override in CODEX_EFFORT_LEVELS else default
 
 
 def codex_config_path(payload: Optional[Dict[str, Any]] = None) -> str:
@@ -1272,14 +1310,19 @@ def claude_policy_notice() -> str:
 # Backwards-compatible constant (default configuration).
 CLAUDE_POLICY_NOTICE = claude_policy_notice()
 
-CODEX_POLICY_NOTICE = (
-    "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
-    f"location, git/log checks, single-file inspection) to `{DEFAULT_CODEX_SCOUT_MODEL}` "
-    "(`agent_type: \"explorer\"`) and multi-file research, test runs, web/docs "
-    f"research and scoped code edits to `{DEFAULT_CODEX_WORKER_MODEL}` (`agent_type: \"worker\"`). "
-    "Never use `model: \"inherit\"` on subagents. "
-    "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
-)
+def codex_policy_notice() -> str:
+    return (
+        "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
+        f"location, git/log checks, single-file inspection) to `{codex_tier_model('flash_lite')}` "
+        "(`agent_type: \"explorer\"`) and multi-file research, test runs, web/docs "
+        f"research and scoped code edits to `{codex_tier_model('flash')}` (`agent_type: \"worker\"`). "
+        "Never use `model: \"inherit\"` on subagents. "
+        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+    )
+
+
+# Backwards-compatible constant (default configuration).
+CODEX_POLICY_NOTICE = codex_policy_notice()
 
 
 def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1315,16 +1358,16 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {codex_policy_notice()}",
             },
         }
     if is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ:
         return {
-            "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
-            "systemMessage": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+            "additionalContext": f"[Mitosis Orchestrator Active] {note} {codex_policy_notice()}",
+            "systemMessage": f"[Mitosis Orchestrator Active] {note} {codex_policy_notice()}",
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": f"[Mitosis Orchestrator Active] {note} {CODEX_POLICY_NOTICE}",
+                "additionalContext": f"[Mitosis Orchestrator Active] {note} {codex_policy_notice()}",
             },
         }
     if is_claude_code_payload(p):
@@ -2197,7 +2240,7 @@ def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Di
 
     item = {"Prompt": prompt, "Role": "codex-subagent"}
     tier, type_override, reason = classify_subagent(item)
-    target_model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+    target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
 
     if re.search(r"(?:-m|--model)\s+(\S+)", cmd):
@@ -2244,7 +2287,7 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
         "TypeName": role,
     }
     tier, type_override, reason = classify_subagent(item)
-    target_model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+    target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
 
     updated_args = copy.deepcopy(args)
@@ -2286,11 +2329,11 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             return _deny("mitosis_scout prompt cannot be empty.", payload)
         mutation = find_mutation(prompt)
         if mutation:
-            target_model = DEFAULT_CODEX_WORKER_MODEL
+            target_model = codex_tier_model("flash")
             target_type = WORKER_TYPE
             reason = f"mutation verb '{mutation}' upgraded scout to worker"
         else:
-            target_model = DEFAULT_CODEX_SCOUT_MODEL
+            target_model = codex_tier_model("flash_lite")
             target_type = SCOUT_TYPE
             reason = "read-only scout"
         updated_args = copy.deepcopy(args)
@@ -2309,7 +2352,7 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return _deny("mitosis_worker prompt cannot be empty.", payload)
-        target_model = DEFAULT_CODEX_WORKER_MODEL
+        target_model = codex_tier_model("flash")
         workspace = str(args.get("workspace") or "inherit").strip().lower()
         active_branch = workspace in ("branch", "worktree")
         updated_args = copy.deepcopy(args)
@@ -2335,7 +2378,7 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
                 if not isinstance(t, dict):
                     continue
                 tier, _, reason = classify_subagent(t)
-                model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+                model = codex_tier_model(tier)
                 t["model"] = model
                 ws = str(t.get("workspace") or "inherit").strip().lower()
                 spawns.append({
@@ -2353,7 +2396,7 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         prompt = str(args.get("prompt") or "").strip()
         if prompt:
             tier, _, reason = classify_subagent(args)
-            model = DEFAULT_CODEX_SCOUT_MODEL if tier == "flash_lite" else DEFAULT_CODEX_WORKER_MODEL
+            model = codex_tier_model(tier)
             updated_args = copy.deepcopy(args)
             updated_args["model"] = model
             state.setdefault("pending_spawns", []).append({

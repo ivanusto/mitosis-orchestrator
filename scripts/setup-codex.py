@@ -57,13 +57,80 @@ def _toml_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def update_or_append_mcp_server(content: str, script_path: str, interpreter: str = "python3") -> str:
-    """Updates [mcp_servers.mitosis] to use the absolute script path, or appends it."""
+# Same rules as codex_tier_model / codex_tier_effort in enforce-orchestrator.py.
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+EFFORT_LEVELS = {"minimal", "low", "medium", "high", "xhigh", "max"}
+OVERRIDE_NAMES = (
+    "CODEX_MITOSIS_SCOUT_MODEL",
+    "CODEX_MITOSIS_WORKER_MODEL",
+    "CODEX_MITOSIS_SCOUT_EFFORT",
+    "CODEX_MITOSIS_WORKER_EFFORT",
+)
+
+
+def codex_overrides() -> dict[str, str]:
+    """Valid CODEX_MITOSIS_{SCOUT,WORKER}_{MODEL,EFFORT} values from the environment."""
+    found: dict[str, str] = {}
+    for name in OVERRIDE_NAMES:
+        val = os.environ.get(name, "").strip()
+        if name.endswith("_MODEL"):
+            if MODEL_RE.match(val):
+                found[name] = val
+        else:
+            val = val.lower()
+            if val in EFFORT_LEVELS:
+                found[name] = val
+    return found
+
+
+def _is_scout_file(name: str) -> bool:
+    return name in ("explorer.toml", "flash-lite-scout.toml") or name.startswith("mitosis-scout")
+
+
+def render_overrides(text: str, filename: str, overrides: dict[str, str]) -> str:
+    """Replace the top-level model / model_reasoning_effort lines when overrides are set."""
+    tier = "SCOUT" if _is_scout_file(filename) else "WORKER"
+    model = overrides.get(f"CODEX_MITOSIS_{tier}_MODEL")
+    effort = overrides.get(f"CODEX_MITOSIS_{tier}_EFFORT")
+    if model:
+        text = re.sub(r'(?m)^model = ".*"$', lambda _: f'model = "{model}"', text, count=1)
+    if effort:
+        text = re.sub(r'(?m)^model_reasoning_effort = ".*"$', lambda _: f'model_reasoning_effort = "{effort}"', text, count=1)
+    return text
+
+
+def install_toml(src: Path, dest: Path, overrides: dict[str, str]) -> None:
+    """Copy src to dest, byte-identical unless an override applies to it."""
+    if not overrides:
+        shutil.copy2(src, dest)
+        return
+    original = src.read_text(encoding="utf-8")
+    rendered = render_overrides(original, src.name, overrides)
+    if rendered == original:
+        shutil.copy2(src, dest)
+    else:
+        dest.write_text(rendered, encoding="utf-8")
+
+
+def update_or_append_mcp_server(
+    content: str,
+    script_path: str,
+    interpreter: str = "python3",
+    env: dict[str, str] | None = None,
+) -> str:
+    """Updates [mcp_servers.mitosis] to use the absolute script path, or appends it.
+
+    `env` (CODEX_MITOSIS_* overrides) is written as an inline table because Codex
+    starts MCP servers with a filtered environment.
+    """
     mcp_section = (
         "[mcp_servers.mitosis]\n"
         f"command = {_toml_string(interpreter)}\n"
         f"args = [{_toml_string(script_path)}]\n"
     )
+    if env:
+        pairs = ", ".join(f"{k} = {_toml_string(v)}" for k, v in sorted(env.items()))
+        mcp_section += f"env = {{ {pairs} }}\n"
     pattern = r'\[mcp_servers\.mitosis\][\s\S]*?(?=\n\[|\Z)'
     if re.search(r'\[mcp_servers\.mitosis\]', content):
         content = re.sub(pattern, lambda _: mcp_section.rstrip(), content, count=1)
@@ -99,6 +166,7 @@ def setup_codex(
     agents_dir.mkdir(parents=True, exist_ok=True)
 
     installed_files: list[Path] = []
+    overrides = codex_overrides()
 
     # 1. Back up config.toml
     config_file = codex_home / "config.toml"
@@ -133,7 +201,7 @@ def setup_codex(
         if role.get("name") != toml_path.stem:
             raise ValueError(f"{toml_path.name}: 'name' must equal the file stem ('{toml_path.stem}')")
         dest = agents_dir / toml_path.name
-        shutil.copy2(toml_path, dest)
+        install_toml(toml_path, dest, overrides)
         print(f"[OK] Installed agent role {toml_path.name} -> {dest}")
         installed_files.append(dest)
 
@@ -146,7 +214,7 @@ def setup_codex(
         with open(profile_path, "rb") as f:
             tomllib.load(f)
         dest = codex_home / profile_path.name
-        shutil.copy2(profile_path, dest)
+        install_toml(profile_path, dest, overrides)
         print(f"[OK] Installed profile {profile_path.name} -> {dest}")
         installed_files.append(dest)
 
@@ -160,7 +228,7 @@ def setup_codex(
     except Exception as e:
         raise ValueError(f"Existing {config_file} contains invalid TOML: {e}") from e
 
-    updated_content = update_or_append_mcp_server(existing_content, str(mcp_script), interpreter)
+    updated_content = update_or_append_mcp_server(existing_content, str(mcp_script), interpreter, overrides)
     tomllib.loads(updated_content)
     tmp_config = config_file.with_name(config_file.name + ".mitosis-tmp")
     with open(tmp_config, "w", encoding="utf-8") as f:
