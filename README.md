@@ -14,13 +14,13 @@
 
 ---
 
-## Overview — Why Mitosis?
+## Overview: Why Mitosis?
 
 Inspired by biological **mitosis (cell division)**, **Mitosis Orchestrator** treats your chosen **frontier reasoning model** as the central **Master Nucleus (Primary Architect)**. Instead of spending high-cost frontier tokens and context window capacity on single-file searches, raw log reading, or repetitive edit-and-test cycles, Mitosis Orchestrator divides complex engineering work into specialized, context-bounded **daughter subagents**:
 
 - **Master Nucleus (Primary Frontier Orchestrator)**: Retains full architectural context, designs API contracts, decomposes tasks, resolves cross-cutting invariants, and synthesizes final results.
 - **Execution Daughter Cells (`flash-worker` · `worker`)**: Execute parallel multi-file analysis, documentation/web research, scoped code edits, and unit/integration test loops within an explicit file allowlist.
-- **Reconnaissance Daughter Cells (`flash-lite-scout` · `explorer`)**: Perform high-fan-out, single-hop read-only lookups—locating symbols, running `grep`/`glob` searches, slicing `.log` or `transcript.jsonl` files, and inspecting single configs at minimal latency and cost.
+- **Reconnaissance Daughter Cells (`flash-lite-scout` · `explorer`)**: Perform high-fan-out, single-hop read-only lookups: locating symbols, running `grep`/`glob` searches, slicing `.log` or `transcript.jsonl` files, and inspecting single configs at minimal latency and cost.
 
 ---
 
@@ -68,6 +68,20 @@ keyword rules ──► confidence ≥ 0.9 ────────────�
 - **The judge is off by default.** Setting `MITOSIS_JUDGE_URL` turns it on. It speaks the Jev `choice` request format, so TypeSafe Jev, a self-hosted Jev-compatible gateway and Ollaya are interchangeable. A judge may veto a scout's mutation upgrade, but never overrides explicit types, workspace modes or models. Without a URL, routing is identical to v1.4.1 apart from the wider negation.
 - **Privacy.** The judge receives the first 2000 characters of the prompt after secrets, e-mail and IP addresses and home directories are masked ([`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)). Use a local gateway if prompts must not leave the machine.
 - **When it matters.** On Claude Code the primary nearly always picks a typed agent, so the judge mostly sees untyped calls and Codex `spawn_agent` prompts. In a 66-prompt sample of real sessions, typed calls never reached it.
+
+### Routing eval
+
+Rule layer only, judge off. "Dangerous" means a worker task routed to the read-only scout.
+
+| Set | Role in 1.7.0 | v1.6.0 | v1.7.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases (120 -> 183) | training | 119/120, 0 dangerous | 183/183, 0 dangerous |
+| holdout v1 (40) | tuned in 1.5.1 and 1.7.0 | 32/40, 0 | 39/40, 0 |
+| holdout v2 (40) | blind baseline, then training | 25/40, 4 | 39/40, 0 |
+| holdout v3 (40) | blind first contact after the first tuning round, then training | 25/40, 9 | 29/40, 6 at first contact; 36/40, 0 after |
+| holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
+
+The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors are lookups sent to the worker (cost, not failure). Known limitation: read-only questions that name debug, migration or build words still go to the worker without a judge; a judge (`MITOSIS_JUDGE_URL`) now gets a say on noun-use heavy hits (confidence 0.75).
 
 ---
 
@@ -121,7 +135,11 @@ A standard-library script that reads Claude Code transcripts (`~/.claude/project
 python3 scripts/mitosis-cost-report.py                     # newest session of the current project
 python3 scripts/mitosis-cost-report.py --last 2            # the two newest sessions, side by side
 python3 scripts/mitosis-cost-report.py --session <id-A> --session <id-B> --json
+python3 scripts/mitosis-cost-report.py --format ccusage    # shape of `ccusage session --json` (ccusage 20.x)
+python3 scripts/mitosis-cost-report.py --debug-log /tmp/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log
 ```
+
+Since 1.7.0 the report also prints a savings line: every subagent row is re-priced on the primary model (the all-frontier counterfactual) and compared with what the pinned scouts and workers cost. `--format text|json|ccusage` selects the output (`--json` stays as an alias). When a hook debug log exists (`*_MITOSIS_DEBUG=1`; found automatically per session or passed with `--debug-log`), a routing section shows how many decisions went to each tier and which rules fired.
 
 Trimmed output from two real (different) tasks, one per primary:
 
@@ -161,7 +179,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.6.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.7.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -206,12 +224,14 @@ The installer is idempotent and performs, in order:
 
 1. **Backs up** `$CODEX_HOME/config.toml` to `config.toml.bak` (`$CODEX_HOME` defaults to `~/.codex`).
 2. **Copies** `rules/AGENTS.md` to `$CODEX_HOME/AGENTS.md`.
-3. **Installs** native agent role files into `$CODEX_HOME/agents/`: `explorer.toml` & `flash-lite-scout.toml` (`gpt-5.6-luna`, `low` effort) and `worker.toml` & `flash-worker.toml` (`gpt-5.6-terra`, `medium` effort). Roles are selectable by the primary agent through `spawn_agent(agent_type=...)`.
+3. **Installs** native agent role files into `$CODEX_HOME/agents/`: `explorer.toml` & `flash-lite-scout.toml` (`gpt-5.6-luna`, `low` effort) and `worker.toml` & `flash-worker.toml` (`gpt-5.6-terra`, `medium` effort). Roles are selectable by the primary agent through `spawn_agent(agent_type=...)`; the `flash-*` role files exist only after this installer has run.
 4. **Installs** profile files `mitosis-scout.config.toml` and `mitosis-worker.config.toml` into `$CODEX_HOME/` (Codex 0.134+ reads `--profile <name>` from `$CODEX_HOME/<name>.config.toml`; the legacy `[profiles.*]` table is no longer honoured).
 5. **Configures** `[mcp_servers.mitosis]` in `config.toml` with the running interpreter and the absolute path to `scripts/mitosis-mcp-server.py`.
 6. **Validates** every TOML file and verifies all mounted files exist.
 
 The MCP server runs scouts with `--sandbox read-only` and workers with `--sandbox workspace-write`. Set `MITOSIS_CODEX_YOLO=1` only if you deliberately want `--dangerously-bypass-approvals-and-sandbox`.
+
+Since 1.7.0 the plugin hook rewrites `spawn_agent` calls to the built-in `explorer` (scout) and `worker` roles, because Codex 0.163 rejects an unknown `agent_type` (`unknown agent_type '...'`) and the `flash-*` roles do not exist on plugin-only installs. Models and efforts come from `gpt-5.6-luna` / `gpt-5.6-terra` with `low` / `medium`; override them with `CODEX_MITOSIS_SCOUT_MODEL`, `CODEX_MITOSIS_WORKER_MODEL`, `CODEX_MITOSIS_SCOUT_EFFORT` and `CODEX_MITOSIS_WORKER_EFFORT`. The values are validated (the model is spliced into a `codex exec` command) and there is no `AGY_` form. `setup-codex.py` renders the role and profile TOMLs with the effective values and passes them to the MCP server through its `env` table.
 
 ### Plugin hooks (Codex 0.128+)
 
@@ -262,10 +282,10 @@ NOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, in
 
 ### 3. 4-Phase `/orchestrate` Skill ([`skills/orchestrate/SKILL.md`](./skills/orchestrate/SKILL.md))
 Provides the structured `/orchestrate` workflow:
-1. **Phase 1 — Reconnaissance (Scout / Explorer Fan-Out)**: Parallel read-only scouts gather file paths, symbols, and config layouts.
-2. **Phase 2 — Architecture & Decomposition (Primary Frontier Agent)**: Synthesize recon findings, design interfaces, and partition work units.
-3. **Phase 3 — Scoped Execution & Testing (Workers)**: Parallel workers implement changes within explicit file allowlists and run verification commands.
-4. **Phase 4 — Synthesis & Branch Cleanup (Primary Frontier Agent)**: Review diffs, verify integration, and terminate branch worktrees.
+1. **Phase 1: Reconnaissance (Scout / Explorer Fan-Out)**: Parallel read-only scouts gather file paths, symbols, and config layouts.
+2. **Phase 2: Architecture & Decomposition (Primary Frontier Agent)**: Synthesize recon findings, design interfaces, and partition work units.
+3. **Phase 3: Scoped Execution & Testing (Workers)**: Parallel workers implement changes within explicit file allowlists and run verification commands.
+4. **Phase 4: Synthesis & Branch Cleanup (Primary Frontier Agent)**: Review diffs, verify integration, and terminate branch worktrees.
 
 ---
 
@@ -295,19 +315,54 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `MITOSIS_JUDGE_ALLOW_HTTP_KEY` | `0` | Set to `1` to also send the token over plain http to other hosts. |
 | `MITOSIS_JUDGE_THRESHOLD` · `MITOSIS_JUDGE_MIN_CONFIDENCE` | `0.9` · `0.7` | Rule confidence below which the judge is asked; judge confidence below which it counts as unsure (falls back to `flash`). |
 | `MITOSIS_JUDGE_TIMEOUT` | `1.5` | Seconds to wait for the judge before falling back to `flash`. |
+| `CODEX_MITOSIS_SCOUT_MODEL` · `CODEX_MITOSIS_WORKER_MODEL` | `gpt-5.6-luna` · `gpt-5.6-terra` | Codex model pinned per tier. Read from the environment only (no `AGY_` form); invalid values fall back to the default. |
+| `CODEX_MITOSIS_SCOUT_EFFORT` · `CODEX_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Codex reasoning effort pinned per tier; invalid values fall back to the default. |
+| `*_MITOSIS_LOCK_TIMEOUT` | `2` | Seconds to wait for the per-session state lock before failing open (`CLAUDE_`, `CODEX_` or `AGY_` prefix). |
+| `MITOSIS_OTEL` | `0` | Set to `1` to emit an OpenTelemetry `invoke_agent` span per routing decision (needs a file or an endpoint below). |
+| `MITOSIS_OTEL_FILE` | unset | Append one OTLP JSON body per line to this file. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` · `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` · `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP settings. `/v1/traces` is appended to the first; the second is used as-is; headers are `k=v,k2=v2`. |
+| `MITOSIS_OTEL_TIMEOUT` | `0.5` | Seconds to wait on the OTLP endpoint; every telemetry failure is swallowed. |
 | `MITOSIS_CODEX_YOLO` | `0` | Set to `1` to run Codex subagents with `--dangerously-bypass-approvals-and-sandbox` instead of tiered sandboxes. |
+
+---
+
+## Observability
+
+**OpenTelemetry (opt-in).** With `MITOSIS_OTEL=1` and either `MITOSIS_OTEL_FILE` or an OTLP endpoint, every routing decision becomes one `invoke_agent {agent}` span following the OpenTelemetry GenAI conventions. Attributes: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.agent.name`, `gen_ai.request.model`, `gen_ai.conversation.id`, plus `mitosis.tier`, `mitosis.rule`, `mitosis.confidence`, `mitosis.source`, `mitosis.platform` and `mitosis.effort`. The span marks the routing moment (start equals end), because the subagent runs later inside the host CLI. Spans are flushed after the hook response, outside the state lock.
+
+```bash
+export MITOSIS_OTEL=1
+export MITOSIS_OTEL_FILE=/tmp/mitosis-spans.jsonl                 # and/or:
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pinned model, effort and platform.
+
+**Cost report.** `scripts/mitosis-cost-report.py` prints the savings against an all-frontier run, can emit `ccusage`-shaped JSON and summarises routing from the debug logs (see "Measure it" above).
+
+**Statusline (optional).** Shows per-session scout and worker counts, for example `mitosis: scout 3 (1 live) | worker 2 | Opus | $1.23`. Add to `~/.claude/settings.json`:
+
+```json
+{"statusLine": {"type": "command", "command": "python3 <plugin path>/scripts/mitosis-statusline.py"}}
+```
+
+`MITOSIS_STATUSLINE_PREFIX` changes the leading label; any problem prints `mitosis: idle`.
 
 ---
 
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 246 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # 307 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session
 ```
+
+### Single source (`spec/`)
+
+Contributors: do not edit generated files by hand. `spec/models.toml` (models, efforts, prices), `spec/report.toml` (the four-header report contract) and `spec/agents/*.md` (shared agent bodies) are the single source. `python3 scripts/sync-generated.py` renders the Claude Code and Antigravity agent files, the Codex role and profile TOMLs, the report block in `rules/AGENTS.md` and both READMEs, `.agents/skills/orchestrate/SKILL.md` (a byte copy of the skill, which the Codex manifest ships through its `skills` entry) and `scripts/mitosis_generated.py`. `python3 scripts/sync-generated.py --check` runs in the test suite and fails when anything is stale.
 
 ### Evals
 

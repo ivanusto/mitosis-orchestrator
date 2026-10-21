@@ -1,0 +1,40 @@
+{"id": "v4-en-01", "prompt": "Run cargo clippy on the parser crate and tell me what it complains about.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-02", "prompt": "pytest -x tests/audio", "expected": "flash", "lang": "en"}
+{"id": "v4-en-03", "prompt": "The ring buffer in dsp/ringbuf.c drops samples when the writer wraps. Fix the off-by-one and add a regression test, but leave dsp/legacy_ringbuf.c alone.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-04", "prompt": "Check the Stripe docs for the current idempotency key expiry and summarize what changes for our retry logic.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-05", "prompt": "npm install and build the extension, then tell me the bundle size.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-06", "prompt": "Our operator seems to reconcile forever after CRD status updates. Reproduce it with the envtest suite and see whether it actually loops.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-07", "prompt": "Bump numpy to 2.1 in requirements, install it, and run the solver tests to see what breaks.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-08", "prompt": "terraform plan in infra/staging", "expected": "flash", "lang": "en"}
+{"id": "v4-en-09", "prompt": "Rename the config key robot.max_vel to robot.max_velocity across the repo and update the sample YAML files.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-10", "prompt": "Nightly indexing went from 40 to 90 minutes after last week's tokenizer change. Profile the search indexer with py-spy on the sample corpus and report the top 5 hot functions.", "expected": "flash", "lang": "en"}
+{"id": "v4-en-11", "prompt": "Which file defines the retry backoff for the payments client?", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-12", "prompt": "git log -5 on src/codegen/", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-13", "prompt": "What does the lint-and-typecheck job in .github/workflows/ci.yml actually run? Just read the file, don't execute anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-14", "prompt": "Who last touched the SIMD fallback in the resampler, and what was the commit message?", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-15", "prompt": "Show me how migration 0042_add_ledger_index is written and whether it is reversible.", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-16", "prompt": "List the debug flags the browser extension's background script reads.", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-17", "prompt": "Explain how the LLVM pass pipeline gets assembled in compiler/passes.rs. Read-only please.", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-18", "prompt": "wc -l on everything under kernels/", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-19", "prompt": "The sensor fusion node got a patch last month about timestamp skew. Find the commit and its diff; I only want to know what it changed. Not asking you to fix anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-en-20", "prompt": "Where do the tests for the Kubernetes admission webhook live, and which fixtures do they use?", "expected": "flash_lite", "lang": "en"}
+{"id": "v4-zh-01", "prompt": "跑一下 go test ./... 把失敗的列給我", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-02", "prompt": "CI 的 build 壞了，linker 說找不到 libfftw。幫我在本機重現，然後修掉 CMakeLists。", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-03", "prompt": "docker compose up 起 search 服務，curl 一下 /health 看回什麼", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-04", "prompt": "把 utils/geo.py 裡的 haversine 改成 numpy 向量化版本，然後跑 benchmark 前後對比。不要動 utils/geo_legacy.py。", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-05", "prompt": "查一下 Chrome MV3 service worker 最新的 lifecycle 官方文件，整理成三點重點給我", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-06", "prompt": "pip install -r requirements.txt 然後 mypy src/", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-07", "prompt": "analysis/spectrum.ipynb 的結果好像怪怪的，頻譜整個偏移。整本跑一遍看是哪個 cell 出問題，順便修掉。", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-08", "prompt": "機器人手臂的 IK 求解偶爾會卡住，我懷疑是初始值的問題。寫個小腳本隨機跑一千組，看有幾組不收斂。", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-09", "prompt": "kubectl get pods -n payments", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-10", "prompt": "把 README 裡的安裝步驟改成用 uv，然後實際照著跑一次確認真的可以。", "expected": "flash", "lang": "zh"}
+{"id": "v4-zh-11", "prompt": "payment webhook 的簽章驗證在哪個檔案？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-12", "prompt": "git blame audio/mixer.cpp 第 120 到 150 行", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-13", "prompt": "幫我看 tests/ 底下有哪些跟 OCR 有關的測試，只要列出來，不要跑。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-14", "prompt": "上次修 race condition 的那個 commit 到底改了哪些檔案？我只是想了解，不用重修。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-15", "prompt": "這個 Kubernetes operator 的 reconcile 流程是怎麼走的，可以講解一下嗎？不用改 code，也不用跑。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-16", "prompt": "CI 的 deploy stage 用的是哪個 secret 名稱？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-17", "prompt": "ls scripts/", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-18", "prompt": "migration 0017 有沒有寫 rollback？看 code 就好，不要真的去跑。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-19", "prompt": "之前有人回報 tokenizer 對全形標點會切錯。我想先搞清楚現在的邏輯寫在哪、到底有沒有處理，不需要改任何東西。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v4-zh-20", "prompt": "DEBUG_TRACE 這個環境變數不是只在 Makefile 裡設定的嗎？幫我看一下 repo 裡還有哪些地方在讀它。", "expected": "flash_lite", "lang": "zh"}

@@ -29,7 +29,7 @@ jobs:
           {
             echo '### Routing eval (rule layer, judge off)'
             echo '```'
-            python tests/test_routing_eval.py 2>/dev/null | sed '/^\.*$/,$d'
+            python tests/test_routing_eval.py 2>/dev/null | sed '/^\.\+$/,$d'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

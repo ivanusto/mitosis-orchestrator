@@ -28,7 +28,7 @@ class TestVersionsAgree(unittest.TestCase):
             ".claude-plugin/plugin.json": load_json(".claude-plugin/plugin.json")["version"],
             "pyproject.toml": tomllib.loads(read("pyproject.toml"))["project"]["version"],
             "SERVER_VERSION": re.search(r'^SERVER_VERSION = "([^"]+)"', read("scripts/mitosis-mcp-server.py"), re.M).group(1),
-            "SKILL.md": re.search(r"— v(\d+\.\d+\.\d+)\)", read("skills/orchestrate/SKILL.md")).group(1),
+            "SKILL.md": re.search(r"`/orchestrate`, v(\d+\.\d+\.\d+)\)", read("skills/orchestrate/SKILL.md")).group(1),
             "rules/AGENTS.md": re.search(r"\(v(\d+\.\d+\.\d+)\)", read("rules/AGENTS.md").splitlines()[0]).group(1),
             "CHANGELOG.md": re.search(r"^## (\d+\.\d+\.\d+)", read("CHANGELOG.md"), re.M).group(1),
         }

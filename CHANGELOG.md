@@ -1,9 +1,58 @@
 # Changelog
 
+## 1.7.0 - 2026-10-22
+
+### Added
+- `spec/` is the single source: `spec/models.toml` (models, efforts, prices), `spec/report.toml` (the four-header report contract) and `spec/agents/*.md` (shared agent bodies). `scripts/sync-generated.py` renders the Claude Code and Antigravity agent files, the Codex role and profile TOMLs, the report block in `rules/AGENTS.md` and both READMEs, `.agents/skills/orchestrate/SKILL.md` (a byte copy of the skill) and `scripts/mitosis_generated.py`, which the hook, MCP server and cost report load by file path. `--check` runs in the test suite and fails on stale output. The Codex plugin manifest now ships the orchestrate skill through its `skills` entry.
+- `CODEX_MITOSIS_{SCOUT,WORKER}_{MODEL,EFFORT}` override the Codex scout and worker models and efforts. They are read from the environment only (no `AGY_` form) and validated, because the model is spliced into the `codex exec -m` command. The hook, MCP server, policy notice and `setup-codex.py` (role and profile TOMLs, MCP `env` table) all use the effective values.
+- Per-session state lock (`fcntl` on POSIX, `msvcrt` on Windows): a hidden sidecar lock file, re-entrant, released after every handler, failing open after 2 s (`CLAUDE_`/`CODEX_`/`AGY_MITOSIS_LOCK_TIMEOUT`).
+- OpenTelemetry GenAI spans, opt-in with `MITOSIS_OTEL=1` plus `MITOSIS_OTEL_FILE` (JSONL, one OTLP body per line) and/or `OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT` with `OTEL_EXPORTER_OTLP_HEADERS` and `MITOSIS_OTEL_TIMEOUT` (default 0.5 s). Each routing decision becomes one `invoke_agent {agent}` span with `gen_ai.*` attributes (operation, provider, agent name, request model, conversation id) and `mitosis.*` attributes (tier, rule, confidence, source, platform, effort). Spans are flushed after the hook response and outside the lock; the MCP server flushes from a daemon thread.
+- Cost report (`scripts/mitosis-cost-report.py`): savings against an all-frontier counterfactual (subagent rows re-priced on the primary model), `--format text|json|ccusage` (`--json` stays as an alias; the ccusage shape matches `ccusage session --json` from ccusage 20.x) and a routing section built from the hook debug logs (`--debug-log`, auto-detected per session).
+- Optional Claude Code statusline, `scripts/mitosis-statusline.py`, with per-session scout and worker counts: `{"statusLine":{"type":"command","command":"python3 <plugin path>/scripts/mitosis-statusline.py"}}`.
+- `tests/routing_holdout_v2.jsonl`, `v3` and `v4`: 40 prompts each (10 per language and expected tier), written blind by subagents. Only v1 to v3 are used for tuning; v4 was scored once and not tuned.
+
+### Changed
+- Codex `spawn_agent` is now rewritten to the built-in `explorer` and `worker` roles. Codex 0.163 rejects an unknown `agent_type` with "unknown agent_type '...'", so the 1.6.0 rewrite to `flash-lite-scout` / `flash-worker` broke plugin-only installs (those roles exist only after `setup-codex.py`).
+- Routing: linter and type-checker runs, "reproduce by running", wish-style requests ("it would be nice if") and Chinese indirect requests count as change or execution requests. Heavy keywords in paths, label nouns and read-only questions are skipped; remaining noun-like heavy hits use rule `heavy-noun` (confidence 0.75) so a judge can overrule them. Run and CLI execution signals and a docs-lookup rule (the scout has no web access) were added, and read-only declarations are recognised more widely.
+- The short-prompt fallback now sends a prompt to the scout only with a lookup signal and no run task; otherwise it goes to the worker (rule `short-prompt-unknown`). Long-prompt behaviour is unchanged.
+- Report-format wording is normalised across agents, rules, skill and READMEs (rendered from `spec/report.toml`).
+- Debug log `decisions` carry the pinned model, effort and platform actually written into `updatedInput`, not the tier defaults.
+
+### Fixed
+- Lost updates in per-session state: parallel `Agent` spawns dropping `pending_spawns` entries, agent id pairing in `_claude_register_agent` (which made the SendMessage guard fail open), `report_nagged` flags (`SubagentStop` saves once), `consecutive_failures` and the `turn_edited_files` budget. The judge HTTP call runs outside the lock.
+- Subagent tool calls (`PostToolUse` with an `agent_id`) no longer load or save the primary's state, so a subagent's failing tests no longer trip the primary's circuit breaker.
+- Spawn records carry a `tier` field and the Codex scout SendMessage guard uses it, so records that store the Codex model id (or come from old state files) are recognised as scouts.
+- The `codex exec` Bash rewrite (since 1.5.1) matched the phrase anywhere in a command, so it rewrote unrelated `-m` flags (e.g. `python3 -m unittest`), inserted `-m <model>` into heredoc text, grep patterns and echo strings, and classified the task from the whole command. It now rewrites only a parsed `codex exec` invocation (split at unquoted `;`, `&`, `|`, newlines; heredoc bodies and comments skipped; `VAR=x`, `env`, `nohup`, `time`, `sudo`, `exec` and `npx` prefixes accepted), leaves the rest of the command byte-identical, and classifies from its prompt. Text corrupted by the old rewrite is repaired in `scripts/enforce-orchestrator.py`, `scripts/sync-generated.py`, the two `codex-config` profile TOMLs, `README.md` and the 1.6.0 and 1.5.1 entries below.
+- Debug log lines are written with a single `O_APPEND` write.
+
+### Routing eval
+Rule layer only, judge off; dangerous = a worker task routed to the read-only scout.
+
+| Set | Role in 1.7.0 | v1.6.0 | v1.7.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases (120 -> 183) | training | 119/120, 0 dangerous | 183/183, 0 dangerous |
+| holdout v1 (40) | tuned in 1.5.1 and 1.7.0 | 32/40, 0 | 39/40, 0 |
+| holdout v2 (40) | blind baseline, then training | 25/40, 4 | 39/40, 0 |
+| holdout v3 (40) | blind first contact after the first tuning round, then training | 25/40, 9 | 29/40, 6 at first contact; 36/40, 0 after |
+| holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
+
+The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors are lookups sent to the worker (cost, not failure).
+
+### Known limitations
+- Read-only questions that name debug, migration or build words still go to the worker without a judge. A judge (`MITOSIS_JUDGE_URL`) now gets a say on noun-use heavy hits (confidence 0.75).
+- The v1 to v3 holdout sets were used for tuning, so their scores are regression checks, not accuracy figures. Only v4 is an unbiased measurement, and it has 40 prompts.
+
+### Upgrade notes
+- **Behaviour change:** untyped short prompts without a lookup signal now go to the worker (`sonnet` / `gpt-5.6-terra` / `flash`) instead of the scout. Expect somewhat more worker spawns and no more failed scout runs from this path.
+- Codex: `spawn_agent` calls are pinned to the built-in `explorer` / `worker` roles; role names in debug logs and state change accordingly.
+- State writes now wait up to 2 s for a per-session lock (`*_MITOSIS_LOCK_TIMEOUT`); on timeout the hook proceeds without it, as before.
+- `SKILL.md` heading is now "(`/orchestrate`, v1.7.0)"; the report-format wording in agent prompts and READMEs is regenerated from `spec/report.toml`.
+- 307 tests (was 246).
+
 ## 1.6.0 — 2026-10-22
 
 ### Added
-- Codex plugin hooks: `.codex-plugin/plugin.json` points Codex 0.128+ at `hooks/codex-hooks.json` (SessionStart, UserPromptSubmit, PreToolUse on `spawn_agent|Bash|Edit|Write|mcp__mitosis__.*`, PostToolUse, SubagentStop, Stop), and `.agents/plugins/marketplace.json` lets `codex plugin marketplace add <repo>` + `codex plugin add mitosis-orchestrator@mitosis-orchestrator` install it. The manifest's `hooks` entry replaces Codex's default `hooks/hooks.json`, so Codex no longer picks up the Claude Code hook file. Codex requires hook trust: untrusted plugin hooks are skipped silently; review them in `/hooks` once, or pass `--dangerously-bypass-hook-trust` to `codex exec -m gpt-5.6-luna` for throwaway runs.
+- Codex plugin hooks: `.codex-plugin/plugin.json` points Codex 0.128+ at `hooks/codex-hooks.json` (SessionStart, UserPromptSubmit, PreToolUse on `spawn_agent|Bash|Edit|Write|mcp__mitosis__.*`, PostToolUse, SubagentStop, Stop), and `.agents/plugins/marketplace.json` lets `codex plugin marketplace add <repo>` + `codex plugin add mitosis-orchestrator@mitosis-orchestrator` install it. The manifest's `hooks` entry replaces Codex's default `hooks/hooks.json`, so Codex no longer picks up the Claude Code hook file. Codex requires hook trust: untrusted plugin hooks are skipped silently; review them in `/hooks` once, or pass `--dangerously-bypass-hook-trust` to `codex exec` for throwaway runs.
 - Codex `spawn_agent` calls are pinned like Claude `Agent` calls: allow + `updatedInput.model` (`gpt-5.6-luna` scouts, `gpt-5.6-terra` workers), `agent_type` rewritten to `flash-lite-scout` / `flash-worker` when present, and the four-header REPORT FORMAT appended to the message.
 - CI (`.github/workflows/ci.yml`): unit tests on Python 3.11, 3.12 and 3.13 with the routing confusion matrix in the job summary; ruff (correctness rules) and vermin (hook scripts stay Python 3.8 compatible); a Python 3.8 job that pipes sample hook payloads through the scripts.
 - `pyproject.toml` (tooling config only, no runtime dependencies) and `tests/test_packaging.py`: every manifest, `SERVER_VERSION`, `SKILL.md`, `rules/AGENTS.md`, `pyproject.toml` and the top CHANGELOG entry must carry the same version, agent paths keep the `./` prefix Claude Code needs, and every hook command points at an existing script and a known mode.
@@ -35,7 +84,7 @@
 - `is_frontier_tier` matches whole name segments, so "proxy", "product-o1x" and sub-30B checkpoints such as `deepseek-coder-1.3b` are not frontier.
 
 ### Fixed (other)
-- MCP server: invalid JSON gets a `-32700` reply and a non-object a `-32600` reply instead of silence; a handler exception returns `-32603` instead of ending the server; the prompt follows `--` so one starting with `-` is not read as a `codex exec -m gpt-5.6-luna` option.
+- MCP server: invalid JSON gets a `-32700` reply and a non-object a `-32600` reply instead of silence; a handler exception returns `-32603` instead of ending the server; the prompt follows `--` so one starting with `-` is not read as a `codex exec` option.
 - `setup-codex.py` no longer overwrites the first `config.toml.bak` (later runs write `.bak-YYYYmmdd-HHMMSS`), backs up a different `~/.codex/AGENTS.md` before replacing it, and writes `config.toml` atomically.
 - `SKILL.md` and `rules/AGENTS.md` said v1.4.1.
 

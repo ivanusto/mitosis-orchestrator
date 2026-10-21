@@ -20,6 +20,7 @@ CASES = Path(__file__).resolve().parent / "routing_cases.jsonl"
 HOLDOUT = Path(__file__).resolve().parent / "routing_holdout.jsonl"
 HOLDOUT_V2 = Path(__file__).resolve().parent / "routing_holdout_v2.jsonl"
 HOLDOUT_V3 = Path(__file__).resolve().parent / "routing_holdout_v3.jsonl"
+HOLDOUT_V4 = Path(__file__).resolve().parent / "routing_holdout_v4.jsonl"
 
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_eval", ROOT / "scripts" / "enforce-orchestrator.py")
 eo = importlib.util.module_from_spec(spec)
@@ -132,8 +133,25 @@ class TestRoutingHoldoutV3(unittest.TestCase):
         self.assertEqual(failing, [], report("routing_holdout_v3", cases, matrix, misses))
 
 
+class TestRoutingHoldoutV4(unittest.TestCase):
+    """Written blind by a subagent and scored once on v1.7.0 (commit e69aac8) with no tuning afterwards: 33/40, no worker task sent to the scout, 7 lookups sent to the worker. v1.6.0 scored 25/40 with 8 dangerous."""
+
+    def test_no_worker_task_reaches_a_scout(self):
+        cases = load(HOLDOUT_V4)
+        matrix, misses = evaluate(cases)
+        failing = [m for m in misses if m[1] == "flash"]
+        self.assertEqual(failing, [], report("routing_holdout_v4", cases, matrix, misses))
+
+    def test_dataset_is_well_formed(self):
+        cases = load(HOLDOUT_V4)
+        self.assertEqual(len(cases), 40)
+        self.assertEqual(len({c["id"] for c in cases}), 40)
+        split = collections.Counter((c["lang"], c["expected"]) for c in cases)
+        self.assertEqual(set(split.values()), {10}, split)
+
+
 if __name__ == "__main__":
-    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3)):
+    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3), ("routing_holdout_v4", HOLDOUT_V4)):
         if path.exists():
             data = load(path)
             print(report(name, data, *evaluate(data)), end="\n\n")

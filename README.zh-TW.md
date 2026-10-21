@@ -7,16 +7,16 @@
 </p>
 
 <p align="center">
-  <strong>跨模型有絲分裂編排外掛 — 支援三大 AI CLI 平台</strong><br/>
+  <strong>跨模型有絲分裂編排外掛，支援三大 AI CLI 平台</strong><br/>
   <em>Google Antigravity (<code>agy</code>) · Anthropic Claude Code · OpenAI Codex CLI</em><br/>
   <a href="./README.md">English Documentation (README.md)</a> · <a href="./CHANGELOG.md">版本紀錄 (Changelog)</a> · <a href="./rules/AGENTS.md">編排規則 (Rules)</a>
 </p>
 
 ---
 
-## 專案簡介 — 為什麼命名為 Mitosis（有絲分裂）？
+## 專案簡介：為什麼命名為 Mitosis（有絲分裂）？
 
-靈感源自生物學的**細胞有絲分裂（Mitosis）**。**Mitosis Orchestrator** 將您選用的**尖端推理模型（Frontier Model）**定位為系統的**主核架構師（Master Nucleus）**。主核不再把昂貴的 Token 與上下文視窗消耗在單檔搜尋、原始 Log 翻找或反覆的「修改—跑測試」迴圈，而是將複雜的工程任務有紀律地「分裂」並平行委派給兩類專職子細胞（Subagents）：
+靈感源自生物學的**細胞有絲分裂（Mitosis）**。**Mitosis Orchestrator** 將您選用的**尖端推理模型（Frontier Model）**定位為系統的**主核架構師（Master Nucleus）**。主核不再把昂貴的 Token 與上下文視窗消耗在單檔搜尋、原始 Log 翻找或反覆的「修改後再跑測試」迴圈，而是將複雜的工程任務有紀律地「分裂」並平行委派給兩類專職子細胞（Subagents）：
 
 - **主核架構師（Primary Frontier Orchestrator）**：專注於高階架構設計、API 介面契約、跨模組重構決策、資安與並行性把關，以及最終結果的統合驗證。
 - **執行子代理（`flash-worker` · `worker`）**：負責跨檔案程式碼探索、呼叫圖（Call-Graph）追蹤、外部文件查證、撰寫與執行測試，以及在明確允許清單內的局部修改。
@@ -76,6 +76,20 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 - **隱私。** 送給判斷器的是提示詞前 2000 字元，並先遮蔽金鑰、電子郵件、IP 位址與家目錄路徑（見 [`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)）。如果提示詞不能離開本機，請改用本機閘道。
 - **實際作用範圍。** Claude Code 的主核幾乎都會指定型別，所以判斷器主要處理未指定型別的呼叫與 Codex 的 `spawn_agent`。在 66 筆真實工作階段樣本中，帶型別的呼叫一次都沒有送到判斷器。
 
+### 路由評測
+
+只看規則層，判斷器關閉。「危險」指把應由執行者處理的任務送給唯讀的偵察者。
+
+| 資料集 | 1.7.0 中的角色 | v1.6.0 | v1.7.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases（120 -> 183） | 訓練 | 119/120，0 危險 | 183/183，0 危險 |
+| holdout v1（40） | 於 1.5.1 與 1.7.0 調校 | 32/40，0 | 39/40，0 |
+| holdout v2（40） | 盲測基準，之後轉為訓練 | 25/40，4 | 39/40，0 |
+| holdout v3（40） | 第一輪調校後的首次盲測，之後轉為訓練 | 25/40，9 | 首次 29/40，6；調校後 36/40，0 |
+| holdout v4（40） | 盲測，只評分一次，未調校 | 25/40，8 | 33/40，0 |
+
+1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗）。已知限制：提到 debug、migration 或 build 等字眼的唯讀問題，在沒有判斷器時仍會送給執行者；判斷器（`MITOSIS_JUDGE_URL`）現在可以對名詞用法的重量級命中（信心 0.75）表示意見。
+
 ---
 
 ## Claude Code 主核模型選擇：Fable 5.1 與 Opus 5.5
@@ -128,7 +142,11 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 python3 scripts/mitosis-cost-report.py                     # 目前專案最新的 session
 python3 scripts/mitosis-cost-report.py --last 2            # 最新兩個 session 並排比較
 python3 scripts/mitosis-cost-report.py --session <id-A> --session <id-B> --json
+python3 scripts/mitosis-cost-report.py --format ccusage    # 格式同 `ccusage session --json`（ccusage 20.x）
+python3 scripts/mitosis-cost-report.py --debug-log /tmp/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log
 ```
+
+1.7.0 起報表多一行節省金額：把每筆子代理列改用主核模型重新計價（全尖端模型的反事實），再與實際釘定的偵察者與執行者費用比較。`--format text|json|ccusage` 選擇輸出格式（`--json` 仍是別名）。若存在 hook 除錯日誌（`*_MITOSIS_DEBUG=1`，自動依 session 尋找，或用 `--debug-log` 指定），報表會多一段路由統計，列出各階層的決策數與觸發的規則。
 
 兩場真實（但不同）任務的節錄輸出，各用一種主核：
 
@@ -168,7 +186,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.6.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.7.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -213,12 +231,14 @@ codex exec --profile mitosis-scout "Locate where parse_token is defined"
 
 1. **自動備份**：將 `$CODEX_HOME/config.toml` 複製為 `config.toml.bak`（`$CODEX_HOME` 預設 `~/.codex`）。
 2. **同步規則**：將 `rules/AGENTS.md` 複製至 `$CODEX_HOME/AGENTS.md`。
-3. **安裝角色**：將角色檔安裝至 `$CODEX_HOME/agents/`：`explorer.toml` 與 `flash-lite-scout.toml`（`gpt-5.6-luna`、`low`）、`worker.toml` 與 `flash-worker.toml`（`gpt-5.6-terra`、`medium`）。主代理可透過 `spawn_agent(agent_type=...)` 選用。
+3. **安裝角色**：將角色檔安裝至 `$CODEX_HOME/agents/`：`explorer.toml` 與 `flash-lite-scout.toml`（`gpt-5.6-luna`、`low`）、`worker.toml` 與 `flash-worker.toml`（`gpt-5.6-terra`、`medium`）。主代理可透過 `spawn_agent(agent_type=...)` 選用；`flash-*` 角色檔只有執行過這個安裝腳本後才存在。
 4. **安裝 profile**：將 `mitosis-scout.config.toml` 與 `mitosis-worker.config.toml` 複製至 `$CODEX_HOME/`（Codex 0.134 起 `--profile <name>` 讀取 `$CODEX_HOME/<name>.config.toml`，舊的 `[profiles.*]` 區段已不再生效）。
 5. **注入 MCP**：在 `config.toml` 寫入 `[mcp_servers.mitosis]`，使用執行安裝腳本的 Python 直譯器與 `scripts/mitosis-mcp-server.py` 的絕對路徑。
 6. **完整性驗證**：校驗所有 TOML 並確認檔案存在。
 
 MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代理使用 `--sandbox workspace-write`；只有設定 `MITOSIS_CODEX_YOLO=1` 才會改用 `--dangerously-bypass-approvals-and-sandbox`。
+
+1.7.0 起，外掛 hook 會把 `spawn_agent` 呼叫改寫為 Codex 內建的 `explorer`（偵察者）與 `worker` 角色，因為 Codex 0.163 會拒絕未知的 `agent_type`（`unknown agent_type '...'`），而 `flash-*` 角色在只安裝外掛時並不存在。模型與 effort 預設為 `gpt-5.6-luna` / `gpt-5.6-terra` 與 `low` / `medium`，可用 `CODEX_MITOSIS_SCOUT_MODEL`、`CODEX_MITOSIS_WORKER_MODEL`、`CODEX_MITOSIS_SCOUT_EFFORT`、`CODEX_MITOSIS_WORKER_EFFORT` 覆寫。這些值會經過驗證（模型會被嵌入 `codex exec -m` 指令），且沒有 `AGY_` 形式。`setup-codex.py` 會用生效後的值產生角色與 profile TOML，並透過 MCP 的 `env` 表傳給 MCP server。
 
 ### 外掛 hook（Codex 0.128 以上）
 
@@ -301,19 +321,54 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | `MITOSIS_JUDGE_ALLOW_HTTP_KEY` | `0` | 設為 `1` 時，金鑰也可經純 http 送往其他主機。 |
 | `MITOSIS_JUDGE_THRESHOLD` · `MITOSIS_JUDGE_MIN_CONFIDENCE` | `0.9` · `0.7` | 規則信心低於前者才詢問判斷器；判斷器信心低於後者視為不確定，退回 `flash`。 |
 | `MITOSIS_JUDGE_TIMEOUT` | `1.5` | 等待判斷器的秒數，逾時退回 `flash`。 |
+| `CODEX_MITOSIS_SCOUT_MODEL` · `CODEX_MITOSIS_WORKER_MODEL` | `gpt-5.6-luna` · `gpt-5.6-terra` | Codex 各階層釘定的模型。只讀環境變數（沒有 `AGY_` 形式）；無效值退回預設。 |
+| `CODEX_MITOSIS_SCOUT_EFFORT` · `CODEX_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Codex 各階層釘定的推理 effort；無效值退回預設。 |
+| `*_MITOSIS_LOCK_TIMEOUT` | `2` | 等待每個 session 狀態鎖的秒數，逾時即放行（前綴 `CLAUDE_`、`CODEX_` 或 `AGY_`）。 |
+| `MITOSIS_OTEL` | `0` | 設為 `1` 時，每個路由決策送出一個 OpenTelemetry `invoke_agent` span（需搭配下列檔案或端點）。 |
+| `MITOSIS_OTEL_FILE` | 未設定 | 每行附加一個 OTLP JSON 內容到此檔案。 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` · `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` · `OTEL_EXPORTER_OTLP_HEADERS` | 未設定 | 標準 OTLP 設定。前者會附加 `/v1/traces`，第二個原樣使用，標頭格式為 `k=v,k2=v2`。 |
+| `MITOSIS_OTEL_TIMEOUT` | `0.5` | 等待 OTLP 端點的秒數；所有遙測錯誤都會被吞掉。 |
 | `MITOSIS_CODEX_YOLO` | `0` | 設為 `1` 時 Codex 子代理改用 `--dangerously-bypass-approvals-and-sandbox` 而非分級沙箱。 |
+
+---
+
+## 可觀測性
+
+**OpenTelemetry（選用）。** 設定 `MITOSIS_OTEL=1`，並指定 `MITOSIS_OTEL_FILE` 或 OTLP 端點後，每個路由決策會產生一個符合 OpenTelemetry GenAI 慣例的 `invoke_agent {agent}` span。屬性有 `gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.agent.name`、`gen_ai.request.model`、`gen_ai.conversation.id`，以及 `mitosis.tier`、`mitosis.rule`、`mitosis.confidence`、`mitosis.source`、`mitosis.platform`、`mitosis.effort`。span 標記的是路由決策的時間點（起訖相同），因為子代理稍後才在宿主 CLI 內執行。span 在 hook 回應送出後、狀態鎖釋放後才送出。
+
+```bash
+export MITOSIS_OTEL=1
+export MITOSIS_OTEL_FILE=/tmp/mitosis-spans.jsonl                 # 與（或）：
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+除錯日誌（`*_MITOSIS_DEBUG=1`）記錄相同的決策，現在也包含釘定的模型、effort 與平台。
+
+**成本報表。** `scripts/mitosis-cost-report.py` 會列出相對於全尖端模型執行的節省金額，可輸出 `ccusage` 格式的 JSON，並從除錯日誌彙整路由統計（見上方「實際量測」）。
+
+**狀態列（選用）。** 顯示每個 session 的偵察者與執行者數量，例如 `mitosis: scout 3 (1 live) | worker 2 | Opus | $1.23`。加入 `~/.claude/settings.json`：
+
+```json
+{"statusLine": {"type": "command", "command": "python3 <外掛路徑>/scripts/mitosis-statusline.py"}}
+```
+
+`MITOSIS_STATUSLINE_PREFIX` 可更改開頭標籤；發生任何問題時只會印出 `mitosis: idle`。
 
 ---
 
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 246 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # 307 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
 ```
+
+### 單一來源（`spec/`）
+
+給貢獻者：不要手動修改產生的檔案。`spec/models.toml`（模型、effort、價格）、`spec/report.toml`（四標頭回報合約）與 `spec/agents/*.md`（共用的代理內文）是單一來源。`python3 scripts/sync-generated.py` 會產生 Claude Code 與 Antigravity 的代理檔、Codex 的角色與 profile TOML、`rules/AGENTS.md` 與兩份 README 內的回報區塊、`.agents/skills/orchestrate/SKILL.md`（技能的逐位元組複本，Codex 外掛清單以 `skills` 欄位附帶）以及 `scripts/mitosis_generated.py`。`python3 scripts/sync-generated.py --check` 會在測試套件中執行，內容過期時即失敗。
 
 ### 評測
 

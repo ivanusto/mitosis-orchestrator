@@ -1,7 +1,7 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.6.0)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v1.7.0)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
-- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model — **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
+- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
 - **Subagents (Daughter Cells)**: Always pinned to execution (`worker`) or reconnaissance (`scout` / `explorer`) tiers according to the 3-platform routing matrix below.
 
 > [!IMPORTANT]
