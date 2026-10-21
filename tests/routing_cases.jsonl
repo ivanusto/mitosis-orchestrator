@@ -161,3 +161,23 @@
 {"id": "v7-noun-use-17", "prompt": "Would it be better to cache at the edge? Explain the tradeoffs, read-only.", "expected": "flash_lite", "lang": "en", "category": "indirect-request"}
 {"id": "v7-noun-use-18", "prompt": "這個函式可以怎麼改比較好？只要說明，不要動手。", "expected": "flash_lite", "lang": "zh", "category": "indirect-request"}
 {"id": "v7-noun-use-19", "prompt": "Which steps reproduce the crash according to ISSUE-142.md? Summarize them.", "expected": "flash_lite", "lang": "en", "category": "repro"}
+{"id": "n3-en-01", "prompt": "Where is the retry limit set?", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-zh-01", "prompt": "列出所有用到 RedisClient 的檔案", "expected": "flash_lite", "lang": "zh", "category": "fallback"}
+{"id": "n3-en-02", "prompt": "Which module owns the JWT parsing?", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-en-03", "prompt": "locate parse_token", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-zh-02", "prompt": "StripeWebhook 在哪個檔案定義", "expected": "flash_lite", "lang": "zh", "category": "fallback"}
+{"id": "n3-en-04", "prompt": "Show me every caller of renderInvoice", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-en-05", "prompt": "Run the migrations script in db/ against the dev database and report any errors.", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-06", "prompt": "Execute ./scripts/smoke.sh and tell me which step is slow.", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-07", "prompt": "pytest -x tests/api and summarise the first failure", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-08", "prompt": "cargo bench --bench parser then give me the mean throughput", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-09", "prompt": "Look up the latest release notes for Next.js 15 and tell me if the app router changed.", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-10", "prompt": "Check the latest docs for the Stripe API and say whether idempotency keys expire.", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-zh-03", "prompt": "查一下 Kubernetes 最新的官方文件，Gateway API 現在是 GA 了嗎？", "expected": "flash", "lang": "zh", "category": "fallback"}
+{"id": "n3-zh-04", "prompt": "跑一次 make bench，回報每個項目的耗時。", "expected": "flash", "lang": "zh", "category": "fallback"}
+{"id": "n3-zh-05", "prompt": "對 prod-mirror 資料庫執行 scripts/vacuum_report.sh 再把結果整理給我。", "expected": "flash", "lang": "zh", "category": "fallback"}
+{"id": "n3-en-11", "prompt": "Rewrite the shell helper in bin/deploy.sh so it fails fast.", "expected": "flash", "lang": "en", "category": "fallback"}
+{"id": "n3-en-12", "prompt": "Does the Helm chart expose a readiness probe?", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-zh-06", "prompt": "有沒有哪個 service 設定了 hostNetwork？", "expected": "flash_lite", "lang": "zh", "category": "fallback"}
+{"id": "n3-en-13", "prompt": "Walk me through how the scheduler picks the next job in sched/queue.go. Read-only.", "expected": "flash_lite", "lang": "en", "category": "fallback"}
+{"id": "n3-zh-07", "prompt": "yarn build 然後告訴我 bundle 大小", "expected": "flash", "lang": "zh", "category": "fallback"}

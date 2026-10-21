@@ -1,0 +1,40 @@
+{"id": "v3-en-01", "prompt": "lint src/ and tell me what fails", "expected": "flash", "lang": "en"}
+{"id": "v3-en-02", "prompt": "typecheck the api package", "expected": "flash", "lang": "en"}
+{"id": "v3-en-03", "prompt": "Our Unity player controller jitters when jumping on slopes. Reproduce it by running the PlayMode tests in Assets/Tests and report which one fails.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-04", "prompt": "It would be great if the retry logic in uploader.go backed off exponentially instead of a fixed 2s. Read it first and then make that change.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-05", "prompt": "Look up the current Terraform AWS provider docs for aws_lb_listener_rule and tell me whether a condition block now supports multiple host_header values.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-06", "prompt": "Run the notebook analysis/churn.ipynb top to bottom and tell me the final AUC it prints.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-07", "prompt": "Install the deps from requirements.txt into a fresh venv and see whether the CLI even starts with --help.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-08", "prompt": "Nobody trusts the numbers in the README. Run the suite in bench/ on the current branch and give me the p95 latencies.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-09", "prompt": "Don't touch anything under firmware/, but rename the confusingly named useData hook in Header.tsx to useHeaderData and fix the imports.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-10", "prompt": "Our Android app crashes on API 34 when the screen rotates. Look at MainActivity, work out why, and patch it.", "expected": "flash", "lang": "en"}
+{"id": "v3-en-11", "prompt": "Read-only please: where is the debounce for the search box implemented in the frontend?", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-12", "prompt": "What did the commit that last touched .github/workflows/ci.yml change? git show is fine, but don't modify anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-13", "prompt": "Which tests cover the PID controller in firmware/control? Just list the files, no need to run them.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-14", "prompt": "Summarize what scripts/deploy.sh does, step by step. I'm not deploying anything, I just want to understand it.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-15", "prompt": "Is debug logging turned on in config/prod.yaml? Tell me the value of log_level.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-16", "prompt": "Who last changed the retry settings in the Terraform module for the RDS cluster, and what was the stated reason? git log and blame are fine.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-17", "prompt": "How many lines of Python are in each file of the notebooks/helpers directory?", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-18", "prompt": "List every place the Godot autoload GameState is referenced.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-19", "prompt": "Why was migration 0042_add_index reverted last month? Dig through the git history and commit messages for the answer.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-en-20", "prompt": "Walk me through how the CLI parses subcommands in cmd/root.go. Explanation only, leave the code alone.", "expected": "flash_lite", "lang": "en"}
+{"id": "v3-zh-01", "prompt": "幫忙跑一下 pytest tests/api，看哪幾個 case 掛掉", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-02", "prompt": "麻煩把 LoginScreen.swift 裡的 force unwrap 都改成 guard let，其他檔案先別動。", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-03", "prompt": "npm run build 一下，看有沒有 type error", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-04", "prompt": "可以幫我把 Dockerfile 的 base image 升到 node:22-alpine，然後 build 看看嗎？", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-05", "prompt": "查一下 Flutter 最新的官方文件，Impeller 在 Android 上現在是預設開啟嗎？", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-06", "prompt": "ESP32 的 UART 中斷好像會掉資料，先看 drivers/uart.c，找到問題就直接修掉。", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-07", "prompt": "對 envs/staging 跑一次 terraform plan，把變更摘要整理給我。", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-08", "prompt": "這個 notebook 的 pandas 寫法太慢了，希望可以改成 vectorized，改完重跑一遍確認結果一致。", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-09", "prompt": "Boss 場景一載入 Unity 就卡頓，執行 tools/profile_frame.py 量一下 frame time 再回報。", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-10", "prompt": "ruff check . 然後 mypy src/", "expected": "flash", "lang": "zh"}
+{"id": "v3-zh-11", "prompt": "解釋一下 useAuth hook 的流程就好，先不要改。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-12", "prompt": "build.gradle 裡的 minSdk 現在是多少？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-13", "prompt": "CI 的 workflow 裡有哪些 job 會跑 e2e 測試？只要列出來，不用執行。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-14", "prompt": "幫我找一下 src/physics/ 底下碰撞偵測的入口在哪個檔案，別動程式碼。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-15", "prompt": "上次修 memory leak 的那個 commit 改了哪些檔案？用 git show 看就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-16", "prompt": "請總結 firmware/bootloader 的 linker script 裡記憶體是怎麼配置的，唯讀就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-17", "prompt": "terraform 的 variables.tf 裡有哪些變數沒有設 default？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-18", "prompt": "Dockerfile 裡有沒有開 debug 模式？不要 build，看檔案就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-19", "prompt": "migrations 目錄裡最新的一支是哪個檔案？裡面做了什麼事？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v3-zh-20", "prompt": "我想了解 train.py 的 learning rate scheduler 是怎麼設定的，不要動任何檔案，也不用跑。", "expected": "flash_lite", "lang": "zh"}

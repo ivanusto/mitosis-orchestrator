@@ -259,9 +259,9 @@ _CHECKER_ALT = (r"(?:eslint|ruff|flake8|pylint|mypy|pyright|tsc|prettier|black|g
 EXECUTION_RE = re.compile(
     r"\b(?:run|rerun|re-run|execute)\s+(?:[\w./:-]+\s+){0,3}?"
     r"(?:tests?|test suite|pytest|unittest|jest|vitest|builds?|benchmarks?|make|npm test|cargo test|go test)\b|"
-    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试|建置|編譯|编译|基準|基准)|"
+    r"(?<![會会能可要用])(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试|建置|編譯|编译|基準|基准)|"
     r"\b(?:run|rerun|re-run|execute)\s+(?:[\w./:-]+\s+){0,3}?" + _CHECKER_ALT + r"\b|"
-    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?" + _CHECKER_ALT + r"\b|"
+    r"(?<![會会能可要用])(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?" + _CHECKER_ALT + r"\b|"
     r"\b(?:reproduce|repro)\b[^.?!\n]{0,60}?\b(?:running|run|executing|execute)\b|"
     r"(?:重現|重现|復現|复现)[^。？?！!]{0,20}?(?:跑|執行|执行|運行|运行)|"
     r"(?:^|[.;:!?\n]|\b(?:please|then|and|also)\s)\s*(?:re-?run|run|execute)\s+(?:(?:the|this|that|our|it|your|a)\s+)?"
@@ -439,7 +439,7 @@ LITE_RE = re.compile(
 )
 
 CJK_HEAVY_RE = re.compile(
-    r"(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试)|調查|调查|上網查|上网查|綜合|综合|記憶體洩漏|内存泄漏|效能分析|性能分析|剖析|"
+    r"(?<![會会能可要用])(?:執行|执行|跑|運行|运行|重跑)[^。？?！!，,]{0,8}?(?:測試|测试)|調查|调查|上網查|上网查|綜合|综合|記憶體洩漏|内存泄漏|效能分析|性能分析|剖析|"
     r"除錯|偵錯|调试|根因|根本原因|編譯|编译|建置|構建|构建|基準測試|基准测试|效能測試|性能测试|"
     r"跨(?:檔案|文件|模組|模块|套件|包)|多(?:檔案|文件)|呼叫圖|调用图|相依|依賴|依赖|追蹤|追踪|深入(?:分析|研究)|彙整|汇总|綜整|文件研究"
 )
@@ -504,6 +504,55 @@ READ_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 READ_ONLY_CONFIDENCE = 0.6
+
+# The caller also declares that nothing is to be executed or built.
+READ_ONLY_RE = re.compile(
+    READ_ONLY_RE.pattern + r"|"
+    r"不用(?:執行|执行|跑|build)|不要(?:執行|执行|跑|build|編譯|编译)|看檔案就好|看文件就好|用 ?git (?:show|log|blame) 看就好|"
+    r"\bdig through the git history\b|\b(?:do not|don't|no need to) (?:run|execute|build)\b",
+    re.IGNORECASE,
+)
+
+# Positive lookup signal: the short-prompt fallback sends a prompt to the
+# scout only when it asks to find or list something. Unknown goes to the worker.
+LOOKUP_SIGNAL_RE = re.compile(
+    r"[?？]|"
+    r"\b(?:where|which|what|find|locate|list|show me|look up|grep|search for|how many)\b|"
+    r"(?:^|[.;!\n])\s*(?:does|do|did|is|are|was|were|can)\b|"
+    r"(?:^|[.;!\n])\s*(?:show|view|print|open|看|查看)\b|(?:^|[.;!\n])\s*(?:看|查看)|"
+    r"\b(?:tail|read|summari[sz]e|explain|walk me through|tell me|display|cat)\b|"
+    r"哪裡|哪里|哪個|哪个|哪些|哪幾|哪几|在哪|列出|找出|查找|有沒有|有没有|是不是|什麼|什么|多少|幾個|几个|有哪些|"
+    r"看一下|讀|读|摘要|總結|总结|解釋|解释|顯示|显示|告訴我|告诉我|說明|说明|了解|怎麼|怎么|如何",
+    re.IGNORECASE,
+)
+# Execution signal: an imperative that starts a clause, "run the <noun>", a
+# Chinese verb with an object, or a leading CLI command.
+RUN_VERBS = r"run|rerun|re-run|execute|profile|benchmark|measure|build|deploy|apply"
+RUN_TASK_RE = re.compile(
+    r"(?:(?:^|[.;:!?\n]\s*|\b(?:then|and|please|also)\s+)(?:" + RUN_VERBS + r")\s+(?!(?:git|ls|cat|grep|rg|head|tail|wc|find)\b)\S)|"
+    r"\brun the\s+\w+|\btop to bottom\b|"
+    r"(?<![會会能可要用別别])(?:重跑|跑一次|跑一下|跑|執行|执行|量一下)(?:\s*[A-Za-z0-9_./`'\"-]|一次|一下|\s|$)",
+    re.IGNORECASE,
+)
+CLI_START_RE = re.compile(
+    r"^\s*`?(?:ruff|mypy|pytest|npm|pnpm|yarn|cargo|go|make|terraform|kubectl|docker|gradle|\./gradlew|tsc|eslint|"
+    r"python3?|node|bash)\s+[^\s\u4e00-\u9fff]",
+)
+# Docs or web research: the scout has no web access.
+DOCS_LOOKUP_RE = re.compile(
+    r"(?:官方文件|文件|文檔|文档|\bdocs\b|\bdocumentation\b|\bchangelog\b|\brelease notes\b)"
+    r"[^。\n]{0,40}?(?:查一下|查|最新|\blook up\b|\bcheck the latest\b)|"
+    r"(?:查一下|查|最新|\blook up\b|\bcheck the latest\b)[^。\n]{0,40}?"
+    r"(?:官方文件|文件|文檔|文档|\bdocs\b|\bdocumentation\b|\bchangelog\b|\brelease notes\b)",
+    re.IGNORECASE,
+)
+
+
+def find_run_task(text: str) -> Optional[str]:
+    """First execution signal in text (imperative run, CLI command, Chinese run verb), or None."""
+    m = CLI_START_RE.search(text) or RUN_TASK_RE.search(text)
+    return m.group(0).strip() if m else None
+
 
 NUMBERED_RULE_RE = re.compile(r"(?m)^\s*[0-9]+[.)]\s+")
 CONVERSATION_ID_RE = re.compile(
@@ -1685,12 +1734,15 @@ RULE_CONFIDENCE = {
     "lite": 0.85,
     "long-prompt": 0.5,
     "short-prompt": 0.5,
+    "short-prompt-unknown": 0.5,
+    "docs-lookup": 0.85,
     "default": 0.5,
 }
 
 # Rules a judge may overrule when their confidence is low. Type, workspace and
 # explicit-model rules state the caller's intent and are never sent to a judge.
-JUDGEABLE_RULES = {"mutation", "heavy", "heavy-noun", "lite", "long-prompt", "short-prompt", "default"}
+JUDGEABLE_RULES = {"mutation", "heavy", "heavy-noun", "lite", "long-prompt", "short-prompt",
+                  "short-prompt-unknown", "docs-lookup", "default"}
 
 # Decisions made during this process, read by _debug_log. Hooks are one-shot
 # processes; the cap keeps the long-running MCP server from growing it.
@@ -1789,7 +1841,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
       7. explicit Model flash/flash_lite        -> honoured
       8. lite signals, prompt <= 600 chars      -> flash_lite
       9. prompt > 450 chars                     -> flash
-     10. short prompt (<= 320 chars)            -> flash_lite
+     10. short prompt (<= 320 chars)            -> flash_lite only with a lookup signal and no run task, else flash
      11. otherwise                              -> flash
     """
     raw_type_name = str(_get(subagent, "TypeName", "typeName", "subagent_type", "subagentType", default="")).strip()
@@ -1835,12 +1887,18 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))
     if requested in ALLOWED_SUBAGENT_MODELS:
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
-    if lite and len(prompt) <= 600:
+    if DOCS_LOOKUP_RE.search(text):
+        return done(_rule_decision("flash", None, "docs-lookup", "docs or web lookup needs web access"))
+    run_task = find_run_task(text)
+    if lite and len(prompt) <= 600 and not run_task:
         return done(_rule_decision("flash_lite", None, "lite", f"lite signal '{lite}'"))
     if len(prompt) > 450:
         return done(_rule_decision("flash", None, "long-prompt", "long prompt"))
     if len(prompt) <= 320:
-        return done(_rule_decision("flash_lite", None, "short-prompt", "short prompt without heavy signals"))
+        if (LOOKUP_SIGNAL_RE.search(text) or READ_ONLY_RE.search(text)) and not run_task:
+            return done(_rule_decision("flash_lite", None, "short-prompt", "short lookup prompt without heavy signals"))
+        return done(_rule_decision("flash", None, "short-prompt-unknown",
+                                   f"short prompt without a lookup signal{'; run task' if run_task else ''}"))
     return done(_rule_decision("flash", None, "default", "default"))
 
 

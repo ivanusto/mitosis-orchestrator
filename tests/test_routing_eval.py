@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CASES = Path(__file__).resolve().parent / "routing_cases.jsonl"
 HOLDOUT = Path(__file__).resolve().parent / "routing_holdout.jsonl"
 HOLDOUT_V2 = Path(__file__).resolve().parent / "routing_holdout_v2.jsonl"
+HOLDOUT_V3 = Path(__file__).resolve().parent / "routing_holdout_v3.jsonl"
 
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_eval", ROOT / "scripts" / "enforce-orchestrator.py")
 eo = importlib.util.module_from_spec(spec)
@@ -121,8 +122,18 @@ class TestRoutingHoldoutV2(unittest.TestCase):
         self.assertEqual(set(split.values()), {10}, split)
 
 
+class TestRoutingHoldoutV3(unittest.TestCase):
+    """Written blind by a subagent; first contact on v1.7.0 rules after commit 0f460d0: 29/40 with 6 dangerous (v1.6.0: 25/40, 9 dangerous). Used for tuning after that, so no longer blind."""
+
+    def test_no_worker_task_reaches_a_scout(self):
+        cases = load(HOLDOUT_V3)
+        matrix, misses = evaluate(cases)
+        failing = [m for m in misses if m[1] == "flash"]
+        self.assertEqual(failing, [], report("routing_holdout_v3", cases, matrix, misses))
+
+
 if __name__ == "__main__":
-    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2)):
+    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3)):
         if path.exists():
             data = load(path)
             print(report(name, data, *evaluate(data)), end="\n\n")
