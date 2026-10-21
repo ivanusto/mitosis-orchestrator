@@ -1,0 +1,40 @@
+{"id": "v2-en-01", "prompt": "What does the build step in .github/workflows/ci.yml do before it uploads artifacts? Just read the file and summarize it, don't change anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-02", "prompt": "Which tests under tests/unit/ cover the retry logic in PaymentClient? List file paths and test names only.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-03", "prompt": "Why does scripts/migrate.sh export DATABASE_URL twice? Check the git log for that file and explain how it ended up that way.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-04", "prompt": "How many Gradle modules are declared in settings.gradle, and which of them set a different sourceCompatibility in their build.gradle?", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-05", "prompt": "Can you explain what the fix in PR #812 changed? Use git log and git show to read the diff, no edits please.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-06", "prompt": "What debug log level is configured for the queue consumers in config/production.yaml, and is it overridden anywhere else in config/?", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-07", "prompt": "Find the migration file that adds the last_seen_at column and tell me which later migration touches the same table.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-08", "prompt": "Which targets in the Makefile call docker compose, and what environment variables do they rely on? Read only, please.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-09", "prompt": "Summarize the structure of the Airflow DAG in dags/ingest_events.py: task order, retries, and schedule interval.", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-10", "prompt": "According to gradle.properties, what JVM args does the Android release build use, and does the CI config override any of them?", "expected": "flash_lite", "lang": "en"}
+{"id": "v2-en-11", "prompt": "Run the full pytest suite and tell me which tests fail, with the first traceback for each failure.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-12", "prompt": "Could you make the CLI's --output flag accept a dash to mean stdout? Add a test for it too, but leave cli/legacy.py alone.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-13", "prompt": "It would be nice if the upload endpoint handled files over 50MB with a clear 413 error instead of crashing the request handler.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-14", "prompt": "Run eslint on src/ and report the number of errors grouped by rule.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-15", "prompt": "Look up the current Kubernetes docs on native sidecar containers and the Gateway API, then write a short comparison of upgrade options for our ingress setup.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-16", "prompt": "Install the dependencies, run npm run build, and tell me whether the main bundle ends up larger than 500kb.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-17", "prompt": "Which of the tests in tests/integration fail under Python 3.12? You'll need to actually run them to find out.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-18", "prompt": "Add retry with exponential backoff to fetchInvoices in billing/client.go. Don't touch anything in the vendor/ directory.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-19", "prompt": "The nightly ETL sometimes double-counts rows. Reproduce it by running the pipeline on fixtures/sample.csv twice, then find the cause.", "expected": "flash", "lang": "en"}
+{"id": "v2-en-20", "prompt": "Bump pydantic to v2 in requirements.txt, update whatever code breaks, and then run mypy to confirm it's clean.", "expected": "flash", "lang": "en"}
+{"id": "v2-zh-01", "prompt": "幫我看一下 .github/workflows/ci.yml 裡的 deploy job 是在哪個 branch 觸發的，只看不改。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-02", "prompt": "tests/unit/ 底下哪些檔案有 mock 到 RedisClient？列出路徑就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-03", "prompt": "那個 patch 為什麼要在 UserService 裡加 try/except？看一下 git log 跟 diff 解釋給我聽，先不要改。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-04", "prompt": "scripts/migrate.sh 會依序跑哪些 migration？我只是想了解流程，先不要動手。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-05", "prompt": "build.gradle 裡的 minSdk 跟 targetSdk 各是多少？有沒有在不同 flavor 被覆寫？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-06", "prompt": "PR #812 的 fix 主要改了哪幾個檔案？用 git show 看一下就好，順便說明改動原因。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-07", "prompt": "專案裡有幾個地方讀 DEBUG_MODE 這個環境變數？分別在哪個檔案？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-08", "prompt": "請解釋 Makefile 裡 make release 這個 target 在做什麼，先不要改。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-09", "prompt": "benchmark/ 目錄下的腳本分別在測什麼？簡單摘要就好，不要執行。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-10", "prompt": "migration file 0042_add_index.py 是對哪張表建索引？欄位是哪幾個？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v2-zh-11", "prompt": "麻煩跑一下 pytest tests/unit/，把失敗的測試和錯誤訊息整理給我。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-12", "prompt": "幫我把 config loader 改成同時支援 YAML 跟 JSON，順便補測試，不要動 legacy_config.py。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-13", "prompt": "如果 API 在 token 過期時能回 401 而不是 500 就好了，可以幫忙處理一下嗎？", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-14", "prompt": "跑一下 ./gradlew assembleRelease 看看有沒有 build error，有的話把 log 貼給我。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-15", "prompt": "幫我上網查 Next.js 15 App Router 的快取行為有哪些變更，整理成跟我們目前寫法的差異清單。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-16", "prompt": "麻煩把 Dockerfile 的 base image 升到 node:22，順便改一下 CI 裡的 Node 版本設定。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-17", "prompt": "跑 npm test 之後告訴我哪些 test 是 flaky 的，需要重跑幾次來確認。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-18", "prompt": "資料 pipeline 的 dedupe 步驟好像有 bug，幫我用 sample 資料跑一次重現，然後修好。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-19", "prompt": "請安裝 ruff 並跑 lint，把違規數量依規則統計給我。", "expected": "flash", "lang": "zh"}
+{"id": "v2-zh-20", "prompt": "幫我寫一個 scripts/backfill.py，把舊訂單補上 currency 欄位，先不要動 models.py。", "expected": "flash", "lang": "zh"}

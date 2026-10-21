@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CASES = Path(__file__).resolve().parent / "routing_cases.jsonl"
 HOLDOUT = Path(__file__).resolve().parent / "routing_holdout.jsonl"
+HOLDOUT_V2 = Path(__file__).resolve().parent / "routing_holdout_v2.jsonl"
 
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_eval", ROOT / "scripts" / "enforce-orchestrator.py")
 eo = importlib.util.module_from_spec(spec)
@@ -101,8 +102,21 @@ class TestRoutingHoldout(unittest.TestCase):
         self.assertEqual(failing, [], report("routing_holdout", cases, matrix, misses))
 
 
+class TestRoutingHoldoutV2(unittest.TestCase):
+    """40 more prompts, written by a subagent that never saw scripts/ or the
+    earlier sets. v1.6.0 scored 25/40 with 4 worker tasks sent to the scout.
+    Only the format is enforced here, so the set can be scored without tuning to it."""
+
+    def test_dataset_is_well_formed(self):
+        cases = load(HOLDOUT_V2)
+        self.assertEqual(len(cases), 40)
+        self.assertEqual(len({c["id"] for c in cases}), 40)
+        split = collections.Counter((c["lang"], c["expected"]) for c in cases)
+        self.assertEqual(set(split.values()), {10}, split)
+
+
 if __name__ == "__main__":
-    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT)):
+    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2)):
         if path.exists():
             data = load(path)
             print(report(name, data, *evaluate(data)), end="\n\n")
