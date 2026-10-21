@@ -79,12 +79,14 @@ Environment variables:
 """
 
 import copy
+import functools
 import json
 import os
 import re
 import shlex
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -1005,8 +1007,104 @@ def _state_file(payload: Dict[str, Any]) -> Optional[Path]:
     return base / STATE_FILENAME
 
 
-def load_state(payload: Dict[str, Any]) -> Dict[str, Any]:
-    path = _state_file(payload)
+LOCK_FILENAME = ".mitosis_orchestrator_state.lock"
+
+try:  # POSIX
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore
+try:  # Windows
+    import msvcrt as _msvcrt
+except ImportError:
+    _msvcrt = None  # type: ignore
+
+# Held lock fds keyed by lock path. flock locks belong to the open file description, so a
+# second open of the same file in this process would block against the first; keeping the
+# fd here makes re-entrant acquisition (nested handler calls) a no-op.
+_HELD_LOCKS: Dict[str, int] = {}
+
+
+def _lock_timeout() -> float:
+    try:
+        return max(0.0, float(_get_env("AGY_MITOSIS_LOCK_TIMEOUT", "CLAUDE_MITOSIS_LOCK_TIMEOUT", "CODEX_MITOSIS_LOCK_TIMEOUT", default="2")))
+    except ValueError:
+        return 2.0
+
+
+def _try_lock_fd(fd: int) -> bool:
+    if _fcntl is not None:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+    if _msvcrt is not None:  # pragma: no cover - Windows
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    return True
+
+
+def _acquire_state_lock(state_path: Path) -> None:
+    """Take the per-session lock (idempotent). Fails open after the timeout; never raises."""
+    if _fcntl is None and _msvcrt is None:
+        return
+    lock_path = str(state_path.with_name(LOCK_FILENAME))
+    if lock_path in _HELD_LOCKS:
+        return
+    try:
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    except OSError:
+        return
+    deadline = time.monotonic() + _lock_timeout()
+    while True:
+        if _try_lock_fd(fd):
+            _HELD_LOCKS[lock_path] = fd
+            return
+        if time.monotonic() >= deadline:
+            os.close(fd)  # proceed unlocked
+            return
+        time.sleep(0.02)
+
+
+def _release_state_locks() -> None:
+    for lock_path, fd in list(_HELD_LOCKS.items()):
+        try:
+            if _fcntl is not None:
+                _fcntl.flock(fd, _fcntl.LOCK_UN)
+            elif _msvcrt is not None:  # pragma: no cover - Windows
+                os.lseek(fd, 0, os.SEEK_SET)
+                _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        _HELD_LOCKS.pop(lock_path, None)
+
+
+_HANDLER_DEPTH = [0]
+
+
+def _releases_state_locks(func):
+    """Decorator: the outermost public handler call always drops the state locks."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        _HANDLER_DEPTH[0] += 1
+        try:
+            return func(*args, **kwargs)
+        finally:
+            _HANDLER_DEPTH[0] -= 1
+            if _HANDLER_DEPTH[0] == 0:
+                _release_state_locks()
+    return wrapper
+
+
+def _read_state_file(path: Optional[Path]) -> Dict[str, Any]:
     state = _empty_state()
     if path and path.exists():
         try:
@@ -1017,6 +1115,19 @@ def load_state(payload: Dict[str, Any]) -> Dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             pass
     return state
+
+
+def _peek_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Lock-free read for decisions made before any network call. Never save this copy."""
+    return _read_state_file(_state_file(payload))
+
+
+def load_state(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the session state and take its lock (held until the handler returns)."""
+    path = _state_file(payload)
+    if path:
+        _acquire_state_lock(path)
+    return _read_state_file(path)
 
 
 def save_state(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
@@ -1138,6 +1249,7 @@ def sync_subagents_from_artifacts(payload: Dict[str, Any], state: Dict[str, Any]
                     "role": role or type_name,
                     "type": type_name,
                     "model": "flash_lite" if type_name.lower() == SCOUT_TYPE else "flash",
+                    "tier": "flash_lite" if type_name.lower() == SCOUT_TYPE else "flash",
                     "workspace": "branch" if in_worktree else "inherit",
                 }
             subagents[cid] = record
@@ -1325,6 +1437,7 @@ def codex_policy_notice() -> str:
 CODEX_POLICY_NOTICE = codex_policy_notice()
 
 
+@_releases_state_locks
 def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     p = payload or {}
     target_file = "config.toml" if (is_codex_payload(p) or "CODEX_CONFIG_PATH" in os.environ) else "settings.json"
@@ -1388,6 +1501,7 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
 # pre-invocation / user-prompt-submit
 # ---------------------------------------------------------------------------
 
+@_releases_state_locks
 def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     # A subagent's own prompt (Codex sends UserPromptSubmit with agent_id) is
     # neither a new primary turn nor a primary model to check.
@@ -1714,6 +1828,7 @@ def _handle_invoke_subagent(payload: Dict[str, Any], args: Dict[str, Any]) -> Di
                 "role": str(label),
                 "type": str(_get(item, "TypeName", "typeName", default="")),
                 "model": target_model,
+                "tier": "flash_lite" if target_model == "flash_lite" else "flash",
                 "workspace": workspace,
                 "active_branch": workspace == "branch",
             }
@@ -1750,6 +1865,17 @@ def _claude_subagent_in_scope(subagent_type: str) -> Tuple[bool, str]:
     return False, f"unknown agent type '{raw}' left untouched"
 
 
+def _passthrough_tier(subagent_type: str, model_req: str) -> str:
+    bare = subagent_type.split(":")[-1].strip().lower()
+    if bare == SCOUT_TYPE:
+        return "flash_lite"
+    if bare == WORKER_TYPE:
+        return "flash"
+    if model_req in ("haiku", "flash_lite"):
+        return "flash_lite"
+    return "flash"
+
+
 def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     prompt = str(args.get("prompt") or "").strip()
     if not prompt:
@@ -1769,6 +1895,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
                 "role": description or subagent_type or tool_name.lower(),
                 "type": subagent_type,
                 "model": model_req,
+                "tier": _passthrough_tier(subagent_type, model_req),
                 "workspace": workspace,
                 "active_branch": True,
             })
@@ -1841,6 +1968,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         "role": description or target_type or tool_name.lower(),
         "type": target_type,
         "model": target_tier,
+        "tier": target_tier,
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }]
@@ -1872,7 +2000,7 @@ def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[
     save_state(payload, state)
 
     info = state.get("subagents", {}).get(recipient)
-    if not info or info.get("model") != "flash_lite":
+    if not info or _record_tier(info) != "flash_lite":
         return _no_opinion(payload) if is_claude else {"decision": "allow"}
 
     mutation = find_mutation(message)
@@ -1886,6 +2014,17 @@ def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[
         )
         return _deny(reason, payload) if is_claude else {"decision": "deny", "reason": reason}
     return _no_opinion(payload) if is_claude else {"decision": "allow"}
+
+
+def _record_tier(info: Dict[str, Any]) -> str:
+    """Tier of a spawn record: its `tier` field, else inferred from `model` (old state files)."""
+    tier = info.get("tier")
+    if tier in ("flash_lite", "flash"):
+        return str(tier)
+    model = str(info.get("model") or "").strip().lower()
+    if model in ("flash_lite", "haiku", DEFAULT_CODEX_SCOUT_MODEL.lower(), codex_tier_model("flash_lite").lower()):
+        return "flash_lite"
+    return "flash"
 
 
 def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint: str = "") -> Optional[Dict[str, Any]]:
@@ -1908,6 +2047,7 @@ def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint
         record = {
             "role": hint, "type": hint,
             "model": "flash_lite" if bare_hint == SCOUT_TYPE else "flash",
+            "tier": "flash_lite" if bare_hint == SCOUT_TYPE else "flash",
             "workspace": "inherit", "active_branch": False,
         }
     else:
@@ -2253,6 +2393,7 @@ def _handle_codex_exec_command(payload: Dict[str, Any], tool_name: str, args: Di
         "role": target_type,
         "type": target_type,
         "model": target_model,
+        "tier": tier,
         "workspace": "branch" if active_branch else "inherit",
         "active_branch": active_branch,
     }]
@@ -2307,6 +2448,7 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
         "role": role or target_type,
         "type": target_type,
         "model": target_model,
+        "tier": tier,
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }]
@@ -2322,30 +2464,38 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
 
 
 def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    state = load_state(payload)
+    # Classification (which may call the judge over HTTP) always runs before load_state
+    # takes the lock, so the lock is never held across network I/O.
+    def _record(state_spawns: List[Dict[str, Any]]) -> None:
+        state = load_state(payload)
+        state.setdefault("pending_spawns", []).extend(state_spawns)
+        save_state(payload, state)
+
     if tool_name == "mitosis_scout":
         prompt = str(args.get("prompt") or "").strip()
         if not prompt:
             return _deny("mitosis_scout prompt cannot be empty.", payload)
         mutation = find_mutation(prompt)
         if mutation:
+            tier = "flash"
             target_model = codex_tier_model("flash")
             target_type = WORKER_TYPE
             reason = f"mutation verb '{mutation}' upgraded scout to worker"
         else:
+            tier = "flash_lite"
             target_model = codex_tier_model("flash_lite")
             target_type = SCOUT_TYPE
             reason = "read-only scout"
         updated_args = copy.deepcopy(args)
         updated_args["model"] = target_model
-        state.setdefault("pending_spawns", []).append({
+        _record([{
             "role": str(args.get("role") or target_type),
             "type": target_type,
             "model": target_model,
+            "tier": tier,
             "workspace": "inherit",
             "active_branch": False,
-        })
-        save_state(payload, state)
+        }])
         return _allow(f"Mitosis Orchestrator pinned scout: {target_model} ({reason})", updated_input=updated_args, payload=payload)
 
     if tool_name == "mitosis_worker":
@@ -2357,14 +2507,14 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
         active_branch = workspace in ("branch", "worktree")
         updated_args = copy.deepcopy(args)
         updated_args["model"] = target_model
-        state.setdefault("pending_spawns", []).append({
+        _record([{
             "role": str(args.get("role") or WORKER_TYPE),
             "type": WORKER_TYPE,
             "model": target_model,
+            "tier": "flash",
             "workspace": "branch" if active_branch else workspace,
             "active_branch": active_branch,
-        })
-        save_state(payload, state)
+        }])
         return _allow(f"Mitosis Orchestrator pinned worker: {target_model}", updated_input=updated_args, payload=payload)
 
     if tool_name == "mitosis_invoke_subagent":
@@ -2385,11 +2535,11 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
                     "role": str(t.get("role") or tier),
                     "type": SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE,
                     "model": model,
+                    "tier": tier,
                     "workspace": ws,
                     "active_branch": ws in ("branch", "worktree"),
                 })
-            state.setdefault("pending_spawns", []).extend(spawns)
-            save_state(payload, state)
+            _record(spawns)
             updated_args = copy.deepcopy(args)
             updated_args["tasks"] = updated_tasks
             return _allow("Mitosis Orchestrator pinned tasks", updated_input=updated_args, payload=payload)
@@ -2399,20 +2549,21 @@ def _handle_mitosis_tools(payload: Dict[str, Any], tool_name: str, args: Dict[st
             model = codex_tier_model(tier)
             updated_args = copy.deepcopy(args)
             updated_args["model"] = model
-            state.setdefault("pending_spawns", []).append({
+            _record([{
                 "role": str(args.get("role") or tier),
                 "type": SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE,
                 "model": model,
+                "tier": tier,
                 "workspace": "inherit",
                 "active_branch": False,
-            })
-            save_state(payload, state)
+            }])
             return _allow(f"Mitosis Orchestrator pinned subagent: {model} ({reason})", updated_input=updated_args, payload=payload)
         return _deny("mitosis_invoke_subagent requires tasks or prompt.", payload)
 
     return _no_opinion(payload)
 
 
+@_releases_state_locks
 def handle_codex_notify(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = load_state(payload)
     sync_subagents(payload, state)
@@ -2501,6 +2652,7 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
     return _allow("Mitosis Orchestrator: path is inside the workspace.", overrides=[f"{action}({t})" for t in targets], payload=payload)
 
 
+@_releases_state_locks
 def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, args = _extract_tool_call(payload)
     if not tool_name:
@@ -2509,7 +2661,10 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name.startswith("mcp__mitosis__"):
         tool_name = tool_name[len("mcp__mitosis__"):]
 
-    state = load_state(payload)
+    # Lock-free read: the dispatch below may call the judge over HTTP (classify_subagent),
+    # which must never happen while the state lock is held. Handlers that mutate state call
+    # load_state (locking) themselves after classification.
+    state = _peek_state(payload)
 
     # Circuit breaker: if consecutive failures >= 2 and breaker is not disabled ("0"),
     # block retry loops on commands and subagents.
@@ -2594,6 +2749,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                             norm_targets.append(str(Path(os.path.expanduser(t)).resolve()))
                         except Exception:
                             norm_targets.append(t)
+                    state = load_state(payload)  # locked read-modify-write of the edit budget
                     edited: List[str] = state.setdefault("turn_edited_files", [])
                     max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
                     try:
@@ -2633,6 +2789,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                             norm_target = str(Path(os.path.expanduser(target)).resolve())
                         except Exception:
                             norm_target = target
+                        state = load_state(payload)  # locked read-modify-write of the edit budget
                         edited: List[str] = state.setdefault("turn_edited_files", [])
                         max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
                         try:
@@ -2698,8 +2855,14 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
     return False
 
 
+@_releases_state_locks
 def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, _ = _extract_tool_call(payload)
+    # A subagent's own tool call (Claude and Codex both send agent_id) must not touch the
+    # primary's state: its failures are not the primary's failures, and skipping the
+    # load/save avoids needless lock contention.
+    if payload.get("agent_id") and tool_name not in ("Agent", "Task", "spawn_agent"):
+        return {}
     state = load_state(payload)
     failed = _tool_failed(tool_name, payload)
     if tool_name in ("invoke_subagent", "Task", "Agent", "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker") and (payload.get("error") or failed):
@@ -2738,6 +2901,7 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+@_releases_state_locks
 def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     if is_claude_code_payload(payload) or is_codex_payload(payload):
         if payload.get("stop_hook_active") is True:
@@ -2825,27 +2989,24 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
             meta["active_branch"] = False
         for meta in state.setdefault("subagents", {}).values():
             meta["active_branch"] = False
+
+    # One save for every outcome (the report_nagged flag is part of the same write).
+    result: Dict[str, Any] = {}
+    if payload.get("stop_hook_active") is not True and _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") != "0":
+        type_name = agent_type or (str(record.get("type") or "") if record else "")
+        if _is_plugin_agent_type(type_name):
+            error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
+            if error is not None:
+                nagged: List[str] = state.setdefault("report_nagged", [])
+                key = agent_id or type_name
+                if key not in nagged:
+                    nagged.append(key)
+                    result = {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
     save_state(payload, state)
-
-    if payload.get("stop_hook_active") is True:
-        return {}
-    if _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") == "0":
-        return {}
-    type_name = agent_type or (str(record.get("type") or "") if record else "")
-    if not _is_plugin_agent_type(type_name):
-        return {}
-    error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
-    if error is None:
-        return {}
-    nagged: List[str] = state.setdefault("report_nagged", [])
-    key = agent_id or type_name
-    if key in nagged:
-        return {}
-    nagged.append(key)
-    save_state(payload, state)
-    return {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
+    return result
 
 
+@_releases_state_locks
 def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     if is_claude_code_payload(payload):
         return _handle_claude_subagent_stop(payload)
@@ -2901,8 +3062,17 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
         entry["decisions"] = [d.as_log() for d in _RECENT_DECISIONS]
         _RECENT_DECISIONS.clear()
     try:
-        with open(path.with_name("mitosis_orchestrator_debug.log"), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # One O_APPEND write per entry so concurrent hooks never interleave lines.
+        line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        fd = os.open(
+            str(path.with_name("mitosis_orchestrator_debug.log")),
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        try:
+            os.write(fd, line)
+        finally:
+            os.close(fd)
     except OSError:
         pass
 
@@ -2964,6 +3134,8 @@ def main() -> None:
     except Exception as exc:  # never break the agent loop because of the guard
         result = _no_opinion(payload) if mode in ("stop", "pre-tool-use") else {}
         sys.stderr.write(f"[mitosis-orchestrator] {mode} hook error: {exc!r}\n")
+    finally:
+        _release_state_locks()
     _debug_log(payload, mode, result)
 
     sys.stdout.write(json.dumps(result) + "\n")
