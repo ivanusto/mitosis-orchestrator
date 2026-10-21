@@ -21,7 +21,7 @@
 ### Fixed
 - Lost updates in per-session state: parallel `Agent` spawns dropping `pending_spawns` entries, agent id pairing in `_claude_register_agent` (which made the SendMessage guard fail open), `report_nagged` flags (`SubagentStop` saves once), `consecutive_failures` and the `turn_edited_files` budget. The judge HTTP call runs outside the lock.
 - Subagent tool calls (`PostToolUse` with an `agent_id`) no longer load or save the primary's state, so a subagent's failing tests no longer trip the primary's circuit breaker.
-- Spawn records carry a `tier` field and the Codex scout SendMessage guard uses it, so records that store the Codex model id (or come from old state files) are recognised as scouts.
+- Spawn records carry a `tier` field, and the SendMessage guard reads it, so records that store a Codex model id (or come from old state files) are recognised as scouts. This does not yet guard Codex: Codex spawn records are never paired with an agent id, so they stay in `pending_spawns` and follow-up messages to a Codex scout are not checked (see Known limitations).
 - The `codex exec` Bash rewrite (since 1.5.1) matched the phrase anywhere in a command, so it rewrote unrelated `-m` flags (e.g. `python3 -m unittest`), inserted `-m <model>` into heredoc text, grep patterns and echo strings, and classified the task from the whole command. It now rewrites only a parsed `codex exec` invocation (split at unquoted `;`, `&`, `|`, newlines; heredoc bodies and comments skipped; `VAR=x`, `env`, `nohup`, `time`, `sudo`, `exec` and `npx` prefixes accepted), leaves the rest of the command byte-identical, and classifies from its prompt. Text corrupted by the old rewrite is repaired in `scripts/enforce-orchestrator.py`, `scripts/sync-generated.py`, the two `codex-config` profile TOMLs, `README.md` and the 1.6.0 and 1.5.1 entries below.
 - Debug log lines are written with a single `O_APPEND` write.
 
@@ -39,6 +39,7 @@ Rule layer only, judge off; dangerous = a worker task routed to the read-only sc
 The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors are lookups sent to the worker (cost, not failure).
 
 ### Known limitations
+- Codex follow-up messages to a scout are not guarded: the hook does not pair Codex `spawn_agent` results with the spawned agent id, so the SendMessage guard has no Codex record to check. Verified on Codex 0.163 after release.
 - Read-only questions that name debug, migration or build words still go to the worker without a judge. A judge (`MITOSIS_JUDGE_URL`) now gets a say on noun-use heavy hits (confidence 0.75).
 - The v1 to v3 holdout sets were used for tuning, so their scores are regression checks, not accuracy figures. Only v4 is an unbiased measurement, and it has 40 prompts.
 
