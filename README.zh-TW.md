@@ -3,7 +3,7 @@
 [![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="./assets/logo.svg" width="108" height="108" alt="Mitosis Orchestrator Logo" />
+  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator：尖端模型主核負責規劃，便宜的子細胞負責查找與修改，由 hook 強制分工" />
 </p>
 
 <p align="center">
@@ -21,6 +21,20 @@
 - **主核架構師（Primary Frontier Orchestrator）**：專注於高階架構設計、API 介面契約、跨模組重構決策、資安與並行性把關，以及最終結果的統合驗證。
 - **執行子代理（`flash-worker` · `worker`）**：負責跨檔案程式碼探索、呼叫圖（Call-Graph）追蹤、外部文件查證、撰寫與執行測試，以及在明確允許清單內的局部修改。
 - **偵察子代理（`flash-lite-scout` · `explorer`）**：負責高併發、低延遲的唯讀單跳偵察：快速定位檔案與符號、執行 `grep`/`glob` 搜尋、切片檢視 `.log` 與 `transcript.jsonl`，以及單一檔案結構摘要。
+
+## 實際畫面
+
+在小型示範專案上以 Claude Code（主核 Opus 5.5）實際執行 `/orchestrate`。主核先派 `flash-lite-scout` 找出函式位置，再派 `flash-worker` 撰寫並執行測試，最後自己複查結果：
+
+<p align="center"><img src="./assets/screenshots/orchestrate-zh.png" width="820" alt="Claude Code 工作階段：主核派出 flash-lite-scout 與 flash-worker，再自行驗證測試" /></p>
+
+同一場工作階段的 `scripts/mitosis-cost-report.py` 報表：scout 跑在 haiku、worker 跑在 sonnet，費用大部分仍來自主核（見 [Claude Code 主核模型選擇](#claude-code-主核模型選擇fable-51-與-opus-55)）：
+
+<p align="center"><img src="./assets/screenshots/cost.png" width="820" alt="費用報表：haiku 偵察者、sonnet 執行者、opus 主核，合計 0.41 美元" /></p>
+
+路由評測（`python3 tests/test_routing_eval.py`）：所有標註資料集都沒有把執行者的任務送給唯讀的偵察者（見[路由評測](#路由評測)）：
+
+<p align="center"><img src="./assets/screenshots/eval.png" width="720" alt="訓練集與 v1 到 v5 盲測集的路由混淆矩陣" /></p>
 
 ---
 

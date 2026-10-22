@@ -3,7 +3,7 @@
 [![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="./assets/logo.svg" width="108" height="108" alt="Mitosis Orchestrator Logo" />
+  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator: one frontier nucleus plans, cheap daughter cells do the lookups and edits, hooks enforce the split" />
 </p>
 
 <p align="center">
@@ -21,6 +21,20 @@ Inspired by biological **mitosis (cell division)**, **Mitosis Orchestrator** tre
 - **Master Nucleus (Primary Frontier Orchestrator)**: Retains full architectural context, designs API contracts, decomposes tasks, resolves cross-cutting invariants, and synthesizes final results.
 - **Execution Daughter Cells (`flash-worker` · `worker`)**: Execute parallel multi-file analysis, documentation/web research, scoped code edits, and unit/integration test loops within an explicit file allowlist.
 - **Reconnaissance Daughter Cells (`flash-lite-scout` · `explorer`)**: Perform high-fan-out, single-hop read-only lookups: locating symbols, running `grep`/`glob` searches, slicing `.log` or `transcript.jsonl` files, and inspecting single configs at minimal latency and cost.
+
+## Screenshots
+
+A real Claude Code session (Opus 5.5 primary) running `/orchestrate` on a small demo repo. The primary sends a `flash-lite-scout` to locate the function, then a `flash-worker` to write and run the tests, and re-checks the result itself:
+
+<p align="center"><img src="./assets/screenshots/orchestrate-en.png" width="820" alt="Claude Code session: the primary dispatches a flash-lite-scout and a flash-worker, then verifies the tests" /></p>
+
+`scripts/mitosis-cost-report.py` on a run of the same task: the scout ran on haiku, the worker on sonnet, and the primary still accounts for most of the cost (see [Choosing the Primary Model](#choosing-the-primary-model-on-claude-code-fable-51-vs-opus-55)):
+
+<p align="center"><img src="./assets/screenshots/cost.png" width="820" alt="Cost ledger: haiku scout, sonnet worker, opus primary, total 0.41 USD" /></p>
+
+The routing eval (`python3 tests/test_routing_eval.py`): no worker task reaches the read-only scout on any labelled set (see [Routing eval](#routing-eval)):
+
+<p align="center"><img src="./assets/screenshots/eval.png" width="720" alt="Routing confusion matrices for the training set and holdouts v1 to v5" /></p>
 
 ---
 
