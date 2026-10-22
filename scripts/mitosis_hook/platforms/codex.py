@@ -3,7 +3,7 @@
 import copy
 import json
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..common import (
     CODEX_SCOUT_ROLE,
@@ -179,7 +179,7 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
         updated_args[prompt_key] = append_report_format(prompt, tier)
 
     record = {
-        "role": role or target_type,
+        "role": codex_role,  # the Codex role sent in updatedInput.agent_type; "type" keeps flash-*
         "type": target_type,
         "model": target_model,
         "tier": tier,
@@ -367,3 +367,77 @@ def _codex_confirm_spawn(state: Dict[str, Any], args: Dict[str, Any], response: 
     if record is not None:
         record["agent_path"] = path
         subagents[key] = record
+
+
+_ROLLOUT_FIRST_LINE_CAP = 1024 * 1024
+
+
+def _codex_rollout_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """session_meta payload from the first line of the child's rollout JSONL ({} on any problem)."""
+    for key in ("transcript_path", "agent_transcript_path"):
+        path = payload.get(key)
+        if not isinstance(path, str) or not path:
+            continue
+        try:
+            with open(path, "rb") as fh:
+                line = fh.readline(_ROLLOUT_FIRST_LINE_CAP)
+            first = json.loads(line.decode("utf-8"))
+            meta = first.get("payload") if isinstance(first, dict) else None
+            if isinstance(meta, dict):
+                return meta
+        except Exception:
+            continue
+    return {}
+
+
+def codex_bind_agent(state: Dict[str, Any], payload: Dict[str, Any]) -> Optional[str]:
+    """Map a Codex child uuid (payload.agent_id) to its task_name record; return the record key.
+
+    Binds via the rollout's session_meta.agent_path, else via the only unbound record of the
+    child's role. Writes record["agent_id"] and state["codex_agent_ids"][uuid]; None if unbound.
+    """
+    if not is_codex_payload(payload):
+        return None
+    uuid = str(payload.get("agent_id") or "").strip()
+    if not uuid:
+        return None
+    subagents = state.get("subagents")
+    if not isinstance(subagents, dict):
+        return None
+    ids = state.get("codex_agent_ids")
+    known = ids.get(uuid) if isinstance(ids, dict) else None
+    if known and isinstance(subagents.get(known), dict):
+        return known
+
+    key = None
+    meta = _codex_rollout_meta(payload)
+    agent_path = str(meta.get("agent_path") or "").strip()
+    if agent_path and str(meta.get("id") or uuid) == uuid:
+        key = _codex_agent_key(agent_path)
+        if not isinstance(subagents.get(key), dict):
+            key = None
+    elif not agent_path:
+        agent_type = str(payload.get("agent_type") or "").strip()
+        cands = [k for k, r in subagents.items()
+                 if isinstance(r, dict) and agent_type and r.get("role") == agent_type and not r.get("agent_id")]
+        if len(cands) == 1:
+            key = cands[0]
+    if key is None:
+        return None
+    subagents[key]["agent_id"] = uuid
+    state.setdefault("codex_agent_ids", {})[uuid] = key
+    return key
+
+
+def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+    """Codex SubagentStop fires after every child turn: update only the bound record."""
+    key = codex_bind_agent(state, payload)
+    if key is None:
+        return None
+    rec = state["subagents"][key]
+    rec["active_branch"] = False
+    rec["stops"] = int(rec.get("stops") or 0) + 1
+    rec["last_turn_id"] = payload.get("turn_id")
+    if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
+        rec["report_ok"] = validate_subagent_report(str(payload.get("last_assistant_message") or "")) is None
+    return key

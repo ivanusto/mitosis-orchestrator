@@ -67,6 +67,7 @@ from .platforms.codex import (
     _handle_codex_exec_command,
     _handle_mitosis_tools,
     _handle_spawn_agent,
+    codex_subagent_stop,
 )
 from .routing import TEST_RUNNER_RE
 from .state import (
@@ -594,6 +595,12 @@ def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _handle_claude_subagent_stop(payload)
     state = load_state(payload)
     sync_subagents(payload, state)
+    if is_codex_payload(payload):
+        bound = codex_subagent_stop(payload, state)
+        _RECENT_BINDINGS.append({"agentId": payload.get("agent_id"), "boundTo": bound})
+        del _RECENT_BINDINGS[:-16]
+        save_state(payload, state)
+        return {}
     subagents = state.setdefault("subagents", {})
     pending = state.setdefault("pending_spawns", [])
 
@@ -615,6 +622,9 @@ def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
                 meta["active_branch"] = False
     save_state(payload, state)
     return {}
+
+
+_RECENT_BINDINGS: List[Dict[str, Any]] = []
 
 
 def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> None:
@@ -647,6 +657,9 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
         "payloadKeys": sorted(payload.keys()),
         "result": result,
     }
+    if _RECENT_BINDINGS:
+        entry["codexBinding"] = list(_RECENT_BINDINGS)
+        _RECENT_BINDINGS.clear()
     if _RECENT_DECISIONS:
         entry["decisions"] = [d.as_log() for d in _RECENT_DECISIONS]
         _RECENT_DECISIONS.clear()

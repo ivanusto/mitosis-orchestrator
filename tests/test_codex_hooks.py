@@ -156,7 +156,7 @@ OPAQUE = (
 CHILD = {"agent_id": "01a16158-4b8c-7740-8588-dc83af681e30", "agent_type": "explorer"}
 
 
-class CodexCollaborationTest(unittest.TestCase):
+class _CodexCollabBase(unittest.TestCase):
     def setUp(self):
         CodexHooksTest.setUp(self)
         self.sid = f"01a16158-{os.getpid():04x}-{id(self) & 0xffff:04x}"
@@ -186,6 +186,8 @@ class CodexCollaborationTest(unittest.TestCase):
         tool_input.update(extra)
         return self.pre("collaborationspawn_agent", tool_input)
 
+
+class CodexCollaborationTest(_CodexCollabBase):
     def test_collaboration_prefix_is_stripped(self):
         for raw in ("collaborationspawn_agent", "collaboration.followup_task", "collaboration__send_message"):
             name, _ = eo._extract_tool_call(self.payload("PreToolUse", tool_name=raw, tool_input={}))
@@ -287,6 +289,101 @@ class CodexCollaborationTest(unittest.TestCase):
         entry = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
         self.assertEqual((entry["tool"], entry["rawTool"]), ("spawn_agent", "collaborationspawn_agent"))
         self.assertEqual(entry["toolInputKeys"], ["message", "task_name"])
+
+
+UUID = "01a161ae-4d72-74f2-be05-d8fa31145c60"
+
+
+class CodexBindTest(_CodexCollabBase):
+    def rollout(self, meta, name="rollout.jsonl"):
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps({"timestamp": "t", "type": "session_meta", "payload": meta}) + "\n{\"type\":\"x\"}\n",
+                        encoding="utf-8")
+        return str(path)
+
+    def meta(self, **kw):
+        m = {"id": UUID, "thread_source": "subagent", "agent_role": "explorer", "agent_path": "/root/probe"}
+        m.update(kw)
+        return m
+
+    def stop(self, path=None, turn="t1", uuid=UUID, agent_type="explorer"):
+        extra = {"agent_transcript_path": path} if path else {}
+        p = self.payload("SubagentStop", stop_hook_active=False, agent_id=uuid, agent_type=agent_type,
+                         turn_id=turn, last_assistant_message="STATUS: COMPLETED", **extra)
+        p.pop("transcript_path")
+        return eo.handle_subagent_stop(p)
+
+    def state(self):
+        return eo._read_state_file(eo._state_file(self.payload("Stop")))
+
+    def test_roleless_v2_spawn_records_worker_role(self):
+        self.spawn_probe()
+        rec = self.subagents()["probe"]
+        self.assertEqual((rec["role"], rec["type"]), ("worker", "flash-worker"))
+
+    def test_scout_spawn_records_explorer_role(self):
+        self.spawn_probe(agent_type="explorer")
+        rec = self.subagents()["probe"]
+        self.assertEqual((rec["role"], rec["type"]), ("explorer", "flash-lite-scout"))
+
+    def test_bind_via_rollout_first_line(self):
+        self.spawn_probe(agent_type="explorer")
+        self.spawn_probe_named("other", "explorer")
+        self.assertEqual(self.stop(self.rollout(self.meta())), {})
+        st = self.state()
+        self.assertEqual(st["subagents"]["probe"]["agent_id"], UUID)
+        self.assertEqual(st["codex_agent_ids"][UUID], "probe")
+        self.assertNotIn("agent_id", st["subagents"]["other"])
+
+    def spawn_probe_named(self, name, role, **extra):
+        return self.pre("collaborationspawn_agent",
+                        dict({"task_name": name, "fork_turns": "none", "message": OPAQUE, "agent_type": role}, **extra))
+
+    def test_unreadable_rollout_single_same_role_binds(self):
+        self.spawn_probe(agent_type="explorer")
+        self.spawn_probe_named("w", "worker")
+        self.stop("/nonexistent/rollout.jsonl")
+        st = self.state()
+        self.assertEqual(st["subagents"]["probe"]["agent_id"], UUID)
+        self.assertNotIn("agent_id", st["subagents"]["w"])
+
+    def test_two_same_role_unbound_do_not_bind(self):
+        self.spawn_probe(agent_type="explorer")
+        self.spawn_probe_named("two", "explorer")
+        self.stop("/nonexistent/rollout.jsonl")
+        st = self.state()
+        self.assertNotIn("codex_agent_ids", st)
+        self.assertTrue(all("agent_id" not in r and "stops" not in r for r in st["subagents"].values()))
+
+    def test_mismatched_rollout_id_does_not_bind(self):
+        self.spawn_probe(agent_type="explorer")
+        self.stop(self.rollout(self.meta(id="other-uuid")))
+        self.assertNotIn("agent_id", self.subagents()["probe"])
+
+    def test_two_stops_touch_only_bound_record(self):
+        self.spawn_probe(agent_type="worker", workspace="branch")
+        self.spawn_probe_named("keep", "worker", workspace="branch")
+        path = self.rollout(self.meta(agent_role="worker"))
+        self.stop(path, turn="t1", agent_type="worker")
+        self.stop(path, turn="t2", agent_type="worker")
+        subs = self.subagents()
+        self.assertEqual(subs["probe"]["stops"], 2)
+        self.assertEqual(subs["probe"]["last_turn_id"], "t2")
+        self.assertFalse(subs["probe"]["active_branch"])
+        self.assertTrue(subs["probe"]["report_ok"] is False or subs["probe"]["report_ok"] is True)
+        self.assertTrue(subs["keep"]["active_branch"])
+        self.assertNotIn("stops", subs["keep"])
+
+    def test_agy_subagent_stop_with_subagent_id_unchanged(self):
+        state_p = {"toolCall": {}, "artifactDirectoryPath": self.tmp.name, "conversationId": "c1", "subagent_id": "flash-worker"}
+        st = eo.load_state(state_p)
+        st["pending_spawns"] = [{"role": "flash-worker", "type": "flash-worker", "active_branch": True},
+                                {"role": "other", "type": "other", "active_branch": True}]
+        eo.save_state(state_p, st)
+        eo.handle_subagent_stop(state_p)
+        pend = eo.load_state(state_p)["pending_spawns"]
+        self.assertFalse(pend[0]["active_branch"])
+        self.assertTrue(pend[1]["active_branch"])
 
 
 if __name__ == "__main__":
