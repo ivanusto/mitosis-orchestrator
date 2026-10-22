@@ -1,0 +1,40 @@
+{"id": "v5-en-01", "prompt": "Where is the migration that adds the users.last_login column defined? Just tell me the file.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-02", "prompt": "ls src/", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-03", "prompt": "git log --oneline -5 -- db/migrations", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-04", "prompt": "Which test file covers the retry logic in client/http.py? Read-only please.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-05", "prompt": "I'm not asking you to actually fix anything, just tell me why tests/test_queue.py is marked flaky.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-06", "prompt": "What is the default build target called in the Makefile?", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-07", "prompt": "rg TODO lib/", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-08", "prompt": "Explain how the debug logger in pkg/log/logger.go is wired up. Don't change anything.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-09", "prompt": "Why does .github/workflows/ci.yml pin node to 18? Check the comments and git blame for the reason.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-10", "prompt": "Is there any lock around the cache map in internal/cache/store.go that could explain the race condition report? Just read the code and describe it.", "expected": "flash_lite", "lang": "en"}
+{"id": "v5-en-11", "prompt": "Reproduce the crash in the upload handler by sending a 2GB file locally, then debug it and fix it.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-12", "prompt": "Can you run the Alembic migration on staging and tell me if it fails?", "expected": "flash", "lang": "en"}
+{"id": "v5-en-13", "prompt": "Could you run the full pytest suite and tell me which tests fail?", "expected": "flash", "lang": "en"}
+{"id": "v5-en-14", "prompt": "Fix the flaky test tests/test_queue.py::test_drain; run it 50 times to confirm it is stable.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-15", "prompt": "Write a regression test for issue #482 in tests/api/test_orders.py and make sure it passes.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-16", "prompt": "Create a new migration that adds an index on orders(customer_id) and apply it to the dev database.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-17", "prompt": "Run npm run build and fix any type errors it reports.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-18", "prompt": "Deploy the current main branch to the staging cluster with ./scripts/deploy.sh staging.", "expected": "flash", "lang": "en"}
+{"id": "v5-en-19", "prompt": "Would you mind bumping axios to 1.7 and making sure CI still passes locally?", "expected": "flash", "lang": "en"}
+{"id": "v5-en-20", "prompt": "Add a mutex around the cache map to remove the race condition, then run go test -race ./...", "expected": "flash", "lang": "en"}
+{"id": "v5-zh-01", "prompt": "db/migrations 裡新增 users.last_login 欄位的遷移檔是哪一個？只要告訴我檔名。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-02", "prompt": "ls app/", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-03", "prompt": "wc -l app/*.py", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-04", "prompt": "請問 CI 設定檔為什麼把 Python 固定在 3.11？看註解就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-05", "prompt": "不是要你去修改它，只要告訴我 tests/test_queue.py 為什麼被標成 flaky。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-06", "prompt": "Makefile 裡預設的建置目標叫什麼？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-07", "prompt": "哪個測試檔涵蓋了 payment/refund.py 的邏輯？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-08", "prompt": "說明 pkg/log 裡的除錯記錄器是怎麼接線的，唯讀即可。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-09", "prompt": "git log --oneline -5 -- db/", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-10", "prompt": "internal/cache/store.go 的 map 有沒有加鎖？我想知道回報的競態問題是否合理，只需閱讀程式碼回答。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v5-zh-11", "prompt": "在本機重現上傳 handler 的當機問題，用 2GB 檔案測試，然後除錯並修好。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-12", "prompt": "可以幫我在 staging 跑一下資料庫遷移，看有沒有失敗嗎？", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-13", "prompt": "跑完整的 pytest 並回報哪些測試失敗。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-14", "prompt": "修掉 tests/test_queue.py 的 flaky 測試，連跑 50 次確認穩定。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-15", "prompt": "為 issue #482 寫一個回歸測試放到 tests/api/test_orders.py，並確認會通過。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-16", "prompt": "新增一個遷移，在 orders(customer_id) 加索引，並套用到開發資料庫。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-17", "prompt": "執行 npm run build，把型別錯誤都修掉。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-18", "prompt": "把 main 分支部署到 staging，用 ./scripts/deploy.sh staging。", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-19", "prompt": "你能不能把 axios 升到 1.7，然後在本機跑 CI 確認沒壞？", "expected": "flash", "lang": "zh"}
+{"id": "v5-zh-20", "prompt": "幫 cache 的 map 加上 mutex 消除競態，再跑 go test -race ./...", "expected": "flash", "lang": "zh"}
