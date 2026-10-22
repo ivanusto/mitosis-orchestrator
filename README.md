@@ -87,16 +87,29 @@ keyword rules ──► confidence ≥ 0.9 ────────────�
 
 Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dangerous" means a worker task routed to the read-only scout).
 
-| Set | Role in 2.0.0 | v1.8.1 | v2.0.0 |
-| :--- | :--- | :--- | :--- |
-| routing_cases (183 -> 281) | training | 183/183, 0 dangerous | 281/281, 0 dangerous |
-| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 |
-| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 |
-| holdout v5 (40) | sealed blind, scored once | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 |
+| Set | Role | v1.8.1 | v2.0.0 | v2.1.0 |
+| :--- | :--- | :--- | :--- | :--- |
+| routing_cases (183 -> 281 -> 361) | training | 183/183, 0 dangerous | 281/281, 0 dangerous | 361/361, 0 dangerous |
+| 2.1 hand-written counterexamples (80, inside routing_cases) | training in 2.1.0 | | 44/80, 15, 21 | 80/80, 0, 0 |
+| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 | 38/40, 2, 0 |
+| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
+| holdout v5 (40) | sealed blind, scored once; tuned in 2.0.0 | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 | 39/40, 1, 0 |
+| holdout v6 (40) | sealed blind, scored once per version, not tuned | | 29/40, 8, 3 | 32/40, 8, 0 |
 
 v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
+
+v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`) was written blind by a subagent, sealed in commit 1c5d524 and scored once on 2026-10-22 in separate processes: 2.0.0 29/40, 8 cost, 3 dangerous; 2.1.0 32/40, 8 cost, 0 dangerous. Four of the cost errors are lookups typed `flash-worker`, which always routes to the worker. It was not tuned on afterwards.
+
+**2.1 routing additions.**
+- Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades.
+- A `flash-lite-scout` typed call is upgraded to the worker when it needs web access (`scout-web`, 0.9), ends with an action after a question (`trailing-imperative`) or still asks for a run (`run-directive`, 0.9).
+- A scout-typed call that declares read-only with its last word keeps the scout (`scout-read-only`, 0.7, judgeable).
+- New soft-request frames: "would it be possible to", "appreciate it if you" + past tense, "it would be great if you" + verb.
+- Questions without "?" (auxiliary inversion, "I wonder", "not sure", "curious", 不確定 / 不知道 / 想知道 / 好奇) arm the trailing-imperative check.
+- New Chinese verbs (弄成, 弄好, 搞定, 拉到, 換掉, 改掉, 調成, 調大, 調小) and lookups (弄清楚, 搞清楚, 釐清).
+- Known gaps: lookups typed `flash-worker` (the type wins), scout prompts over 600 characters skip the trailing-imperative check, Chinese verbs outside the list.
 
 Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
 
@@ -206,7 +219,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.0.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.1.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -271,7 +284,7 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 
 Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently (a matcher change in a new version needs approval again). `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
 
-Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Since 2.0 a child's own hooks (which carry an `agent_id`, not the `task_name`) are bound to its record through the first line of the child rollout (`session_meta.agent_path`), else through the only unbound record of the same role; `SubagentStop` only updates that record and never blocks. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
+Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Since 2.0 a child's own hooks (which carry an `agent_id`, not the `task_name`) are bound to its record through the first line of the child rollout (`session_meta.agent_path`), else through the only unbound record of the same role; `SubagentStop` updates that record (stops, `last_turn_id`, `report_ok`). Since 2.1 it also sends a bound scout/worker back once (`{"decision":"block"}`; Codex re-runs the child, and the second `SubagentStop` carries `stop_hook_active: true`) when its final message is not the four-header report, which happens when the primary dictates its own headings in the hidden `spawn_agent` message. Verified on Codex 0.163: a `SubagentStop` block makes the child answer again, and the parent receives the corrected report. The agent definitions say the four headers win over the task message, and the SessionStart notice tells the primary not to dictate headings. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
 
 ---
 
@@ -296,7 +309,7 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 | `PreToolUse` · **Circuit Breaker** | Trips after `2` consecutive failures across `run_command` / `Bash` / subagent spawns, halting runaway retry loops until the next turn. |
 | `PreToolUse` · **Workspace Guard** | Opt-in (`*_MITOSIS_AUTO_ALLOW=1`): auto-approves file and command tools that stay inside the workspace, while prompting (`ask`; `deny` on Codex, which has no `ask`) for outside paths, privilege escalation, root deletes, force pushes, or shell-piped downloads. When disabled it gives no verdict: on Claude Code the hook returns `{}`, so your normal permission rules and prompts apply (1.5.0 and earlier returned `allow`, which skipped them). |
 | `PostToolUse` | Pairs spawned subagents with platform metadata and updates failure streaks. |
-| `SubagentStop` / `Stop` | When the turn is idle and branch worktrees remain alive, reminds the primary agent once per set of live workers to merge/discard changes and clean them up. On Claude Code, `SubagentStop` also checks that a `flash-lite-scout` / `flash-worker` ended with the four-header report and, once per agent, sends it back to rewrite its final message (`CLAUDE_MITOSIS_ENFORCE_REPORT=0` disables). |
+| `SubagentStop` / `Stop` | When the turn is idle and branch worktrees remain alive, reminds the primary agent once per set of live workers to merge/discard changes and clean them up. On Claude Code and Codex (bound agents only; `CODEX_MITOSIS_ENFORCE_REPORT=0` disables there), `SubagentStop` also checks that a `flash-lite-scout` / `flash-worker` ended with the four-header report and, once per agent, sends it back to rewrite its final message (`CLAUDE_MITOSIS_ENFORCE_REPORT=0` disables). |
 
 ### 2. Bounded 4-Header Subagent Report Contract
 All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`):
@@ -333,6 +346,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | Set to `0` to stop adding `effort` to pinned `Agent` calls in Claude Code (models are still pinned). |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code effort pinned per tier (`low`, `medium`, `high`, `xhigh`, `max`); a valid `effort` passed by the caller wins. |
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | Set to `0` to stop `SubagentStop` from sending a plugin subagent back when its final message is not the four-header report. |
+| `CODEX_MITOSIS_ENFORCE_REPORT` | `1` | Set to `0` to stop Codex `SubagentStop` from sending a mitosis subagent back once when its final message is not the four-header report. |
 | `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | Set to `0` to stop appending the four-header `REPORT FORMAT` block to subagent prompts that lack one (agy `invoke_subagent`, Claude Code `Agent`). |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | Set to `1` to enable the in-workspace permission scope guard in interactive sessions. |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | Maximum distinct workspace files the primary agent may edit directly in a single turn. |
@@ -383,7 +397,7 @@ The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pin
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 361 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # 373 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)

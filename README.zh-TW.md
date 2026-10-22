@@ -94,16 +94,29 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 只看規則層，判斷器關閉。儲存格格式為正確數/40、成本誤差、危險（「危險」指把應由執行者處理的任務送給唯讀的偵察者）。
 
-| 資料集 | 2.0.0 中的角色 | v1.8.1 | v2.0.0 |
-| :--- | :--- | :--- | :--- |
-| routing_cases（183 -> 281） | 訓練 | 183/183，0 危險 | 281/281，0 危險 |
-| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 |
-| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 |
-| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 |
-| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 |
-| holdout v5（40） | 封存盲測，只評分一次 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 |
+| 資料集 | 角色 | v1.8.1 | v2.0.0 | v2.1.0 |
+| :--- | :--- | :--- | :--- | :--- |
+| routing_cases（183 -> 281 -> 361） | 訓練 | 183/183，0 危險 | 281/281，0 危險 | 361/361，0 危險 |
+| 2.1 手寫反例（80，已併入 routing_cases） | 於 2.1.0 訓練 | | 44/80，15，21 | 80/80，0，0 |
+| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 | 38/40，2，0 |
+| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 | 40/40，0，0 |
+| holdout v5（40） | 封存盲測，只評分一次；於 2.0.0 調校 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 | 39/40，1，0 |
+| holdout v6（40） | 封存盲測，每版只評分一次，未調校 | | 29/40，8，3 | 32/40，8，0 |
 
 v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
+
+v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`）由子代理盲寫，於 commit 1c5d524 封存，並於 2026-10-22 以獨立程序各評分一次：2.0.0 為 29/40，8 筆成本誤差，3 筆危險；2.1.0 為 32/40，8 筆成本誤差，0 筆危險。其中 4 筆成本誤差是標為 `flash-worker` 的查詢，這類呼叫一律交給執行者。封存後未再依 v6 調校。
+
+**2.1 路由新增項目。**
+- 只是詢問「哪個指令會執行某事」的執行用語視為主題；若仍殘留「並執行它」之類的要求，仍會升級。
+- 標為 `flash-lite-scout` 的呼叫，若需要網路存取（`scout-web`，0.9）、在問句之後以行動結尾（`trailing-imperative`），或仍要求執行（`run-directive`，0.9），會升級給執行者。
+- 標為偵察者的呼叫若在最後一句聲明唯讀，則維持由偵察者處理（`scout-read-only`，0.7，可交由判斷器裁決）。
+- 新增委婉請求句型："would it be possible to"、"appreciate it if you" 加過去式、"it would be great if you" 加動詞。
+- 沒有問號的問句（助動詞倒裝、"I wonder"、"not sure"、"curious"、不確定／不知道／想知道／好奇）也會啟動 trailing-imperative 檢查。
+- 新增中文動詞（弄成、弄好、搞定、拉到、換掉、改掉、調成、調大、調小）與查詢用語（弄清楚、搞清楚、釐清）。
+- 已知缺口：標為 `flash-worker` 的查詢（以類型為準）、超過 600 字元的偵察者提示詞會略過 trailing-imperative 檢查、清單以外的中文動詞。
 
 先前輪次（1.6.0 到 1.7.0），儲存格格式為正確數/40、危險：
 
@@ -213,7 +226,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.0.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.1.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -278,7 +291,7 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 
 請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過（新版改了 matcher 時要重新核准）。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
 
-Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。2.0 起，子代理自己的 hook（帶的是 `agent_id`，不是 `task_name`）會透過子代理 rollout 的第一行（`session_meta.agent_path`）綁定到對應紀錄，否則綁定到同角色中唯一尚未綁定的紀錄；`SubagentStop` 只更新該筆紀錄，不會封鎖。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
+Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。2.0 起，子代理自己的 hook（帶的是 `agent_id`，不是 `task_name`）會透過子代理 rollout 的第一行（`session_meta.agent_path`）綁定到對應紀錄，否則綁定到同角色中唯一尚未綁定的紀錄；`SubagentStop` 會更新該筆紀錄（stops、`last_turn_id`、`report_ok`）。2.1 起，若已綁定的偵察或執行子代理最後訊息不是四標頭回報（常見原因是尖端模型在讀不到的 `spawn_agent` 訊息裡自訂了標頭），會退回一次（`{"decision":"block"}`，Codex 讓子代理重答，第二次 `SubagentStop` 帶 `stop_hook_active: true`）。已於 Codex 0.163 驗證：`SubagentStop` 退回後，子代理會重新回答，主代理收到的是修正後的回報。代理定義檔註明四標頭優先於任務訊息，SessionStart 提示也會告訴主代理不要自訂回報標頭。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
 
 ---
 
@@ -303,7 +316,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 指令或子代理呼叫連續失敗達 `2` 次即熔斷，阻止無效重試並要求回報阻礙原因。 |
 | `PreToolUse` · **工作區範圍守衛 (Workspace Guard)** | 選用（`*_MITOSIS_AUTO_ALLOW=1`）：工作區內的檔案讀寫與安全命令自動放行；跨出工作區、提權或危險指令轉為詢問（`ask`；Codex 沒有 `ask`，改為 `deny`）。未啟用時不表態：Claude Code 端回傳 `{}`，沿用使用者原本的權限規則與提示（1.5.0 以前回傳 `allow`，會略過權限提示）。 |
 | `PostToolUse` | 配對新建子代理中繼資料，並更新連續失敗計數。 |
-| `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。Claude Code 端的 `SubagentStop` 另會檢查 `flash-lite-scout` / `flash-worker` 是否以四標頭回報結尾，不符時每個子代理退回一次要求重寫（`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 關閉）。 |
+| `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。Claude Code 與 Codex（僅限已綁定的子代理，Codex 以 `CODEX_MITOSIS_ENFORCE_REPORT=0` 關閉）的 `SubagentStop` 另會檢查 `flash-lite-scout` / `flash-worker` 是否以四標頭回報結尾，不符時每個子代理退回一次要求重寫（`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 關閉）。 |
 
 ### 2. 有界四標頭子代理回報合約 (Bounded 4-Header Report Contract)
 所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結）：
@@ -339,6 +352,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | 設為 `0` 時 Claude Code 端不再為釘定的 `Agent` 呼叫加上 `effort`（模型仍會釘定）。 |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code 各階層釘定的 effort（`low`、`medium`、`high`、`xhigh`、`max`）；呼叫端自帶的合法 `effort` 優先。 |
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，`SubagentStop` 不再因最後訊息不是四標頭回報而退回外掛子代理。 |
+| `CODEX_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，Codex 的 `SubagentStop` 不再因最後訊息不是四標頭回報而把外掛子代理退回一次。 |
 | `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | 設為 `0` 時，不再為缺少 `REPORT FORMAT` 區塊的子代理提示詞自動補上（agy `invoke_subagent`、Claude Code `Agent`）。 |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。 |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
@@ -389,7 +403,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 361 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # 373 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）

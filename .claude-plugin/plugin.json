@@ -1,6 +1,6 @@
 {
   "name": "mitosis-orchestrator",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Cross-model frontier orchestrator with unified 3-platform support (Google Antigravity agy, Anthropic Claude Code, OpenAI Codex CLI): coordinates frontier primary models with sonnet / flash / gpt-5.6-terra workers and haiku / flash_lite / gpt-5.6-luna scouts.",
   "author": {
     "name": "ivanusto"

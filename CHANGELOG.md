@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0 - 2026-10-22
+
+### Changed
+- Routing (rule layer, judge off). Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades. A `flash-lite-scout` typed call is upgraded to the worker when it needs web access (`scout-web`, 0.9), ends with an action after a question (`trailing-imperative`) or still asks for a run (`run-directive`, 0.9). A scout-typed call that declares read-only with its last word keeps the scout (`scout-read-only`, 0.7, judgeable).
+- New soft-request frames: "would it be possible to", "appreciate it if you" + past tense, "it would be great if you" + verb. Questions without "?" (auxiliary inversion, "I wonder", "not sure", "curious", 不確定 / 不知道 / 想知道 / 好奇) now arm the trailing-imperative check.
+- New Chinese verbs (弄成, 弄好, 搞定, 拉到, 換掉, 改掉, 調成, 調大, 調小) and lookups (弄清楚, 搞清楚, 釐清).
+- Routing eval: new sealed blind holdout v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`, sealed in commit 1c5d524), scored once on 2026-10-22 in separate processes: 2.0.0 29/40, 8 cost, 3 dangerous; 2.1.0 32/40, 8 cost, 0 dangerous. Four of the cost errors are lookups typed `flash-worker`, which always routes to the worker. No tuning on v6 afterwards.
+- Known gaps: lookups typed `flash-worker` (the type wins), scout prompts over 600 characters skip the trailing-imperative check, Chinese verbs outside the list.
+
+### Added
+- Codex `SubagentStop` blocks a bound scout/worker once when its final message is not the four-header report (the primary often dictates its own headings in the encrypted `spawn_agent` message). Never blocks when `stop_hook_active` is true, for unbound agents or non-mitosis roles; `CODEX_MITOSIS_ENFORCE_REPORT=0` disables. After the corrected reply `report_ok` becomes true.
+- Agent definitions state that the four headers win over any layout in the task message; the Codex SessionStart notice tells the primary not to dictate report headings.
+- Tests: 373 in total (361 in 2.0.0).
+
 ## 2.0.0 - 2026-10-22
 
 ### Changed

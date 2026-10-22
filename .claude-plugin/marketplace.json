@@ -11,7 +11,7 @@
       "name": "mitosis-orchestrator",
       "source": "./",
       "description": "Cross-model orchestrator: pins frontier primary models while routing subagents to haiku scouts and sonnet workers with lifecycle guardrails.",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "license": "MIT"
     }
   ]

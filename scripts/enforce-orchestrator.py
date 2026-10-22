@@ -71,6 +71,8 @@ Environment variables:
     CLAUDE_MITOSIS_WORKER_EFFORT=<e>    (Claude Code) worker effort (default: medium)
     CLAUDE_MITOSIS_ENFORCE_REPORT=0     (Claude Code) do not block a plugin subagent's stop when its
                                         final message is not the four-header report
+    CODEX_MITOSIS_ENFORCE_REPORT=0      (Codex) do not send a mitosis subagent back once when its
+                                        final message is not the four-header report
     AGY_MITOSIS_APPEND_REPORT_FORMAT=0  do not append the REPORT FORMAT block to subagent prompts
                                         that lack one (agy invoke_subagent, Claude Code Agent)
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
