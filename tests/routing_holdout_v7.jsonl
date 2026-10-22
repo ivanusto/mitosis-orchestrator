@@ -1,0 +1,40 @@
+{"id": "v7-en-01", "prompt": "Where is `build_index` defined and who calls it?", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-02", "prompt": "Run `pytest tests/test_cache.py -x` and tell me which test fails first, then fix the off-by-one in src/cache/lru.py.", "expected": "flash", "lang": "en"}
+{"id": "v7-en-03", "prompt": "Read tests/test_cache.py and tell me what the fixture `redis_stub` returns. Do not run the tests.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-en-04", "prompt": "Look up the changelog for pydantic 2.9 on the web and summarize the breaking changes that affect our validators in app/schemas/.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-en-05", "prompt": "What version of pydantic is pinned in requirements.txt?", "expected": "flash_lite", "lang": "en"}
+{"id": "v7-en-06", "prompt": "Bump axios to ^1.7.4 in packages/web/package.json, run npm install, and make sure npm run build still passes.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-07", "prompt": "git log --oneline -5 src/auth/ and tell me who last touched token.py", "expected": "flash_lite", "lang": "en"}
+{"id": "v7-en-08", "prompt": "Create scripts/seed_dev.py that inserts 50 fake users via the SQLAlchemy session in db/session.py. Don't touch the models.", "expected": "flash", "lang": "en"}
+{"id": "v7-en-09", "prompt": "Does the build script in package.json call tsc or esbuild? Just read it, don't run anything.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-10", "prompt": "Make the retry limit in worker/config.yaml 5 instead of 3.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-11", "prompt": "List files in migrations/ whose names contain 'users'.", "expected": "flash_lite", "lang": "en"}
+{"id": "v7-en-12", "prompt": "Why is the CI job 'lint-and-types' failing on main? Reproduce it locally with mypy --strict src/ and report the errors you get.", "expected": "flash", "lang": "en"}
+{"id": "v7-en-13", "prompt": "How does the retry decorator in utils/retry.py decide when to give up? Explain from the code, I only need the logic.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-en-14", "prompt": "Rename the env var API_BASE to SERVICE_API_URL everywhere in the repo, including docker-compose.yml and .github/workflows. Commit when done.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-en-15", "prompt": "grep for TODO(fix) in src/ and give me file:line for each hit.", "expected": "flash_lite", "lang": "en"}
+{"id": "v7-en-16", "prompt": "Benchmark the two JSON parsers on fixtures/large.json using hyperfine, 20 runs each, and give me the numbers.", "expected": "flash", "lang": "en"}
+{"id": "v7-en-17", "prompt": "Is there a job in .github/workflows/ci.yml that runs pytest? Just read the file and name the job; the failing build from yesterday is not your concern.", "expected": "flash_lite", "lang": "en"}
+{"id": "v7-en-18", "prompt": "Check the Terraform docs for aws_lb_target_group health_check options, then update infra/alb.tf so the interval is 15s and the matcher is 200-299.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-19", "prompt": "Which Dockerfile defines the base image for the api service?", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-en-20", "prompt": "Trace a request from api/routes/orders.py through the services, repos and queue publisher across every module involved, and write up the call graph listing each file touched.", "expected": "flash", "lang": "en"}
+{"id": "v7-zh-01", "prompt": "`get_user_by_email` 定義在哪個檔案?", "expected": "flash_lite", "lang": "zh"}
+{"id": "v7-zh-02", "prompt": "執行 `make test`,把失敗的測試修好,只能改 src/parser/ 底下的檔案。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-zh-03", "prompt": "讀一下 config/settings.py,告訴我 DEBUG 預設值是什麼,不要修改任何東西。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-zh-04", "prompt": "幫我上網查 Next.js 15 App Router 的 caching 預設行為變更,整理成三點。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-05", "prompt": "看一下 git diff HEAD~1 有改到哪些檔案。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v7-zh-06", "prompt": "把 deploy/k8s/api.yaml 的 replicas 從 2 改成 4,然後 git commit 並 push。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-zh-07", "prompt": "这个仓库里哪里用到了 redis 连接池?给我文件路径就好。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-zh-08", "prompt": "请安装 ruff 并跑一遍 ruff check .,把可自动修的都修掉。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-09", "prompt": "package.json 裡的 test script 實際執行什麼指令?只要讀,不用跑。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-zh-10", "prompt": "新增 tests/test_pagination.py,涵蓋 page=0 與 page 超出範圍兩種情況,寫完跑一次確認通過。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-11", "prompt": "列出 docs/ 底下所有 .md 檔名。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v7-zh-12", "prompt": "跑 alembic upgrade head 看看會不會報錯,把錯誤訊息貼回來。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-zh-13", "prompt": "CI 設定檔 .github/workflows/ci.yml 裡有沒有 lint 這一步?CI 紅燈的原因先不用查。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v7-zh-14", "prompt": "調查 worker 為什麼偶爾卡住:跨 services/、queue/、infra/ 追蹤相關程式與設定,並查 celery 官方文件對 acks_late 的說明。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-15", "prompt": "middleware/auth.py 裡的 verify_token 在 token 過期時會回傳什麼?", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v7-zh-16", "prompt": "把 README 裡的安裝步驟改成使用 uv,不要動其他章節。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-17", "prompt": "目前在哪個 branch?有沒有未提交的變更?", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v7-zh-18", "prompt": "重構 utils/date.py 的 parse_ts,讓它支援帶時區的 ISO8601,改完跑 pytest tests/utils。", "expected": "flash", "lang": "zh"}
+{"id": "v7-zh-19", "prompt": "docker-compose.yml 裡 db 服務對外開的 port 是多少?", "expected": "flash_lite", "lang": "zh"}
+{"id": "v7-zh-20", "prompt": "用 wrk 對 localhost:8080/health 壓測 30 秒,回報 p99 延遲。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
