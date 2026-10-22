@@ -67,6 +67,7 @@ from .platforms.codex import (
     _handle_codex_exec_command,
     _handle_mitosis_tools,
     _handle_spawn_agent,
+    codex_report_block,
     codex_subagent_stop,
 )
 from .routing import TEST_RUNNER_RE
@@ -599,8 +600,9 @@ def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         bound = codex_subagent_stop(payload, state)
         _RECENT_BINDINGS.append({"agentId": payload.get("agent_id"), "boundTo": bound})
         del _RECENT_BINDINGS[:-16]
+        result = codex_report_block(state, bound, payload)
         save_state(payload, state)
-        return {}
+        return result
     subagents = state.setdefault("subagents", {})
     pending = state.setdefault("pending_spawns", [])
 

@@ -351,7 +351,9 @@ def codex_policy_notice() -> str:
         "(`agent_type: \"explorer\"`) and multi-file research, test runs, web/docs "
         f"research and scoped code edits to `{codex_tier_model('flash')}` (`agent_type: \"worker\"`). "
         "Never use `model: \"inherit\"` on subagents. "
-        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md. "
+        "Do not dictate other report headings in spawn_agent messages: subagents answer with "
+        "STATUS/FILES_CHANGED/VERIFICATION/NOTES."
     )
 
 

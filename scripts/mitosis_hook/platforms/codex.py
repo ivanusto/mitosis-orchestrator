@@ -13,6 +13,7 @@ from ..common import (
     WORKER_TYPE,
     _allow,
     _deny,
+    _get_env,
     _no_opinion,
     is_claude_code_payload,
     is_codex_payload,
@@ -21,6 +22,7 @@ from ..guards import _parse_codex_exec, _rewrite_codex_exec_model
 from ..models import codex_tier_effort, codex_tier_model
 from .agy import _handle_invoke_subagent
 from ..report import (
+    REPORT_BLOCK_REASON,
     _append_report_format_enabled,
     append_report_format,
     prompt_has_report_format,
@@ -441,3 +443,23 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
     if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
         rec["report_ok"] = validate_subagent_report(str(payload.get("last_assistant_message") or "")) is None
     return key
+
+
+def codex_report_block(state: Dict[str, Any], key: Optional[str], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Block-once for a bound mitosis scout/worker whose final message is not the four-header report.
+
+    Codex lets the primary dictate its own headings (the spawn_agent message is opaque to hooks),
+    so the child gets one chance to re-answer; the second SubagentStop carries stop_hook_active.
+    """
+    if key is None or payload.get("stop_hook_active") is True:
+        return {}
+    if _get_env("AGY_MITOSIS_ENFORCE_REPORT", default="1") == "0":
+        return {}
+    rec = state["subagents"][key]
+    if rec.get("type") not in (WORKER_TYPE, SCOUT_TYPE) or rec.get("report_blocked"):
+        return {}
+    error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
+    if error is None:
+        return {}
+    rec["report_blocked"] = True
+    return {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}

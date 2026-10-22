@@ -306,10 +306,14 @@ class CodexBindTest(_CodexCollabBase):
         m.update(kw)
         return m
 
-    def stop(self, path=None, turn="t1", uuid=UUID, agent_type="explorer"):
+    GOOD = ("STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ran grep, 2 hits\n"
+            "NOTES: found it")
+    BAD = "STATUS: COMPLETED\nRESULT: done\nEVIDENCE: x\nNEXT: none"
+
+    def stop(self, path=None, turn="t1", uuid=UUID, agent_type="explorer", msg=None, active=False):
         extra = {"agent_transcript_path": path} if path else {}
-        p = self.payload("SubagentStop", stop_hook_active=False, agent_id=uuid, agent_type=agent_type,
-                         turn_id=turn, last_assistant_message="STATUS: COMPLETED", **extra)
+        p = self.payload("SubagentStop", stop_hook_active=active, agent_id=uuid, agent_type=agent_type,
+                         turn_id=turn, last_assistant_message=self.GOOD if msg is None else msg, **extra)
         p.pop("transcript_path")
         return eo.handle_subagent_stop(p)
 
@@ -373,6 +377,55 @@ class CodexBindTest(_CodexCollabBase):
         self.assertTrue(subs["probe"]["report_ok"] is False or subs["probe"]["report_ok"] is True)
         self.assertTrue(subs["keep"]["active_branch"])
         self.assertNotIn("stops", subs["keep"])
+
+    def bound_stop(self, **kw):
+        return self.stop(self.rollout(self.meta()), **kw)
+
+    def test_bad_report_blocks_once(self):
+        self.spawn_probe(agent_type="explorer")
+        out = self.bound_stop(msg=self.BAD)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("four-header report", out["reason"])
+        self.assertTrue(self.subagents()["probe"]["report_blocked"])
+        self.assertFalse(self.subagents()["probe"]["report_ok"])
+        self.assertEqual(self.bound_stop(msg=self.BAD, turn="t2"), {})
+
+    def test_stop_hook_active_never_blocks(self):
+        self.spawn_probe(agent_type="explorer")
+        self.assertEqual(self.bound_stop(msg=self.BAD, active=True), {})
+        self.assertNotIn("report_blocked", self.subagents()["probe"])
+
+    def test_valid_report_never_blocks(self):
+        self.spawn_probe(agent_type="worker")
+        self.assertEqual(self.stop(self.rollout(self.meta(agent_role="worker")), agent_type="worker"), {})
+        rec = self.subagents()["probe"]
+        self.assertTrue(rec["report_ok"])
+        self.assertNotIn("report_blocked", rec)
+
+    def test_unbound_agent_does_not_block(self):
+        self.spawn_probe(agent_type="explorer")
+        self.assertEqual(self.bound_stop(msg=self.BAD, uuid="unknown-uuid", agent_type="worker"), {})
+
+    def test_non_mitosis_role_does_not_block(self):
+        self.spawn_probe(agent_type="explorer")
+        pl = self.payload("Stop")
+        st = eo.load_state(pl)
+        st["subagents"]["probe"]["type"] = "custom"
+        eo.save_state(pl, st)
+        self.assertEqual(self.bound_stop(msg=self.BAD), {})
+
+    def test_report_ok_flips_after_corrected_reply(self):
+        self.spawn_probe(agent_type="explorer")
+        self.assertEqual(self.bound_stop(msg=self.BAD)["decision"], "block")
+        self.assertEqual(self.bound_stop(msg=self.GOOD, turn="t2", active=True), {})
+        rec = self.subagents()["probe"]
+        self.assertTrue(rec["report_ok"])
+        self.assertEqual(rec["stops"], 2)
+
+    def test_enforce_report_flag_disables_block(self):
+        self.spawn_probe(agent_type="explorer")
+        os.environ["CODEX_MITOSIS_ENFORCE_REPORT"] = "0"
+        self.assertEqual(self.bound_stop(msg=self.BAD), {})
 
     def test_agy_subagent_stop_with_subagent_id_unchanged(self):
         state_p = {"toolCall": {}, "artifactDirectoryPath": self.tmp.name, "conversationId": "c1", "subagent_id": "flash-worker"}

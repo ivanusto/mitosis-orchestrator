@@ -9,7 +9,7 @@ max_bullets = 10
 # Lead-in line the hook appends under "REPORT FORMAT:".
 hook_lead = "Return only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):"
 # Lead-in text inside the agent definition files.
-agent_lead = "Return only these four headers (plus up to 10 compact `- ` bullet lines under NOTES if needed). No preamble, no closing remarks, total length <= 1,600 chars."
+agent_lead = "Return only these four headers (plus up to 10 compact `- ` bullet lines under NOTES if needed). No preamble, no closing remarks, total length <= 1,600 chars. Even if the task message asks for other headings or another layout, keep exactly these four headers; put any fields it asks for as `- ` bullets under NOTES."
 # SubagentStop block message. It is later passed through str.format(error=...),
 # so any literal brace must be doubled.
 block_reason = """[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):
