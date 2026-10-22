@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0 - 2026-10-22
+
+### Changed
+- `scripts/enforce-orchestrator.py` (3,667 lines) is split into the `scripts/mitosis_hook/` package: `common`, `models`, `report`, `routing`, `state`, `guards`, `handlers` and `platforms/{claude,codex,agy}`. The entry script keeps its path, `HANDLERS` and `main()`, and re-exports every name it defined before, so hook configs, the MCP server and by-path `import` users are unaffected. Verified by replaying 464 recorded and synthetic payloads through 1.8.1 and 2.0 (byte-identical stdout, exit codes, state and settings files) and identical `decide_subagent` output on 343 labelled prompts. CI `vermin` covers the package. The Python 3.8 floor is unchanged.
+
+### Fixed
+- Codex child uuid binding. Codex 0.163 child hooks carry `agent_id` while records are keyed by `task_name`; `SubagentStop` read agy's `subagent_id`, found nothing and cleared `active_branch` on every record. A child now binds through the first line of its rollout (`session_meta.agent_path`), else through the only unbound record of the same role. `SubagentStop` fires after every child turn, so it updates only that record (stops, `last_turn_id`, `report_ok`), never blocks and never marks it dead.
+- Codex role field. Role-less spawns were recorded with role `flash-worker`; the record now holds the Codex role actually sent (`worker` / `explorer`).
+- Routing (rule layer, judge off): read-only questions naming migration, debug, build, tests or race condition now go to the scout (rule `question-noun`, 0.7). A single read-only shell command (`ls`, `wc`, `rg`, `git log` ...) is a lookup (`readonly-command`, 0.8). Negation reaches four words and the Chinese `不用`, `不是要你` and `並非要你`.
+- Routing: dangerous misroutes that already existed in 1.8.1 are closed. A question followed by an imperative or conditional clause ("Where are the tests? Make them pass.", `trailing-imperative`, 0.85), shell mutations in pipelines (`sed -i`, `xargs rm/mv`, `-exec rm`, `dd of=`, `tee` into a file; `shell-mutation`, 0.95), and polite requests with a gerund ("Would you mind bumping axios and making sure CI passes?", `polite-request`, 0.9; also `麻煩你` / `能不能幫我` + action). These three rules are not judgeable, so a judge cannot send them to the scout. Also: "roll it back" is imperative, a shell redirect is a run task, and a `-delete` flag is not a path part.
+- Routing eval (correct out of 40, cost errors, dangerous), 1.8.1 -> 2.0.0: v1 39/40, 1, 0 (unchanged); v2 39/40, 1, 0 (unchanged); v3 36 -> 38 (cost errors 4 -> 2); v4 33 -> 40 (now a tuning set); `routing_cases` grew from 183 to 281 labelled prompts, all correct. New sealed blind holdout v5 (sha256 `160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`, written without access to the scripts or earlier sets) was scored once against the 2.0 candidate rules: 37/40, 2 cost, 1 dangerous (`v5-en-19`, a polite gerund request); 1.8.1 scores 29/40, 10 cost, 1 dangerous on the same set. The `polite-request` rule was then written from new cases only; final 38/40, 2 cost, 0 dangerous. v5 is no longer blind; the next tuning round needs a v6 first.
+
+### Added
+- Tests: 361 in total (338 in 1.8.1).
+
+### Upgrade notes
+- No hook config or matcher change, so Codex does not need re-approval in `/hooks`.
+- Claude Code: update the plugin and restart the session. Codex: re-add the plugin (the cache is a snapshot). agy: picks up the repo.
+- **Behaviour change:** more read-only questions go to the cheaper scout, and some prompts that 1.8.1 sent to the scout (question + imperative, polite gerund requests, `sed -i` pipelines) now go to the worker.
+- Anyone importing private helpers from the package directly should import from the entry script or `mitosis_hook.*` (the internal layout may change).
+- Not in this release (roadmap): embedding stage, escalate-and-retry on test failure, Agent Teams routing, `docs/cost.md` split.
+
 ## 1.8.1 - 2026-10-22
 
 ### Fixed

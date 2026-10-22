@@ -71,7 +71,20 @@ keyword rules ──► confidence ≥ 0.9 ────────────�
 
 ### Routing eval
 
-Rule layer only, judge off. "Dangerous" means a worker task routed to the read-only scout.
+Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dangerous" means a worker task routed to the read-only scout).
+
+| Set | Role in 2.0.0 | v1.8.1 | v2.0.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases (183 -> 281) | training | 183/183, 0 dangerous | 281/281, 0 dangerous |
+| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 |
+| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 |
+| holdout v5 (40) | sealed blind, scored once | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 |
+
+v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
+
+Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
 
 | Set | Role in 1.7.0 | v1.6.0 | v1.7.0 |
 | :--- | :--- | :--- | :--- |
@@ -81,7 +94,7 @@ Rule layer only, judge off. "Dangerous" means a worker task routed to the read-o
 | holdout v3 (40) | blind first contact after the first tuning round, then training | 25/40, 9 | 29/40, 6 at first contact; 36/40, 0 after |
 | holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
 
-The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors are lookups sent to the worker (cost, not failure). Known limitation: read-only questions that name debug, migration or build words still go to the worker without a judge; a judge (`MITOSIS_JUDGE_URL`) now gets a say on noun-use heavy hits (confidence 0.75).
+The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors were lookups sent to the worker (cost, not failure): read-only questions that name debug, migration or build words. 2.0.0 fixes that class in the rule layer (see the table above).
 
 ---
 
@@ -179,7 +192,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.8.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.0.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -244,14 +257,14 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 
 Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently (a matcher change in a new version needs approval again). `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
 
-Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
+Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Since 2.0 a child's own hooks (which carry an `agent_id`, not the `task_name`) are bound to its record through the first line of the child rollout (`session_meta.agent_path`), else through the only unbound record of the same role; `SubagentStop` only updates that record and never blocks. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
 
 ---
 
 ## Bundled Components & Guardrails
 
 ### 1. Lifecycle Enforcement Hooks ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
-Zero-dependency Python 3.8+ standard library hook engine enforcing orchestration discipline across every turn (~30 ms per call). On Claude Code the `PreToolUse` matcher is limited to the tools the engine actually inspects (`Agent`, `Task`, `Bash`, `Read`, `NotebookRead`, `Write`, `Edit`, `NotebookEdit`, `SendMessage`), so `Grep` / `Glob` / `WebFetch` / MCP calls no longer pay the hook start-up cost:
+Zero-dependency Python 3.8+ standard library hook engine (entry script plus the [`scripts/mitosis_hook/`](./scripts/mitosis_hook) package) enforcing orchestration discipline across every turn (~30 ms per call). On Claude Code the `PreToolUse` matcher is limited to the tools the engine actually inspects (`Agent`, `Task`, `Bash`, `Read`, `NotebookRead`, `Write`, `Edit`, `NotebookEdit`, `SendMessage`), so `Grep` / `Glob` / `WebFetch` / MCP calls no longer pay the hook start-up cost:
 
 | Hook Event | Guardrail / Behavior |
 | :--- | :--- |
@@ -356,12 +369,29 @@ The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pin
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 307 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # 361 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session
 ```
+
+### Code layout
+
+The hook engine lives in the [`scripts/mitosis_hook/`](./scripts/mitosis_hook) package. [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py) stays the entry point (same path, `HANDLERS`, `main()`) and re-exports every name it defined before 2.0, so hook configs, the MCP server and by-path imports keep working.
+
+| Module | Role |
+| :--- | :--- |
+| `common` | Shared constants, platform detection, hook-result helpers |
+| `models` | Tier and frontier logic, primary-model settings |
+| `report` | Subagent REPORT FORMAT handling |
+| `routing` | Routing rules, judge hook, subagent classification |
+| `state` | Per-session state file, locking, routing telemetry |
+| `guards` | Workspace and path guards, scout allowlist, shell parsing |
+| `handlers` | Hook mode handlers |
+| `platforms/claude`, `platforms/codex`, `platforms/agy` | Per-platform tool handling |
+
+Dependency order: `common` -> `models` / `report` -> `routing` / `state` / `guards` -> `platforms` -> `handlers`.
 
 ### Single source (`spec/`)
 

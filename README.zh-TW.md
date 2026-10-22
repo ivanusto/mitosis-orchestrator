@@ -78,7 +78,20 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ### 路由評測
 
-只看規則層，判斷器關閉。「危險」指把應由執行者處理的任務送給唯讀的偵察者。
+只看規則層，判斷器關閉。儲存格格式為正確數/40、成本誤差、危險（「危險」指把應由執行者處理的任務送給唯讀的偵察者）。
+
+| 資料集 | 2.0.0 中的角色 | v1.8.1 | v2.0.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases（183 -> 281） | 訓練 | 183/183，0 危險 | 281/281，0 危險 |
+| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 |
+| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 |
+| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 |
+| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 |
+| holdout v5（40） | 封存盲測，只評分一次 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 |
+
+v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
+
+先前輪次（1.6.0 到 1.7.0），儲存格格式為正確數/40、危險：
 
 | 資料集 | 1.7.0 中的角色 | v1.6.0 | v1.7.0 |
 | :--- | :--- | :--- | :--- |
@@ -88,7 +101,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | holdout v3（40） | 第一輪調校後的首次盲測，之後轉為訓練 | 25/40，9 | 首次 29/40，6；調校後 36/40，0 |
 | holdout v4（40） | 盲測，只評分一次，未調校 | 25/40，8 | 33/40，0 |
 
-1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗）。已知限制：提到 debug、migration 或 build 等字眼的唯讀問題，在沒有判斷器時仍會送給執行者；判斷器（`MITOSIS_JUDGE_URL`）現在可以對名詞用法的重量級命中（信心 0.75）表示意見。
+1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 當時剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗），也就是提到 debug、migration 或 build 等字眼的唯讀問題；2.0.0 已在規則層修正這一類（見上表）。
 
 ---
 
@@ -186,7 +199,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.8.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.0.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -251,14 +264,14 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 
 請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過（新版改了 matcher 時要重新核准）。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
 
-Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
+Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。2.0 起，子代理自己的 hook（帶的是 `agent_id`，不是 `task_name`）會透過子代理 rollout 的第一行（`session_meta.agent_path`）綁定到對應紀錄，否則綁定到同角色中唯一尚未綁定的紀錄；`SubagentStop` 只更新該筆紀錄，不會封鎖。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
 
 ---
 
 ## 核心組件與安全防護機制
 
 ### 1. 生命週期強制守衛 ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
-零外部依賴（僅 Python 3.8+ 標準函式庫），每次呼叫約 30 毫秒，於每個代理生命週期自動把關。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
+零外部依賴（僅 Python 3.8+ 標準函式庫；入口腳本加上 [`scripts/mitosis_hook/`](./scripts/mitosis_hook) 套件），每次呼叫約 30 毫秒，於每個代理生命週期自動把關。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
 
 | Hook 事件 | 防護機制與行為說明 |
 | :--- | :--- |
@@ -362,12 +375,29 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 307 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # 361 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
 ```
+
+### 程式結構
+
+hook 引擎位於 [`scripts/mitosis_hook/`](./scripts/mitosis_hook) 套件。[`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py) 仍是入口（路徑、`HANDLERS`、`main()` 不變），並重新匯出 2.0 之前定義的所有名稱，因此 hook 設定、MCP server 與以路徑匯入的使用者都不受影響。
+
+| 模組 | 職責 |
+| :--- | :--- |
+| `common` | 共用常數、平台偵測、hook 結果輔助函式 |
+| `models` | 層級與尖端模型邏輯、主核模型設定 |
+| `report` | 子代理 REPORT FORMAT 處理 |
+| `routing` | 路由規則、判斷器掛鉤、子代理分類 |
+| `state` | 每個工作階段的狀態檔、鎖、路由遙測 |
+| `guards` | 工作區與路徑守衛、偵察者允許清單、shell 解析 |
+| `handlers` | 各 hook 模式的處理函式 |
+| `platforms/claude`、`platforms/codex`、`platforms/agy` | 各平台的工具處理 |
+
+相依順序：`common` -> `models` / `report` -> `routing` / `state` / `guards` -> `platforms` -> `handlers`。
 
 ### 單一來源（`spec/`）
 
