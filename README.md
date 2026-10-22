@@ -118,7 +118,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.2.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.3.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -210,6 +210,14 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 | `PostToolUse` | Pairs spawned subagents with platform metadata and updates failure streaks. |
 | `SubagentStop` / `Stop` | When the turn is idle and branch worktrees remain alive, reminds the primary agent once per set of live workers to merge/discard changes and clean them up. On Claude Code and Codex (bound agents only; `CODEX_MITOSIS_ENFORCE_REPORT=0` disables there), `SubagentStop` also checks that a `flash-lite-scout` / `flash-worker` ended with the four-header report and, once per agent, sends it back to rewrite its final message (`CLAUDE_MITOSIS_ENFORCE_REPORT=0` disables). |
 
+#### Failure escalation (2.3)
+
+- **Trigger.** A mitosis scout reports `STATUS: FAILED` or `BLOCKED`. Claude Code detects it on `SubagentStop` (background `Agent` calls deliver the report only there) or in a synchronous `PostToolUse` result; Codex on `SubagentStop` of a bound explorer. agy is not covered.
+- **Effect.** The next scout-routed dispatch runs on the worker (rule `escalation`), once, within 3 dispatches or 30 minutes. An escalated spawn never escalates again. Untyped calls keep no `subagent_type` and only get the model.
+- **Opt-in.** `*_MITOSIS_ESCALATE_PRIMARY=1` (Claude Code only) also sends the next dispatch after a failed worker to the primary model. `*_MITOSIS_ESCALATE=0` turns escalation off.
+- **Headless check.** A scout told to read a missing file reported `BLOCKED`, and the same scout-typed re-dispatch ran as `mitosis-orchestrator:flash-worker` on sonnet (0.25 USD session).
+- Since 2.3 background `Agent` launches (`{"isAsync": true, "agentId": ...}`) are also registered, so the `SendMessage` scout guard sees them.
+
 ### 2. Bounded 4-Header Subagent Report Contract
 All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`):
 
@@ -262,24 +270,28 @@ keyword rules ──► confidence ≥ 0.9 ────────────�
 
 Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dangerous" means a worker task routed to the read-only scout).
 
-| Set | Role | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| routing_cases (183 -> 281 -> 361 -> 562) | training | 183/183, 0 dangerous | 281/281, 0 dangerous | 361/361, 0 dangerous | 562/562, 0 dangerous |
-| 2.1 hand-written counterexamples (80, inside routing_cases) | training in 2.1.0 | | 44/80, 15, 21 | 80/80, 0, 0 | 80/80, 0, 0 |
-| 2.2 hand-written cases and review probes (201, inside routing_cases) | training in 2.2.0 | | | 130/201, 27, 44 | 201/201, 0, 0 |
-| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 40/40, 0, 0 |
-| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 | 38/40, 2, 0 | 38/40, 2, 0 |
-| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
-| holdout v5 (40) | sealed blind, scored once; tuned in 2.0.0 | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v6 (40) | sealed blind, scored once per version; used to pick the 2.2 gaps | | 29/40, 8, 3 | 32/40, 8, 0 | 35/40, 5, 0 |
-| holdout v7 (40) | sealed blind, scored once per version; two misses fixed afterwards | | | 31/40, 7, 2 | first contact 34/40, 4, 2; final 36/40, 4, 0 |
+| Set | Role | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 | v2.3.0 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| routing_cases (183 -> 281 -> 361 -> 562 -> 855) | training | 183/183, 0 dangerous | 281/281, 0 dangerous | 361/361, 0 dangerous | 562/562, 0 dangerous | 855/855, 0 dangerous |
+| 2.1 hand-written counterexamples (80, inside routing_cases) | training in 2.1.0 | | 44/80, 15, 21 | 80/80, 0, 0 | 80/80, 0, 0 | 80/80, 0, 0 |
+| 2.2 hand-written cases and review probes (201, inside routing_cases) | training in 2.2.0 | | | 130/201, 27, 44 | 201/201, 0, 0 | 201/201, 0, 0 |
+| 2.3 hand-written cases and review probes (293, inside routing_cases) | training in 2.3.0 | | | | 205/293, 21, 67 | 293/293, 0, 0 |
+| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
+| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 | 38/40, 2, 0 | 38/40, 2, 0 | 38/40, 2, 0 |
+| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 | 40/40, 0, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
+| holdout v5 (40) | sealed blind, scored once; tuned in 2.0.0 | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v6 (40) | sealed blind, scored once per version; used to pick the 2.2 gaps | | 29/40, 8, 3 | 32/40, 8, 0 | 35/40, 5, 0 | 35/40, 5, 0 |
+| holdout v7 (40) | sealed blind, scored once per version; two misses fixed afterwards | | | 31/40, 7, 2 | first contact 34/40, 4, 2; final 36/40, 4, 0 | 36/40, 4, 0 |
+| holdout v8 (40) | sealed blind, scored once per version; one miss fixed afterwards | | | | 35/40, 4, 1 | first contact 35/40, 4, 1; final 37/40, 3, 0 |
 
 v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
 
 v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`) was written blind by a subagent, sealed in commit 1c5d524 and scored once on 2026-10-22 in separate processes: 2.0.0 29/40, 8 cost, 3 dangerous; 2.1.0 32/40, 8 cost, 0 dangerous. Four of the cost errors are lookups typed `flash-worker`, which always routes to the worker. It was not tuned on afterwards.
 
 v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`) was written blind by a subagent, sealed in commit 7dffeb0 and scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; the 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous. v7 is therefore no longer blind. The remaining cost errors include one lookup typed `flash-worker` that is kept on the worker and a read-only question that mentions fix/pytest.
+
+v8 (sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`) was written blind by a subagent, sealed in commit 27914e3 and scored once on 2026-10-22 in separate processes: 2.2.0 35/40, 4 cost, 1 dangerous; the 2.3 candidate (e237483) 35/40, 4 cost, 1 dangerous, the same five misses. The dangerous miss (a scout-typed comparison of third-party frameworks' current docs, which needs the web) was then fixed with general rules from new hand-written cases (d0b2624): 37/40, 3 cost, 0 dangerous. v8 is therefore no longer blind. The 2.3 rule work did not move the blind score: both versions missed the same five prompts. The 2.3 gains are on 175 private review probes in seven batches (on the 293 new cases 2.2.0 scored 205/293 with 67 dangerous) that each exposed a new action shape under the type-first default, which is why 2.3 inverted the default for scout-typed calls. The remaining v8 cost errors are two lookups typed `flash-worker` that stay on the worker and one simplified-Chinese question.
 
 **2.1 routing additions.**
 - Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades.
@@ -299,7 +311,19 @@ v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`) w
 - Polite frames (請/幫我) take any non-read verb.
 - Read-only follow-ups: 只要讀, 只需確認, 不必重現, "paste the output".
 - "from the web process" and local CHANGELOG reads no longer count as web needs.
-- Known gaps: the rule layer is still lexical, with no embedding stage; unlisted English verbs with a plain lowercase object; Chinese action verbs outside the lexicon when the clause does not use 把/將 or a resultative complement.
+- Known gaps (closed in 2.3): the rule layer is still lexical, so unlisted English verbs with a plain lowercase object and Chinese action verbs outside the lexicon (when the clause does not use 把/將 or a resultative complement) were missed.
+
+**2.3 routing additions.**
+- `scout-unproven` (0.6, judgeable): a scout-typed call keeps the scout only with positive read-only evidence, otherwise it goes to the worker. Evidence: a question, a read verb (including compare, review, summarize), a lookup signal or read-only command, a read-only declaration, a verbless noun-phrase lookup or a terse "<identifier> in <file>". Modal and desire statements and elliptical assignments are not evidence.
+- Actions are found in any sentence and after a topic separator ("For api/routes.py: alphabetize ...").
+- Unlisted English verbs with a plain object and "<verb> out" phrasal verbs count as actions.
+- Chinese code-edit verbs, 替/給/幫 + verb, and verb + resultative + code token count as actions.
+- Runner-state questions ("Does mypy pass on main?", 目前有沒有過) need a run; config, marker, fixture and history questions that name pytest or fix stay lookups.
+- 不用/別 + a read or run verb is a restriction, not a request.
+- Cleft and whether frames are handled, simplified Chinese included.
+- Third-party docs, release notes and references need the web.
+- ALL-CAPS identifiers and file names are never verbs.
+- Known gaps: the rule layer is still lexical, with no embedding stage; the v8 writer's errors were in categories none of the 2.3 probes covered, so expect new shapes; worker-typed lookups stay on the worker unless short and plain; the failure escalation above is the safety net.
 
 Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
 
@@ -331,6 +355,8 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | Set to `0` to stop `SubagentStop` from sending a plugin subagent back when its final message is not the four-header report. |
 | `CODEX_MITOSIS_ENFORCE_REPORT` | `1` | Set to `0` to stop Codex `SubagentStop` from sending a mitosis subagent back once when its final message is not the four-header report. |
 | `*_MITOSIS_WORKER_DOWNGRADE` | `1` | Set to `0` to keep every `flash-worker` typed call on the worker (by default a short, plain read-only lookup typed `flash-worker` goes to the scout). |
+| `*_MITOSIS_ESCALATE` | `1` | Set to `0` to turn off failure escalation (by default, after a scout reports `STATUS: FAILED` or `BLOCKED` the next scout-routed dispatch runs on the worker, once, within 3 dispatches or 30 minutes). |
+| `*_MITOSIS_ESCALATE_PRIMARY` | `0` | Set to `1` to also send the next dispatch after a failed worker to the primary's model (Claude Code only). |
 | `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | Set to `0` to stop appending the four-header `REPORT FORMAT` block to subagent prompts that lack one (agy `invoke_subagent`, Claude Code `Agent`). |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | Set to `1` to enable the in-workspace permission scope guard in interactive sessions. |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | Maximum distinct workspace files the primary agent may edit directly in a single turn. |
@@ -381,7 +407,7 @@ The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pin
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 402 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # 471 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)

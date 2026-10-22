@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.3.0 - 2026-10-22
+
+### Changed
+- Docs: the README gets a Quick Start with install and update commands for each platform, and the routing matrix moves below the guardrails (671fe85). Cost guidance moves to `docs/cost.md` and `docs/cost.zh-TW.md`; `SECURITY.md` and `CONTRIBUTING.md` are new (0b4190e).
+- Failure escalation (473da20): when a mitosis scout reports `STATUS: FAILED` or `BLOCKED`, the next scout-routed dispatch runs on the worker (rule `escalation`), once, within 3 dispatches or 30 minutes; an escalated spawn never escalates again. Claude Code triggers on `SubagentStop` (background `Agent` calls deliver the report only there) and on synchronous `PostToolUse` results; Codex on `SubagentStop` of a bound explorer; agy is not covered. Untyped calls keep no `subagent_type` and only get the model. `*_MITOSIS_ESCALATE=0` turns it off; `*_MITOSIS_ESCALATE_PRIMARY=1` (Claude Code only) also sends the next dispatch after a failed worker to the primary's model. Headless check: a scout told to read a missing file reported `BLOCKED` and the same scout-typed re-dispatch ran as `mitosis-orchestrator:flash-worker` on sonnet (0.25 USD session).
+- Fix: background `Agent` launches (`{"isAsync": true, "agentId": ...}`) were never registered, so the `SendMessage` scout guard missed them; they are now recorded.
+- Routing (rule layer, judge off; e237483, d0b2624). Behaviour change: a scout-typed call now needs positive read-only evidence or goes to the worker (`scout-unproven`, 0.6, judgeable). Evidence: a question, a read verb (including compare, review, summarize), a lookup signal or read-only command, a read-only declaration, a verbless noun-phrase lookup or a terse "<identifier> in <file>"; modal and desire statements and elliptical assignments are not evidence.
+- Actions are detected in any sentence and after a topic separator ("For api/routes.py: alphabetize ..."); unlisted English verbs with a plain object and "<verb> out" phrasal verbs count as actions. Chinese code-edit verbs, 替/給/幫 + verb and verb + resultative + code token count as actions.
+- Runner-state questions ("Does mypy pass on main?", 目前有沒有過) need a run, while config, marker, fixture and history questions that name pytest or fix stay lookups. 不用/別 + a read or run verb is a restriction. Cleft and whether frames are handled, simplified Chinese included. Third-party docs, release notes and references need the web. ALL-CAPS identifiers and file names are never verbs.
+- Routing eval: `routing_cases` grew from 562 to 855 labelled prompts, all correct (the 293 new ones are 58 + 20 hand-written cases, 175 private review probes in seven batches and 40 worker-written structure cases; 2.2.0 gets 205/293, 21 cost, 67 dangerous on them, 767/855 on the whole set). New sealed blind holdout v8 (sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`, sealed in commit 27914e3), scored once on 2026-10-22 in separate processes: 2.2.0 35/40, 4 cost, 1 dangerous; 2.3 candidate (e237483) 35/40, 4 cost, 1 dangerous, the same five misses. The dangerous miss (a scout-typed comparison of third-party frameworks' current docs, which needs the web) was then fixed with general rules from new hand-written cases (d0b2624): 37/40, 3 cost, 0 dangerous. v8 is no longer blind; the next tuning round needs a v9 first. The 2.3 rule work did not move the blind score; its gains are on the private probes.
+- Proxy corpus (real scout/Explore prompts): upgrades to the worker go from 13 to 12 of 54, worker prompts sent to the scout 0, worker-typed downgrades 0.
+- Known gaps: the rule layer is still lexical, with no embedding stage; the v8 writer's errors were in categories none of the 2.3 probes covered, so expect new shapes; worker-typed lookups stay on the worker unless short and plain; the escalation is the safety net.
+
+### Added
+- `*_MITOSIS_ESCALATE=0` (default `1`) and `*_MITOSIS_ESCALATE_PRIMARY=1` (default `0`).
+- Tests: 471 in total (402 in 2.2.0).
+
 ## 2.2.0 - 2026-10-22
 
 ### Changed
