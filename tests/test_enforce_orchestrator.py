@@ -2552,3 +2552,36 @@ class TestRouting23Gaps(_ScoutDecideMixin, unittest.TestCase):
                        "幫我看 db/versions/ 裡有沒有加 users.email 索引的 migration。", "release.yml 有哪些 job？"):
             self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
         self.assertEqual(self._decide("把 POOL_SIZE 從 10 改成 20。").tier, "flash")
+
+    def test_third_party_docs_need_the_web_but_repo_docs_do_not(self):
+        for prompt in ("Summarize what SQLAlchemy's current documentation says about lazy loading.",
+                       "What do the upstream Next.js 15 docs recommend for caching? Summarize.",
+                       "比較 Jest 跟 Vitest 官方文件對 mock 的說明。", "看一下 Kafka 最新版文件怎麼說 retention。"):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash", "scout-web"), prompt)
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+        for prompt in ("Summarize what docs/caching.md in this repo says about Redis.",
+                       "Which SQLAlchemy version does requirements.txt pin?", "Compare how api/auth.py and web/auth.py read the token.",
+                       "比較 jest.config.js 跟 vitest.config.ts 的 mock 設定。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_simplified_chinese_cleft_and_return_phrases(self):
+        for prompt in ("发布是用哪个脚本打包的？给我路径。", "lint 是在哪个 job 跑的？", "这个设定是谁加的？看 git log。"):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._untyped("在 CI 里加一个 lint job。").tier, "flash")
+
+    def test_build_lint_nouns_versus_verbs(self):
+        for prompt in ("Which npm scripts handle build and lint? Names only.", "Where are the test and format steps defined in Makefile?"):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+        for prompt in ("Build and lint the backend, then report errors.", "Which script lints? Run it and paste the output."):
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+
+    def test_external_docs_wider_shapes(self):
+        for prompt in ("How does Terraform document state locking? Short summary.", "Read the Twilio SMS API reference and tell me the rate limit.",
+                       "Look at the Grafana Alerting handbook for silences.", "看看 Svelte 5 文档里 runes 的写法。",
+                       "Elasticsearch 的手冊怎麼講 refresh_interval？", "MongoDB 官網對 sharding 的說明。"):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash", "scout-web"), prompt)
+        for prompt in ("Which Twilio API version does sms/client.py pin?", "Where does docs/alerts.md describe our silences?",
+                       "我們 repo 的 Svelte 設定檔在哪？", "README 裡寫的 MongoDB 最低版本是多少？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)

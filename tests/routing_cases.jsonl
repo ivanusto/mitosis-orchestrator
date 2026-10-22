@@ -817,3 +817,39 @@
 {"id": "p23-probe6-zf03", "prompt": "release workflow 的 tag job 一直掛，本機用 act 重現看看原因。", "expected": "flash", "lang": "zh", "category": "probe"}
 {"id": "p23-probe6-zf04", "prompt": "查一下 SQLAlchemy 2.1 官方 release notes 裡影響 session 的破壞性變更。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
 {"id": "p23-probe6-zf05", "prompt": "MAX_RETRIES 調回 3，5 會被限流。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f01", "prompt": "Summarize what Pydantic's current documentation says about strict mode versus our usage.", "expected": "flash", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f02", "prompt": "Compare how Django and Flask handle CSRF according to their official docs.", "expected": "flash", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f03", "prompt": "Check the latest Celery docs for how task retries back off by default.", "expected": "flash", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f04", "prompt": "What do the upstream React 19 docs recommend for ref cleanup? Summarize.", "expected": "flash", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f05", "prompt": "比較 Vite 跟 webpack 官方文件對 code splitting 的說明。", "expected": "flash", "lang": "zh", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-f06", "prompt": "看一下 Redis 最新版文件怎麼說 SCAN 的保證。", "expected": "flash", "lang": "zh", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-l01", "prompt": "Summarize what docs/strict-mode.md in this repo says about Pydantic strict mode.", "expected": "flash_lite", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-l02", "prompt": "Compare how app/csrf.py and api/csrf.py handle the token.", "expected": "flash_lite", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-l03", "prompt": "Which Celery version does requirements.txt pin, and what retry settings does tasks/config.py set?", "expected": "flash_lite", "lang": "en", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-web-l04", "prompt": "比較 vite.config.ts 跟 webpack.config.js 的 code splitting 設定。", "expected": "flash_lite", "lang": "zh", "category": "case23b", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23b-zh-l01", "prompt": "这个项目的 release 是用哪个脚本打包的？给我路径。", "expected": "flash_lite", "lang": "zh", "category": "case23b"}
+{"id": "p23b-zh-l02", "prompt": "CI 是在哪个 job 跑测试的？", "expected": "flash_lite", "lang": "zh", "category": "case23b"}
+{"id": "p23b-zh-l03", "prompt": "迁移脚本是谁写的？看 git log。", "expected": "flash_lite", "lang": "zh", "category": "case23b"}
+{"id": "p23b-zh-f01", "prompt": "用 release 脚本打包一次，给我产物路径。", "expected": "flash", "lang": "zh", "category": "case23b"}
+{"id": "p23b-zh-f02", "prompt": "在 CI 的 test job 里加跑 lint。", "expected": "flash", "lang": "zh", "category": "case23b"}
+{"id": "p23b-noun-l01", "prompt": "Which Makefile targets handle build and lint? Names only, do not run anything.", "expected": "flash_lite", "lang": "en", "category": "case23b"}
+{"id": "p23b-noun-l02", "prompt": "Where are the build and lint steps defined in ci.yml?", "expected": "flash_lite", "lang": "en", "category": "case23b"}
+{"id": "p23b-noun-l03", "prompt": "Which tox envs format and lint the code? Just read tox.ini.", "expected": "flash_lite", "lang": "en", "category": "case23b"}
+{"id": "p23b-noun-f01", "prompt": "Build and lint the frontend, then report any errors.", "expected": "flash", "lang": "en", "category": "case23b"}
+{"id": "p23b-noun-f02", "prompt": "Which Makefile target lints? Run it and paste the output.", "expected": "flash", "lang": "en", "category": "case23b"}
+{"id": "p23-probe7-f01", "prompt": "How does Kubernetes document the difference between readiness and startup probes? Short summary.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-f02", "prompt": "Read the Stripe API reference for idempotency keys and tell me the retention window.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-f03", "prompt": "What changed in the Next.js 16 release notes around caching?", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-f04", "prompt": "PostgreSQL 官方文件怎麼解釋 SKIP LOCKED？", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-f05", "prompt": "看看 Tailwind v4 文档里 @apply 还推不推荐用。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l01", "prompt": "How does docs/k8s/probes.md describe our readiness probe?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l02", "prompt": "Which Stripe API version does billing/client.py pin?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l03", "prompt": "What does our CHANGELOG.md say changed in 3.4 around caching?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l04", "prompt": "Which Next.js version is in package.json?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l05", "prompt": "README 裡寫的 PostgreSQL 最低版本是多少？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l06", "prompt": "这个仓库的 Tailwind 配置文件在哪？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p23-probe7-l07", "prompt": "是谁把 lint 加进 pre-commit 的？查 git log 给我 commit。", "expected": "flash_lite", "lang": "zh", "category": "probe"}
+{"id": "p23-probe7-l08", "prompt": "Which npm scripts build, test and lint? Script names only.", "expected": "flash_lite", "lang": "en", "category": "probe"}
+{"id": "p23-probe7-f06", "prompt": "把 lint 加进 pre-commit。", "expected": "flash", "lang": "zh", "category": "probe"}
+{"id": "p23-probe7-f07", "prompt": "Lint and test the api package and paste the failures.", "expected": "flash", "lang": "en", "category": "probe"}
+{"id": "p23-probe7-l09", "prompt": "Compare the retry settings in clients/a.py and clients/b.py.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}

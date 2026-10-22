@@ -519,7 +519,7 @@ CJK_NEGATED_FRAME_RE = re.compile(r"(?:不要|不用|不必|不需要?|別|别|�
 
 
 # 移到 utils/text.py, 改成 30, 存進 `cache`: verb + 到/成/進/回 + a code token, without 把, is an action.
-_CJK_CODE_TOKEN = (r"(?:`[^`\n]+`|\d+(?![\d]*[個个次種种位條条檔份])|[A-Za-z_~.][\w.~-]*[/_.][\w./-]*|[A-Z][A-Z0-9_]{2,}|"
+_CJK_CODE_TOKEN = (r"(?:`[^`\n]+`|\d+(?![\d]*[個个次種种位條条檔档份])|[A-Za-z_~.][\w.~-]*[/_.][\w./-]*|[A-Z][A-Z0-9_]{2,}|"
                    r"[A-Za-z_]\w*\(\))")
 _CJK_RESULT_MOVE_RE = re.compile(
     r"([移搬挪拆存寫写丟丢放貼贴塞推拉改換换轉转調调切分降升])\s*(到|成|進|进|回|為|为)\s*(" + _CJK_CODE_TOKEN + r")")
@@ -646,6 +646,29 @@ _CJK_WHETHER_INSIDE_RE = re.compile(r"有沒有|有没有|是否|有無|有无|�
 _CJK_THEN_RE = re.compile(r"然後|然后|並|并|再|之後|之后|接著|接着")
 
 
+_NOUNISH_ACTIONS = {"build", "lint", "format", "test", "release", "tag", "publish", "deploy", "typecheck", "type-check",
+                    "reformat", "install", "apply", "bump"}
+_NOUN_CONTEXT_BEFORE_RE = re.compile(
+    r"\b(?:handles?|handled|defin\w*|run\s+by|steps?|targets?|envs?|environments?|jobs?|scripts?|stages?|tasks?|recipes?)\b[^.?!;\n]{0,25}$",
+    re.IGNORECASE)
+_WH_SENTENCE_RE = re.compile(r"^\W*(?:which|what|where|who|how|when|why)\b", re.IGNORECASE)
+
+
+def _action_word_used_as_noun(text: str, match: "re.Match[str]") -> bool:
+    """"... handle build and lint?", "the build and lint steps": 'and lint' names a thing, not a request."""
+    phrase = match.group(0).strip().lower()
+    parts = phrase.split()
+    if len(parts) < 2 or parts[0] not in ("and", "or") or parts[-1] not in _NOUNISH_ACTIONS:
+        return False
+    starts = [m.end() for m in re.finditer(r"[.?!;](?=\s)|\n", text[:match.start()])]
+    start = starts[-1] if starts else 0
+    ender = re.compile(r"[.?!;](?=\s|$)|\n").search(text, match.end())
+    sentence = text[start:ender.end() if ender else len(text)]
+    if _NOUN_CONTEXT_BEFORE_RE.search(text[start:match.start()]):
+        return True
+    return bool(_WH_SENTENCE_RE.match(sentence) and sentence.rstrip().endswith("?"))
+
+
 def _is_identifier_word(phrase: str) -> bool:
     """An ALL-CAPS token (PORT, MOVE_LIMIT, BUILD_DIR) names a constant; it is never an English verb."""
     first = phrase.split()[0] if phrase.split() else ""
@@ -676,6 +699,12 @@ def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, st
         for m in pattern.finditer(stripped):
             if _is_identifier_word(m.group(0).strip(" .;:!?\n")):
                 continue
+            if re.search(r"[\u4e00-\u9fff]", m.group(0)) and _cjk_topic_frame(stripped, m.start(), m.end()):
+                continue  # 是在哪個 job 跑測試的: the run is what the question asks about
+            if pattern is IMPERATIVE_MUTATION_RE and (
+                    _action_word_used_as_noun(stripped, m)
+                    or re.match(r"\s*(?:是|的|有|在|會|会|裡|里|怎麼|怎么)", stripped[m.end():])):
+                continue  # "lint 是在哪個 job 跑的": the English word is the subject of a Chinese sentence
             found.append((m.start(), m.group(0).strip(" .;:!?\n")))
     for m in CJK_MUTATION_RE.finditer(stripped):
         if CJK_NOUN_BEFORE_RE.search(stripped[:m.start()]) or CJK_MUTATION_NOUN_AFTER_RE.match(stripped[m.end():]):
@@ -749,7 +778,7 @@ _TRAILING_READONLY_RE = re.compile(
     r"(?:tell me|show me|show|list|explain|describe|summari[sz]e|report(?: back)?|answer|point me|give me (?:the|a) (?:path|file|name|list)|"
     r"let me know|name|identify|locate|find (?:out|me)|look (?:at|in|into|through)|inspect|open(?!\s+(?:(?:a|an|the)\s+)?(?:new\s+)?(?:pr|prs|pull request|mr|merge request|issue|ticket|branch)\b)|view|check(?!\s+(?:out|in)\b)|consult|read|"
     r"(?:the )?(?:path|paths|file|files|name|names|command|commands|line|lines|list|answer|result|location|function)s?\b|"
-    r"告訴我|告诉我|列出|說明|说明|解釋|解释|回報|回报|報告|报告|看看|看一下|看就好|看|查看|找出|指出|回答|"
+    r"告訴我|告诉我|給我|给我|列出|說明|说明|解釋|解释|回報|回报|報告|报告|看看|看一下|看就好|看|查看|找出|指出|回答|"
     r"paste (?:the |its |their )?(?:output|result|results|contents?|text|diff|lines?)|貼出來|貼上來|贴出来|贴上来|"
     r"讀|读|閱讀|阅读|查一下|查|找|搜尋|搜寻|確認|确认|檢查|检查|比對|比对|對照|对照|統計|统计|翻|列一下|列)|"
     r"\b(?:only|just) (?:report|tell|list|show|explain|look|read|check|answer)\b|"
@@ -922,6 +951,10 @@ def find_heavy_ex(text: str, lite_present: bool, question_nouns: bool = True) ->
             continue
         if runner_topic and m.group(0).lower() in _RUNNER_TOPIC_WORDS:
             continue
+        if m.group(0).lower() in _NOUNISH_ACTIONS and (
+                _NOUN_CONTEXT_BEFORE_RE.search(text[max(0, m.start() - 60):m.start()])
+                or re.match(r"\s+(?:and|or|&)\s+\w+\s+(?:steps?|targets?|jobs?|scripts?|stages?|tasks?|commands?)\b", text[m.end():])):
+            continue
         nounish = m.group(0).lower() in NOUNISH_KEYWORDS
         if nounish and (lite_present or question) and _after_determiner(text, m, loose=question):
             continue
@@ -930,6 +963,8 @@ def find_heavy_ex(text: str, lite_present: bool, question_nouns: bool = True) ->
             continue
         return m.group(0), False
     for m in CJK_HEAVY_RE.finditer(text):
+        if _cjk_topic_frame(text, m.start(), m.end()):
+            continue
         if topic and CJK_QUESTION_NOUN_RE.fullmatch(m.group(0)) and not CLAUSE_START_RE.search(text[:m.start()]):
             continue
         if not CJK_HEAVY_NOUN_AFTER_RE.match(text[m.end():]):
@@ -1056,9 +1091,50 @@ def _blank_local_docs(text: str) -> str:
     return out
 
 
+_DOC_WORD = (r"(?:docs?|documentation|documents?|documented|documenting|release notes|changelog|guides?|references?|manuals?|"
+             r"handbook|specs?|specification|rfcs?|api docs)")
+_NOT_PRODUCT = {"the", "our", "this", "that", "these", "those", "your", "my", "their", "its", "project", "repo", "local", "read",
+                "check", "summarize", "summarise", "compare", "see", "open", "update", "fix", "add", "api", "readme", "internal"}
+_PRODUCT_DOCS_RE = re.compile(
+    r"(?<![\w/.-])([A-Z][a-z][\w.+-]*|[a-z][\w.+-]*[A-Z][\w.+-]*)(?:'s)?(?:\s+v?\d+(?:\.\d+)*)?\s+"
+    r"(?:(?:[A-Z][A-Za-z]*|API|SDK|CLI)\s+){0,2}"
+    r"(?:(?:current|latest|official|upstream|newest|public)\s+)*" + _DOC_WORD + r"\b")
+_GENERIC_EXTERNAL_DOCS_RE = re.compile(
+    r"\b(?:upstream|official|latest|current|newest)\s+(?:(?!(?:our|this|my|repo|project|local|the)\b)[\w.+-]+\s+){0,3}?"
+    + _DOC_WORD + r"\b", re.IGNORECASE)
+_CJK_EXTERNAL_DOCS_RE = re.compile(
+    r"官方(?:文件|文檔|文档|說明|说明|手冊|手册|參考|参考)|官網|官网|最新版?(?:的)?(?:官方)?(?:文件|文檔|文档|說明|说明|手冊|手册)|"
+    r"上游(?:文件|文檔|文档)|參考文件|参考文档|參考手冊|参考手册|"
+    r"\b[A-Z][a-z][\w.+-]*(?:\s+v?\d+(?:\.\d+)*)?(?:\s*(?:API|SDK|CLI))?\s*的?\s*"
+    r"(?:文件|文檔|文档|說明書|说明书|手冊|手册|參考|参考|規格|规格)")
+_LOCAL_SCOPE_RE = re.compile(
+    r"\b(?:in|from|of)\s+(?:this|the|our)\s+(?:repo|repository|codebase|project)\b|本專案|本项目|這個專案|这个项目|repo 裡|repo 里|倉庫|仓库",
+    re.IGNORECASE)
+
+
+def _external_docs(text: str) -> Optional[str]:
+    """A third-party product's docs, release notes or guide that is not a repo file: needs the web."""
+    if _LOCAL_SCOPE_RE.search(text):
+        return None
+    blanked = _blank_local_docs(text)
+    m = _CJK_EXTERNAL_DOCS_RE.search(blanked)
+    if m:
+        return m.group(0)
+    m = _GENERIC_EXTERNAL_DOCS_RE.search(blanked)
+    if m:
+        return m.group(0)
+    for m in _PRODUCT_DOCS_RE.finditer(blanked):
+        word = m.group(1)
+        before = blanked[:m.start(1)].rstrip()
+        if word.lower() in _NOT_PRODUCT or (not before or before[-1] in ".?!;:\n") and not m.group(0).count("'s"):
+            continue
+        return m.group(0)
+    return None
+
+
 def needs_web(text: str) -> bool:
     """True when text asks for web access or a docs lookup (a scout has no web)."""
-    return bool(WEB_NEED_RE.search(text) or DOCS_LOOKUP_RE.search(_blank_local_docs(text)))
+    return bool(WEB_NEED_RE.search(text) or DOCS_LOOKUP_RE.search(_blank_local_docs(text)) or _external_docs(text))
 
 
 # A run that is still asked for after the how-to-run phrases are blanked: "...and run it", "execute them", 跑一次.
@@ -1795,6 +1871,10 @@ def _scout_read_evidence(text: str, prompt: str) -> Optional[str]:
             return "read-only command"
         if _WORKER_READ_START_RE.match(sentence) or _READ_OPEN_CJK_RE.match(sentence) or _opens_with_read_verb(sentence):
             return "read-verb opening"
+        lead = re.match(r"\W*(?:(?:please|just|also|and|then|first)\s+)*([A-Za-z]+)", sentence)
+        if lead and lead.group(1).lower() in (_SEQUENCED_READ_WORDS - _OPENING_NOT_ACTION_LEAD) | {"investigate", "analyze", "analyse",
+                                                                                                   "examine", "inspect", "audit"}:
+            return "read-verb opening"
         if not desire and not request and (find_lite(sentence) or LOOKUP_SIGNAL_RE.search(sentence) or _RETURN_RE.search(sentence)):
             return "lookup signal"
         if _DESIRE_INFO_RE.search(sentence) or _CJK_NEED_INFO_RE.search(sentence):
@@ -2079,7 +2159,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))
     if requested in ALLOWED_SUBAGENT_MODELS:
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
-    if DOCS_LOOKUP_RE.search(_blank_local_docs(text)):
+    if DOCS_LOOKUP_RE.search(_blank_local_docs(text)) or _external_docs(text):
         return done(_rule_decision("flash", None, "docs-lookup", "docs or web lookup needs web access"))
     trailing = find_trailing_imperative(prompt) or _action_sentence(prompt)
     if trailing:
