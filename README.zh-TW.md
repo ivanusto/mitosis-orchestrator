@@ -186,7 +186,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.7.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.8.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -249,7 +249,9 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
+請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過（新版改了 matcher 時要重新核准）。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
+
+Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
 
 ---
 
@@ -264,8 +266,9 @@ codex plugin add mitosis-orchestrator@mitosis-orchestrator
 | `PreInvocation`（agy）· `UserPromptSubmit`（Claude Code / Codex） | 每回合檢查即時模型；若切換到非尖端模型，每回合提醒一次。同時重設單回合編輯計數（`turn_edited_files`）與連續失敗計數（`consecutive_failures`）。 |
 | `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理；提示詞缺少 `REPORT FORMAT` 區塊時自動補上。 |
 | `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉），並為缺少 `REPORT FORMAT` 區塊的提示詞自動補上（`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
-| `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。 |
-| `PreToolUse` · `send_message`（agy）· `SendMessage`（Claude Code） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識。 |
+| `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。Codex 不讓 hook 讀訊息時（0.163 傳的是加密字串），改依呼叫指定的 `agent_type` 決定，訊息原樣保留；沒指定角色的呼叫一律綁到 `worker`。 |
+| `PreToolUse` · `send_message`（agy / Codex）· `SendMessage`（Claude Code）· `followup_task`（Codex） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令；Codex 的 `followup_task` 另外比照新任務分類。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識，Codex 端以 `spawn_agent` 時登記的 `task_name` 辨識。hook 讀不到內容的 Codex 追加指令，送給偵察子代理一律拒絕，請改開新的 explorer 或交給 worker。 |
+| `PreToolUse` · 偵察子代理自己的工具（Claude Code / Codex） | `flash-lite-scout` 與 Codex `explorer` 不論提示詞怎麼寫，都不能用 `Write` / `Edit` / `apply_patch`，shell 只能跑白名單內的唯讀指令。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
 | `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.8.0 - 2026-10-22
+
+### Fixed
+- Codex follow-up guard. Codex 0.163 (multi-agent v2) names its agent tools in hook payloads with the namespace glued on (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`, ...). The `spawn_agent` matcher still fired, but the handler compared the full name, so no Codex spawn was ever classified or recorded and the follow-up guard had nothing to check. The namespace is now stripped (`collaboration`, `collaboration.`, `collaboration__`).
+- Codex spawns are registered at `PreToolUse` under their `task_name`, the address `followup_task` and `send_message` use in `target` (`probe` or `/root/probe`). `PostToolUse` stores the returned task path (`{"task_name":"/root/probe"}`) as `agent_path` and drops the record when the spawn fails. Subagent hooks, which share the primary's `session_id`, leave the record alone.
+- Codex `spawn_agent` messages reach hooks as an encrypted token (`gAAAAA...`). The hook no longer classifies or edits them: the requested `agent_type` decides the tier, the message is left byte-identical (appending REPORT FORMAT would corrupt it) and a v2 call without a role gets `agent_type: "worker"` instead of inheriting the primary's model. v2 calls (`task_name` / `fork_turns`) no longer get a `model` field; the role file pins the model.
+
+### Added
+- `followup_task` and `send_message` to a Codex scout are guarded. Readable text goes through the mutation and numbered-step checks, and `followup_task` (which starts a new turn) is also routed like a new task. Text the hook cannot read is refused for scouts, with a hint to spawn a new `explorer` or a `worker`. Messages to workers and unknown recipients pass.
+- Scout-side read-only layer: a Claude Code `flash-lite-scout` or Codex `explorer` cannot use `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or `apply_patch`, and its shell commands go through the scout allowlist (previously Claude Code `Bash` only). This holds when a change request reaches a scout anyway.
+- Debug log entries carry `event`, `rawTool` (the name before namespace stripping), `agentId`, `toolInputKeys`, `toolResponse` (first 500 characters) and a state summary (pending count, subagent keys). `CODEX_MITOSIS_DEBUG=1` enables the log in Codex.
+- `tests/test_codex_hooks.py`: 13 tests built from payloads captured on Codex 0.163 (338 tests in total).
+
+### Changed
+- `hooks/codex-hooks.json` `PreToolUse` matcher adds `followup_task`, `send_message` and `apply_patch`.
+
+### Upgrade notes
+- **Codex: approve the hooks again in `/hooks`.** The matcher changed, so Codex treats the `PreToolUse` hook as untrusted and skips it silently until it is re-approved (`codex exec` runs need `--dangerously-bypass-hook-trust`).
+- **Behaviour change (Codex):** the hook now sees `apply_patch`, so the primary's fast-path budget (direct edits to more than 3 files in one turn go to a worker) applies on Codex as it already did on Claude Code and agy. Set `CODEX_MITOSIS_ALLOW_DIRECT_FASTPATH=1` to keep the old behaviour.
+- **Behaviour change (Codex):** follow-ups to an `explorer` are refused while Codex hides their text. Scouts take one lookup each; spawn another one.
+- Codex spawns routed by role are logged with rule `codex-role`.
+
 ## 1.7.0 - 2026-10-22
 
 ### Added

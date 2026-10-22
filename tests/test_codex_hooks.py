@@ -147,5 +147,137 @@ class CodexHooksTest(unittest.TestCase):
         self.assertTrue((ROOT / "hooks" / "codex-hooks.json").is_file())
 
 
+# Codex 0.163 multi-agent v2: hooks see "collaboration<tool>" names and an encrypted message.
+OPAQUE = (
+    "gAAAAABq2W6q_XALFZgD1zKjI6St8hIilg6diYo5-ULKaJMEhHaMKEcdSxOmRa2b1_16hBGQv9tSsT-yYt4xtowdOA_"
+    "fE7FIw96PB5VXsqtVMWeVsN8J_9wdsW49rMnfe9yNrXF8a8tipe-jXMH7_OFi1IT9rdtcvnDYiwyoN1jlPhnNo"
+)
+CHILD = {"agent_id": "01a16158-4b8c-7740-8588-dc83af681e30", "agent_type": "explorer"}
+
+
+class CodexCollaborationTest(unittest.TestCase):
+    def setUp(self):
+        CodexHooksTest.setUp(self)
+        self.sid = f"01a16158-{os.getpid():04x}-{id(self) & 0xffff:04x}"
+
+    def tearDown(self):
+        CodexHooksTest.tearDown(self)
+
+    def payload(self, event, **extra):
+        p = codex_payload(event, **extra)
+        p["session_id"] = self.sid
+        return p
+
+    def pre(self, tool, tool_input, **extra):
+        return eo.handle_pre_tool_use(self.payload("PreToolUse", tool_name=tool, tool_input=tool_input, tool_use_id="call_1", **extra))
+
+    def post(self, tool, tool_input, **extra):
+        return eo.handle_post_tool_use(self.payload("PostToolUse", tool_name=tool, tool_input=tool_input, tool_use_id="call_1", **extra))
+
+    def subagents(self):
+        return eo._read_state_file(eo._state_file(self.payload("Stop"))).get("subagents", {})
+
+    def denied(self, out):
+        return out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+
+    def spawn_probe(self, message=OPAQUE, **extra):
+        tool_input = {"task_name": "probe", "fork_turns": "none", "message": message}
+        tool_input.update(extra)
+        return self.pre("collaborationspawn_agent", tool_input)
+
+    def test_collaboration_prefix_is_stripped(self):
+        for raw in ("collaborationspawn_agent", "collaboration.followup_task", "collaboration__send_message"):
+            name, _ = eo._extract_tool_call(self.payload("PreToolUse", tool_name=raw, tool_input={}))
+            self.assertEqual(name, raw.replace("collaboration", "").lstrip("._"))
+        name, _ = eo._extract_tool_call(self.payload("PreToolUse", tool_name="collaborationnotes", tool_input={}))
+        self.assertEqual(name, "collaborationnotes")
+
+    def test_opaque_spawn_keeps_message_and_role(self):
+        upd = self.spawn_probe(agent_type="explorer")["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(upd["message"], OPAQUE)
+        self.assertEqual(upd["agent_type"], "explorer")
+        self.assertNotIn("model", upd)
+        rec = self.subagents()["probe"]
+        self.assertEqual((rec["tier"], rec["task_name"]), ("flash_lite", "probe"))
+
+    def test_opaque_spawn_without_role_is_pinned_to_worker(self):
+        upd = self.spawn_probe()["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(upd["agent_type"], "worker")
+        self.assertEqual(self.subagents()["probe"]["tier"], "flash")
+
+    def test_plaintext_v2_spawn_appends_report_format_without_model(self):
+        upd = self.spawn_probe(message="Find where main is defined in this directory and report the file name.",
+                               agent_type="explorer")["hookSpecificOutput"]["updatedInput"]
+        self.assertIn("REPORT FORMAT", upd["message"])
+        self.assertNotIn("model", upd)
+
+    def test_opaque_followups_to_scout_are_denied(self):
+        self.spawn_probe(agent_type="explorer")
+        for tool in ("collaborationfollowup_task", "collaborationsend_message"):
+            for target in ("probe", "/root/probe"):
+                out = self.pre(tool, {"target": target, "message": OPAQUE})
+                self.assertTrue(self.denied(out), (tool, target))
+                self.assertIn("agent_type: \\\"worker\\\"", json.dumps(out))
+
+    def test_opaque_followup_to_worker_or_unknown_is_allowed(self):
+        self.spawn_probe(agent_type="worker")
+        self.assertFalse(self.denied(self.pre("collaborationsend_message", {"target": "probe", "message": OPAQUE})))
+        self.assertFalse(self.denied(self.pre("collaborationfollowup_task", {"target": "nobody", "message": OPAQUE})))
+
+    def test_plaintext_followup_to_scout_is_checked(self):
+        self.spawn_probe(agent_type="explorer")
+        lookup = "Find where parse_header is defined and report the file path."
+        self.assertFalse(self.denied(self.pre("collaborationfollowup_task", {"target": "probe", "message": lookup})))
+        edit = "Edit a.txt and append the line epsilon."
+        self.assertTrue(self.denied(self.pre("collaborationfollowup_task", {"target": "probe", "message": edit})))
+        self.assertTrue(self.denied(self.pre("collaborationsend_message", {"target": "probe", "message": edit})))
+
+    def test_post_tool_use_stores_agent_path(self):
+        tool_input = {"task_name": "probe", "agent_type": "explorer", "fork_turns": "none", "message": OPAQUE}
+        self.pre("collaborationspawn_agent", tool_input)
+        self.post("collaborationspawn_agent", tool_input, tool_response='{"task_name":"/root/probe"}')
+        self.assertEqual(self.subagents()["probe"]["agent_path"], "/root/probe")
+
+    def test_failed_spawn_removes_its_record(self):
+        tool_input = {"task_name": "probe", "agent_type": "explorer", "fork_turns": "none", "message": OPAQUE}
+        self.pre("collaborationspawn_agent", tool_input)
+        self.post("collaborationspawn_agent", tool_input, error="spawn failed")
+        self.assertNotIn("probe", self.subagents())
+
+    def test_child_hooks_keep_the_record(self):
+        self.spawn_probe(agent_type="explorer")
+        eo.handle_post_tool_use(self.payload("PostToolUse", tool_name="Bash", tool_input={"command": "ls -la"},
+                                             tool_response="a.txt\n", **CHILD))
+        eo.handle_subagent_stop(self.payload("SubagentStop", stop_hook_active=False,
+                                             last_assistant_message="STATUS: COMPLETED", **CHILD))
+        eo.handle_stop(self.payload("Stop", stop_hook_active=False, last_assistant_message="DONE"))
+        self.assertEqual(self.subagents()["probe"]["tier"], "flash_lite")
+
+    def test_explorer_is_read_only(self):
+        patch = {"command": "*** Begin Patch\n*** Update File: a.txt\n@@\n+delta\n*** End Patch"}
+        self.assertTrue(self.denied(self.pre("apply_patch", patch, **CHILD)))
+        self.assertTrue(self.denied(self.pre("Bash", {"command": "echo delta >> a.txt"}, **CHILD)))
+        self.assertTrue(self.denied(self.pre("Bash", {"command": "sed -i s/a/b/ a.txt"}, **CHILD)))
+        self.assertFalse(self.denied(self.pre("Bash", {"command": "ls -la && wc -l a.txt"}, **CHILD)))
+        worker = dict(CHILD, agent_type="worker")
+        self.assertFalse(self.denied(self.pre("apply_patch", patch, **worker)))
+
+    def test_codex_hooks_json_matcher_covers_collaboration_tools(self):
+        data = json.loads((ROOT / "hooks" / "codex-hooks.json").read_text(encoding="utf-8"))
+        matcher = data["hooks"]["PreToolUse"][0]["matcher"]
+        for name in ("collaborationspawn_agent", "collaborationfollowup_task", "collaborationsend_message", "apply_patch", "Bash"):
+            self.assertRegex(name, matcher)
+        self.assertRegex("collaborationspawn_agent", data["hooks"]["PostToolUse"][0]["matcher"])
+
+    def test_debug_log_records_codex_tool_fields(self):
+        os.environ["CODEX_MITOSIS_DEBUG"] = "1"
+        p = self.payload("PreToolUse", tool_name="collaborationspawn_agent", tool_input={"task_name": "probe", "message": OPAQUE})
+        eo._debug_log(p, "pre-tool-use", {})
+        log = eo._state_file(p).with_name("mitosis_orchestrator_debug.log")
+        entry = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual((entry["tool"], entry["rawTool"]), ("spawn_agent", "collaborationspawn_agent"))
+        self.assertEqual(entry["toolInputKeys"], ["message", "task_name"])
+
+
 if __name__ == "__main__":
     unittest.main()

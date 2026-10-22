@@ -705,6 +705,29 @@ def _extract_apply_patch_files(patch_text_or_args: Any) -> List[str]:
     return cleaned
 
 
+# Codex 0.163 (multi-agent v2) puts its agent tools in the `collaboration` namespace and
+# names them in hook payloads with the namespace glued on: "collaborationspawn_agent".
+CODEX_COLLAB_TOOLS = ("spawn_agent", "followup_task", "send_message", "wait_agent", "interrupt_agent", "list_agents")
+CODEX_COLLAB_TOOL_RE = re.compile(r"^collaboration(?:__|[./:])?(" + "|".join(CODEX_COLLAB_TOOLS) + r")$")
+# Codex 0.163 hands hooks the spawn_agent / followup_task / send_message text as an
+# encrypted token ("gAAAAA..."), so no content rule can read it.
+OPAQUE_MESSAGE_RE = re.compile(r"^gAAAAA[A-Za-z0-9_-]{20,}={0,2}$")
+
+
+def _codex_tool_name(name: str) -> str:
+    m = CODEX_COLLAB_TOOL_RE.match(name)
+    return m.group(1) if m else name
+
+
+def _is_opaque_message(text: str) -> bool:
+    return bool(OPAQUE_MESSAGE_RE.match((text or "").strip()))
+
+
+def _codex_agent_key(name: Any) -> str:
+    """State key for a Codex agent: the last segment of its task path ("/root/probe" -> "probe")."""
+    return str(name or "").strip().lower().rstrip("/").rsplit("/", 1)[-1]
+
+
 def _extract_tool_call(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     if is_codex_payload(payload):
         name = str(payload.get("tool_name") or payload.get("tool") or "").strip()
@@ -715,7 +738,7 @@ def _extract_tool_call(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
                 name = str(tc.get("name") or "").strip()
                 inp = tc.get("args") or tc.get("arguments") or tc.get("input")
         args = inp if isinstance(inp, dict) else {}
-        return name, args
+        return _codex_tool_name(name), args
     if is_claude_code_payload(payload):
         name = str(payload.get("tool_name") or "").strip()
         inp = payload.get("tool_input")
@@ -2179,13 +2202,31 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     }
 
 
-def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-    is_claude = is_claude_code_payload(payload)
-    recipient = str(_get(args, "Recipient", "recipient", "to", "To", default="")).strip().lower()
+def _handle_agent_message(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Guard follow-up messages (SendMessage, send_message, followup_task) sent to a scout."""
+    hook_protocol = is_claude_code_payload(payload) or is_codex_hook_payload(payload)
+    # Codex keys agents by task path ("target": "probe" or "/root/probe"); Claude and agy by id.
+    recipient = _codex_agent_key(_get(args, "Recipient", "recipient", "target", "task_name", "to", "To", default=""))
     message = str(_get(args, "Message", "message", default=""))
-    tool_label = "SendMessage.message" if is_claude else "send_message.Message"
+    tool_label = {"SendMessage": "SendMessage.message", "followup_task": "followup_task.message"}.get(
+        tool_name, "send_message.message" if hook_protocol else "send_message.Message")
+
+    def deny(reason: str) -> Dict[str, Any]:
+        return _deny(reason, payload) if hook_protocol else {"decision": "deny", "reason": reason}
+
+    def allow() -> Dict[str, Any]:
+        return _no_opinion(payload) if hook_protocol else {"decision": "allow"}
+
     if not message.strip():
-        return _deny(f"{tool_label} cannot be empty.", payload) if is_claude else {"decision": "deny", "reason": f"{tool_label} cannot be empty."}
+        return deny(f"{tool_label} cannot be empty.")
+
+    # followup_task starts a new turn on the recipient, so it is routed like a fresh task.
+    # Classify before load_state: the judge may be called over HTTP and the lock must not be held.
+    followup: Optional[Decision] = None
+    if tool_name == "followup_task" and not _is_opaque_message(message):
+        peek = _peek_state(payload).get("subagents", {}).get(recipient)
+        if peek and _record_tier(peek) == "flash_lite":
+            followup = decide_subagent({"Prompt": message, "Role": "", "Workspace": "inherit", "TypeName": ""})
 
     state = load_state(payload)
     sync_subagents(payload, state)
@@ -2193,19 +2234,30 @@ def _handle_send_message(payload: Dict[str, Any], args: Dict[str, Any]) -> Dict[
 
     info = state.get("subagents", {}).get(recipient)
     if not info or _record_tier(info) != "flash_lite":
-        return _no_opinion(payload) if is_claude else {"decision": "allow"}
+        return allow()
+
+    scout = f"Recipient '{recipient}' is a flash_lite '{info.get('type') or SCOUT_TYPE}' subagent"
+    if _is_opaque_message(message):
+        return deny(
+            f"{scout}. Codex hides {tool_name} text from hooks, so it cannot be checked for code "
+            f"changes: scouts take one lookup each. Spawn a new {_delegation_hint(payload, 'flash_lite')} "
+            f"for another lookup, or use {_delegation_hint(payload, 'flash')} for changes or multi-step work."
+        )
 
     mutation = find_mutation(message)
     rule_count = len(NUMBERED_RULE_RE.findall(message))
     if mutation or rule_count > 3:
         why = f"mutation verb '{mutation}'" if mutation else f"{rule_count} numbered steps"
-        reason = (
-            f"Recipient '{recipient}' is a flash_lite '{info.get('type') or SCOUT_TYPE}' "
-            f"subagent ({why}). Do not send code changes or multi-step (>3 rules) tasks to "
+        return deny(
+            f"{scout} ({why}). Do not send code changes or multi-step (>3 rules) tasks to "
             f"a scout. Use {_delegation_hint(payload, 'flash')} instead."
         )
-        return _deny(reason, payload) if is_claude else {"decision": "deny", "reason": reason}
-    return _no_opinion(payload) if is_claude else {"decision": "allow"}
+    if followup is not None and followup.tier == "flash":
+        return deny(
+            f"{scout} and this follow-up is worker work ({followup.reason}). "
+            f"Use {_delegation_hint(payload, 'flash')} instead."
+        )
+    return allow()
 
 
 def _record_tier(info: Dict[str, Any]) -> str:
@@ -2812,19 +2864,33 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
     workspace = str(args.get("workspace") or args.get("isolation") or "inherit").strip().lower()
     if workspace == "worktree":
         workspace = "branch"
-    item = {
-        "Prompt": prompt,
-        "Role": role,
-        "Workspace": workspace,
-        "TypeName": role,
-    }
-    decision = decide_subagent(item)
+    # Multi-agent v2 (Codex 0.163): task_name / fork_turns, no model parameter; the role file pins the model.
+    task_name = str(args.get("task_name") or "").strip()
+    v2 = "task_name" in args or "fork_turns" in args
+    opaque = _is_opaque_message(prompt)
+    if opaque:
+        # The message is encrypted before hooks see it: route by the requested role and leave
+        # the text alone (appending REPORT FORMAT would corrupt the token).
+        bare = role.split(":")[-1].strip().lower()
+        tier = "flash_lite" if bare in (SCOUT_TYPE, CODEX_SCOUT_ROLE, "scout") else "flash"
+        decision = Decision(tier, None, _tier_effort(tier), 1.0 if bare else 0.5, "rule", "codex-role",
+                            f"message hidden from hooks; routed by agent_type '{role or 'default'}'")
+        _RECENT_DECISIONS.append(decision)
+        del _RECENT_DECISIONS[:-16]
+    else:
+        decision = decide_subagent({
+            "Prompt": prompt,
+            "Role": role,
+            "Workspace": workspace,
+            "TypeName": role,
+        })
     tier, type_override, reason = decision.tier, decision.type_override, decision.reason
     target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
 
     updated_args = copy.deepcopy(args)
-    updated_args["model"] = target_model
+    if not v2:
+        updated_args["model"] = target_model
     # Built-in Codex roles always exist; flash-lite-scout / flash-worker only exist after
     # scripts/setup-codex.py, and an unknown role makes Codex fail with "unknown agent_type".
     # Incoming flash-* names are accepted as aliases and rewritten to the built-in role.
@@ -2833,20 +2899,29 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
     for key in ("type", "agent_type"):
         if key in updated_args:
             updated_args[key] = codex_role
-    if _append_report_format_enabled() and not prompt_has_report_format(prompt):
+    if v2 and "agent_type" not in updated_args:
+        # Without a role a v2 agent runs on the primary's (frontier) model.
+        updated_args["agent_type"] = codex_role
+    if not opaque and _append_report_format_enabled() and not prompt_has_report_format(prompt):
         prompt_key = next(k for k in ("prompt", "instructions", "message") if str(args.get(k) or "").strip())
         updated_args[prompt_key] = append_report_format(prompt, tier)
 
-    spawns = [{
+    record = {
         "role": role or target_type,
         "type": target_type,
         "model": target_model,
         "tier": tier,
         "workspace": workspace,
         "active_branch": workspace == "branch",
-    }]
+    }
     state = load_state(payload)
-    state.setdefault("pending_spawns", []).extend(spawns)
+    if task_name:
+        # The task name is the address followup_task / send_message use; register it now,
+        # since PostToolUse is not guaranteed for collaboration tools.
+        record["task_name"] = task_name
+        state.setdefault("subagents", {})[_codex_agent_key(task_name)] = record
+    else:
+        state.setdefault("pending_spawns", []).append(record)
     save_state(payload, state)
 
     return _allow(
@@ -3093,8 +3168,8 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _handle_spawn_agent(payload, tool_name, args)
     if tool_name in ("mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"):
         return _handle_mitosis_tools(payload, tool_name, args)
-    if tool_name in ("send_message", "SendMessage"):
-        return _handle_send_message(payload, args)
+    if tool_name in ("send_message", "SendMessage", "followup_task"):
+        return _handle_agent_message(payload, tool_name, args)
     if tool_name == "run_workflow":
         return _handle_run_workflow(args)
     if tool_name == "define_subagent":
@@ -3107,16 +3182,24 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         if re.search(r"\bcodex\s+exec\b", cmd) and _parse_codex_exec(cmd) is not None:
             return _handle_codex_exec_command(payload, tool_name, args, cmd)
 
-    # A Claude Code scout has Bash for git/log checks only.
-    if tool_name == "Bash" and is_claude_code_payload(payload):
-        agent_type = str(payload.get("agent_type") or "").split(":")[-1].strip().lower()
-        if agent_type == SCOUT_TYPE:
-            cmd = str(args.get("command") or "")
+    # A scout (Claude flash-lite-scout, Codex explorer) is read-only whatever its prompt says:
+    # Bash for lookups only, no file edits. Codex hides follow-up text from hooks, so this is
+    # the layer that holds when a change request reaches a scout anyway.
+    agent_type = str(payload.get("agent_type") or "").split(":")[-1].strip().lower()
+    if agent_type in (SCOUT_TYPE, CODEX_SCOUT_ROLE) and (is_claude_code_payload(payload) or is_codex_hook_payload(payload)):
+        if tool_name in MUTATION_TOOLS:
+            return _deny(
+                f"[Mitosis Orchestrator] {agent_type} is a read-only scout and cannot use {tool_name}. "
+                "Report the finding and let the orchestrator hand changes to a worker.",
+                payload,
+            )
+        if tool_name in ("Bash", "shell", "exec_command", "local_shell"):
+            cmd = str(_get(args, "command", "cmd", default="") or "")
             ok, why = scout_command_is_read_only(cmd)
             if not ok:
                 return _deny(
-                    f"[Mitosis Orchestrator] {SCOUT_TYPE} runs read-only commands only ({why}). "
-                    "Report the finding and let the orchestrator hand changes to flash-worker.",
+                    f"[Mitosis Orchestrator] {agent_type} runs read-only commands only ({why}). "
+                    "Report the finding and let the orchestrator hand changes to a worker.",
                     payload,
                 )
 
@@ -3259,9 +3342,27 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
     return False
 
 
+def _codex_confirm_spawn(state: Dict[str, Any], args: Dict[str, Any], response: Any) -> None:
+    """Store the task path spawn_agent returned ({"task_name": "/root/probe"}) on its record."""
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+        except ValueError:
+            return
+    path = str(response.get("task_name") or "").strip() if isinstance(response, dict) else ""
+    if not path:
+        return
+    subagents = state.setdefault("subagents", {})
+    key = _codex_agent_key(path)
+    record = subagents.get(key) or subagents.get(_codex_agent_key(args.get("task_name")))
+    if record is not None:
+        record["agent_path"] = path
+        subagents[key] = record
+
+
 @_releases_state_locks
 def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
-    tool_name, _ = _extract_tool_call(payload)
+    tool_name, tool_args = _extract_tool_call(payload)
     # A subagent's own tool call (Claude and Codex both send agent_id) must not touch the
     # primary's state: its failures are not the primary's failures, and skipping the
     # load/save avoids needless lock contention.
@@ -3280,10 +3381,14 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 del pending[-n:]
             else:
                 state["pending_spawns"] = []
+        elif tool_name == "spawn_agent" and str(tool_args.get("task_name") or "").strip():
+            state.setdefault("subagents", {}).pop(_codex_agent_key(tool_args.get("task_name")), None)
         else:
             if pending:
                 pending.pop()
     else:
+        if tool_name == "spawn_agent":
+            _codex_confirm_spawn(state, tool_args, payload.get("tool_response"))
         if is_claude_code_payload(payload) and tool_name in ("Task", "Agent"):
             hint = str((payload.get("tool_input") or {}).get("subagent_type") or "")
             for aid in _claude_agent_ids_from_response(payload):
@@ -3444,16 +3549,27 @@ def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> None:
-    """With AGY_MITOSIS_DEBUG=1 / CLAUDE_MITOSIS_DEBUG=1 (or legacy AGY_ARGON_DEBUG=1), append one JSON line per hook call to the artifact directory."""
+    """With AGY_MITOSIS_DEBUG=1 / CLAUDE_MITOSIS_DEBUG=1 / CODEX_MITOSIS_DEBUG=1 (or legacy AGY_ARGON_DEBUG=1), append one JSON line per hook call to the artifact directory."""
     if not _env_flag("CLAUDE_MITOSIS_DEBUG", "AGY_MITOSIS_DEBUG", "AGY_ARGON_DEBUG"):
         return
     path = _state_file(payload)
     if not path:
         return
-    tool_name, _ = _extract_tool_call(payload)
+    tool_name, args = _extract_tool_call(payload)
+    raw_tool = str(payload.get("tool_name") or "")
+    state = _read_state_file(path)
     entry = {
         "mode": mode,
+        "event": payload.get("hook_event_name"),
         "tool": tool_name,
+        "rawTool": raw_tool if raw_tool and raw_tool != tool_name else None,
+        "agentId": payload.get("agent_id"),
+        "toolInputKeys": sorted(args.keys()) if args else None,
+        "toolResponse": str(payload.get("tool_response"))[:500] if payload.get("tool_response") is not None else None,
+        "state": {
+            "pending": len(state.get("pending_spawns") or []),
+            "subagents": sorted((state.get("subagents") or {}).keys())[:16],
+        },
         "modelName": payload.get("modelName") or payload.get("model_name") or payload.get("model"),
         "invocationNum": payload.get("invocationNum"),
         "executionNum": payload.get("executionNum"),

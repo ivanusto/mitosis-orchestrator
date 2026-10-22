@@ -179,7 +179,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.7.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.8.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -242,7 +242,9 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently. `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
+Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently (a matcher change in a new version needs approval again). `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
+
+Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
 
 ---
 
@@ -257,8 +259,9 @@ Zero-dependency Python 3.8+ standard library hook engine enforcing orchestration
 | `PreInvocation` (agy) · `UserPromptSubmit` (Claude Code / Codex) | Verifies the live session model on every turn; warns once per invocation if switched to a non-frontier model. Resets per-turn tracking (`turn_edited_files`, `consecutive_failures`). |
 | `PreToolUse` · `invoke_subagent` (agy) | Classifies every spawned subagent into `flash` or `flash_lite` based on `TypeName`, `Workspace`, `Role`, and `Prompt`. Strong signals (testing, debugging, call-graph tracing, mutation verbs) always override lookup keywords. Automatically upgrades `flash-lite-scout` to `flash-worker` if given a mutation task, and appends the `REPORT FORMAT` block to prompts that lack one. |
 | `PreToolUse` · `Agent` (Claude Code) | Pins **only** this plugin's own agent types (`flash-worker`, `flash-lite-scout`, with or without the `mitosis-orchestrator:` prefix) and untyped `Agent` calls that use `model: inherit`. Pins `effort` too (scout `low`, worker `medium`; caller values honoured; `CLAUDE_MITOSIS_PIN_EFFORT=0` disables) and appends the four-header `REPORT FORMAT` block to prompts that lack one (`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` disables). Other plugins' agents, built-in types (`Explore`, `Plan`, `general-purpose`, …), and untyped calls with an explicit model are passed through untouched. `CLAUDE_MITOSIS_PIN_SUBAGENTS=0` disables pinning entirely. |
-| `PreToolUse` · `spawn_agent` / `codex exec` (Codex) | Pins subagents to `gpt-5.6-luna` (scout) or `gpt-5.6-terra` (worker) by prompt classification. |
-| `PreToolUse` · `send_message` (agy) · `SendMessage` (Claude Code) | Blocks code-editing or multi-step (>3 numbered rules) follow-up instructions sent to a scout. Claude Code recipients are recognised by the agent id that `PostToolUse` / `SubagentStop` pair with the spawn. |
+| `PreToolUse` · `spawn_agent` / `codex exec` (Codex) | Pins subagents to `gpt-5.6-luna` (scout) or `gpt-5.6-terra` (worker) by prompt classification. When Codex hides the message from hooks (0.163 sends an encrypted token), the requested `agent_type` decides, the message is left untouched, and a call without a role is pinned to `worker`. |
+| `PreToolUse` · `send_message` (agy / Codex) · `SendMessage` (Claude Code) · `followup_task` (Codex) | Blocks code-editing or multi-step (>3 numbered rules) follow-up instructions sent to a scout; a Codex `followup_task` is also routed like a new task. Claude Code recipients are recognised by the agent id that `PostToolUse` / `SubagentStop` pair with the spawn, Codex recipients by the `task_name` registered at `spawn_agent`. Codex follow-up text that hooks cannot read is refused for scouts: spawn a new explorer or a worker instead. |
+| `PreToolUse` · scout's own tools (Claude Code / Codex) | A `flash-lite-scout` or Codex `explorer` cannot use `Write` / `Edit` / `apply_patch` and runs only allowlisted read-only shell commands, whatever its prompt says. |
 | `PreToolUse` · `run_workflow` | Blocks workflow scripts whose `agent(...)` calls omit model specification. |
 | `PreToolUse` · `define_subagent` | Forces `enable_subagent_tools=false` to prevent recursive nested subagent spawning. |
 | `PreToolUse` · **Context Hygiene** | Blocks the primary agent from directly reading raw `.log` or `transcript.jsonl` files, keeping noisy logs out of the primary context window by delegating log slicing to reconnaissance scouts. |

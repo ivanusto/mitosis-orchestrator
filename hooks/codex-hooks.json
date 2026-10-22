@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "spawn_agent|Bash|Edit|Write|mcp__mitosis__.*",
+        "matcher": "spawn_agent|followup_task|send_message|Bash|apply_patch|Edit|Write|mcp__mitosis__.*",
         "hooks": [
           {
             "type": "command",
