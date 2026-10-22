@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0 - 2026-10-22
+
+### Changed
+- Routing (rule layer, judge off). Worker lookups: a `flash-worker` typed call that is a short, plain read-only lookup is downgraded to the scout (`worker-lookup`, 0.7, judgeable). Any edit, run, non-read-only command, web need, broad research or non-read clause keeps the worker.
+- Scout prompts over 600 characters now have their final paragraph checked for an action clause; "then/next/之後" + a non-read verb counts as an action.
+- New `scout-imperative` rule (0.85): a scout-typed prompt whose first clause opens with a non-read verb (English verb list with an object check; Chinese action lexicon such as 取消註解, 停用, 調低, 封存) is upgraded to the worker. "Start with", "make a list of" and 取消的 X (noun use) stay on the scout.
+- `run-directive` also covers run/execute/try/跑/執行 followed by a command the scout cannot run (npm, make, docker, terraform, alembic, python ...); `git log` and `rg` stay. Permission phrasing ("you may run", "feel free to run", 可以執行) is not a request.
+- Chinese: clause-initial 把/將 with a non-read verb, transitive X掉 and resultative complements count as mutations; 被 passives, 要不要/是否 frames and why/where questions (including a mutation verb that ends a where/when question, 在哪裡建立) are topics. Polite frames (請/幫我) take any non-read verb.
+- Read-only follow-ups: 只要讀, 只需確認, 不必重現, 幫我看/查/找, "paste the output". "from the web process" and local CHANGELOG reads no longer count as web needs.
+- Routing eval: `routing_cases` grew from 361 to 562 labelled prompts, all correct (the 201 new ones are hand-written cases and review probes; 2.1.0 gets 130/201, 27 cost, 44 dangerous on them). New sealed blind holdout v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`, sealed in commit 7dffeb0), scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous. v7 is no longer blind; the next tuning round needs a v8 first.
+- Known gaps: the rule layer is still lexical, with no embedding stage; unlisted English verbs with a plain lowercase object; Chinese action verbs outside the lexicon when the clause does not use 把/將 or a resultative complement.
+
+### Added
+- `*_MITOSIS_WORKER_DOWNGRADE=0` keeps every `flash-worker` typed call on the worker (default `1`).
+- Tests: 402 in total (373 in 2.1.0).
+
 ## 2.1.0 - 2026-10-22
 
 ### Changed

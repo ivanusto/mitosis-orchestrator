@@ -94,20 +94,24 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 只看規則層，判斷器關閉。儲存格格式為正確數/40、成本誤差、危險（「危險」指把應由執行者處理的任務送給唯讀的偵察者）。
 
-| 資料集 | 角色 | v1.8.1 | v2.0.0 | v2.1.0 |
-| :--- | :--- | :--- | :--- | :--- |
-| routing_cases（183 -> 281 -> 361） | 訓練 | 183/183，0 危險 | 281/281，0 危險 | 361/361，0 危險 |
-| 2.1 手寫反例（80，已併入 routing_cases） | 於 2.1.0 訓練 | | 44/80，15，21 | 80/80，0，0 |
-| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
-| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
-| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 | 38/40，2，0 |
-| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 | 40/40，0，0 |
-| holdout v5（40） | 封存盲測，只評分一次；於 2.0.0 調校 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 | 39/40，1，0 |
-| holdout v6（40） | 封存盲測，每版只評分一次，未調校 | | 29/40，8，3 | 32/40，8，0 |
+| 資料集 | 角色 | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| routing_cases（183 -> 281 -> 361 -> 562） | 訓練 | 183/183，0 危險 | 281/281，0 危險 | 361/361，0 危險 | 562/562，0 危險 |
+| 2.1 手寫反例（80，已併入 routing_cases） | 於 2.1.0 訓練 | | 44/80，15，21 | 80/80，0，0 | 80/80，0，0 |
+| 2.2 手寫案例與審查探測（201，已併入 routing_cases） | 於 2.2.0 訓練 | | | 130/201，27，44 | 201/201，0，0 |
+| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 40/40，0，0 |
+| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 | 38/40，2，0 | 38/40，2，0 |
+| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 | 40/40，0，0 | 40/40，0，0 |
+| holdout v5（40） | 封存盲測，只評分一次；於 2.0.0 調校 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v6（40） | 封存盲測，每版只評分一次；用來挑出 2.2 的缺口 | | 29/40，8，3 | 32/40，8，0 | 35/40，5，0 |
+| holdout v7（40） | 封存盲測，每版只評分一次；兩筆誤判於事後修正 | | | 31/40，7，2 | 首次 34/40，4，2；最終 36/40，4，0 |
 
 v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
 
 v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`）由子代理盲寫，於 commit 1c5d524 封存，並於 2026-10-22 以獨立程序各評分一次：2.0.0 為 29/40，8 筆成本誤差，3 筆危險；2.1.0 為 32/40，8 筆成本誤差，0 筆危險。其中 4 筆成本誤差是標為 `flash-worker` 的查詢，這類呼叫一律交給執行者。封存後未再依 v6 調校。
+
+v7（sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`）由子代理盲寫，於 commit 7dffeb0 封存，並於 2026-10-22 以獨立程序各評分一次：2.1.0 為 31/40，7 筆成本誤差，2 筆危險；2.2 候選版（c648116）為 34/40，4 筆成本誤差，2 筆危險。兩筆危險誤判（標為偵察者、卻以行動開頭或執行寫入指令的提示詞）隨後依新的手寫案例以通用規則修正（416f754）：36/40，4 筆成本誤差，0 筆危險。因此 v7 已不再是盲測。其餘成本誤差包括一筆標為 `flash-worker` 的查詢（維持交給執行者），以及一筆提到 fix/pytest 的唯讀問題。
 
 **2.1 路由新增項目。**
 - 只是詢問「哪個指令會執行某事」的執行用語視為主題；若仍殘留「並執行它」之類的要求，仍會升級。
@@ -116,7 +120,18 @@ v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`�
 - 新增委婉請求句型："would it be possible to"、"appreciate it if you" 加過去式、"it would be great if you" 加動詞。
 - 沒有問號的問句（助動詞倒裝、"I wonder"、"not sure"、"curious"、不確定／不知道／想知道／好奇）也會啟動 trailing-imperative 檢查。
 - 新增中文動詞（弄成、弄好、搞定、拉到、換掉、改掉、調成、調大、調小）與查詢用語（弄清楚、搞清楚、釐清）。
-- 已知缺口：標為 `flash-worker` 的查詢（以類型為準）、超過 600 字元的偵察者提示詞會略過 trailing-imperative 檢查、清單以外的中文動詞。
+- 已知缺口（2.2 已補上）：標為 `flash-worker` 的查詢、超過 600 字元的偵察者提示詞略過 trailing-imperative 檢查、清單以外的中文動詞。
+
+**2.2 路由新增項目。**
+- `worker-lookup`：標為 `flash-worker`、簡短且單純唯讀的查詢，改以偵察者類型交給偵察者（0.7，可交由判斷器裁決）。設定 `*_MITOSIS_WORKER_DOWNGRADE=0` 可關閉。任何修改、執行、非唯讀指令、需要網路、大範圍研究或含非讀取子句的呼叫，仍留在執行者。
+- 過長（超過 600 字元）的偵察者簡報會檢查最後一段是否含行動子句。
+- `scout-imperative`（0.85）：標為偵察者、第一個子句以非讀取動詞開頭的提示詞會升級，中英文皆適用。
+- `run-directive` 也涵蓋 run／跑／執行 加上偵察者無法執行的指令；"you may run"、"feel free to run"、可以執行 屬於許可，不算要求。
+- 中文的把／將處置式、及物的 X掉 與結果補語視為修改；被字句、要不要／是否句型與為什麼／在哪裡的問句視為主題。
+- 禮貌句型（請／幫我）可接任何非讀取動詞。
+- 唯讀的後續要求：只要讀、只需確認、不必重現、"paste the output"。
+- "from the web process" 與讀取本機 CHANGELOG 不再被視為需要網路。
+- 已知缺口：規則層仍以字面比對為主，尚無 embedding 階段；未列入清單的英文動詞搭配一般小寫受詞；子句未使用把／將或結果補語時，清單以外的中文動作動詞。
 
 先前輪次（1.6.0 到 1.7.0），儲存格格式為正確數/40、危險：
 
@@ -226,7 +241,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.1.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.2.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -353,6 +368,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code 各階層釘定的 effort（`low`、`medium`、`high`、`xhigh`、`max`）；呼叫端自帶的合法 `effort` 優先。 |
 | `CLAUDE_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，`SubagentStop` 不再因最後訊息不是四標頭回報而退回外掛子代理。 |
 | `CODEX_MITOSIS_ENFORCE_REPORT` | `1` | 設為 `0` 時，Codex 的 `SubagentStop` 不再因最後訊息不是四標頭回報而把外掛子代理退回一次。 |
+| `*_MITOSIS_WORKER_DOWNGRADE` | `1` | 設為 `0` 時，所有標為 `flash-worker` 的呼叫一律留在執行者（預設會把簡短、單純唯讀的查詢改交給偵察者）。 |
 | `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | 設為 `0` 時，不再為缺少 `REPORT FORMAT` 區塊的子代理提示詞自動補上（agy `invoke_subagent`、Claude Code `Agent`）。 |
 | `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。 |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
@@ -403,7 +419,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 373 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # 402 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）

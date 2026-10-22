@@ -23,6 +23,7 @@ HOLDOUT_V3 = Path(__file__).resolve().parent / "routing_holdout_v3.jsonl"
 HOLDOUT_V4 = Path(__file__).resolve().parent / "routing_holdout_v4.jsonl"
 HOLDOUT_V5 = Path(__file__).resolve().parent / "routing_holdout_v5.jsonl"
 HOLDOUT_V6 = Path(__file__).resolve().parent / "routing_holdout_v6.jsonl"
+HOLDOUT_V7 = Path(__file__).resolve().parent / "routing_holdout_v7.jsonl"
 
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_eval", ROOT / "scripts" / "enforce-orchestrator.py")
 eo = importlib.util.module_from_spec(spec)
@@ -186,8 +187,25 @@ class TestRoutingHoldoutV6(unittest.TestCase):
         self.assertEqual(set(split.values()), {10}, split)
 
 
+class TestRoutingHoldoutV7(unittest.TestCase):
+    """Written blind by a subagent and sealed in commit 7dffeb0 (sha256 8b6bf916...). Scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous, no longer blind."""
+
+    def test_no_worker_task_reaches_a_scout(self):
+        cases = load(HOLDOUT_V7)
+        matrix, misses = evaluate(cases)
+        failing = [m for m in misses if m[1] == "flash"]
+        self.assertEqual(failing, [], report("routing_holdout_v7", cases, matrix, misses))
+
+    def test_dataset_is_well_formed(self):
+        cases = load(HOLDOUT_V7)
+        self.assertEqual(len(cases), 40)
+        self.assertEqual(len({c["id"] for c in cases}), 40)
+        split = collections.Counter((c["lang"], c["expected"]) for c in cases)
+        self.assertEqual(set(split.values()), {10}, split)
+
+
 if __name__ == "__main__":
-    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3), ("routing_holdout_v4", HOLDOUT_V4), ("routing_holdout_v5", HOLDOUT_V5), ("routing_holdout_v6", HOLDOUT_V6)):
+    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3), ("routing_holdout_v4", HOLDOUT_V4), ("routing_holdout_v5", HOLDOUT_V5), ("routing_holdout_v6", HOLDOUT_V6), ("routing_holdout_v7", HOLDOUT_V7)):
         if path.exists():
             data = load(path)
             print(report(name, data, *evaluate(data)), end="\n\n")

@@ -73,6 +73,8 @@ Environment variables:
                                         final message is not the four-header report
     CODEX_MITOSIS_ENFORCE_REPORT=0      (Codex) do not send a mitosis subagent back once when its
                                         final message is not the four-header report
+    AGY_MITOSIS_WORKER_DOWNGRADE=0      keep every flash-worker typed call on the worker (default: a short
+                                        plain read-only lookup typed flash-worker goes to the scout)
     AGY_MITOSIS_APPEND_REPORT_FORMAT=0  do not append the REPORT FORMAT block to subagent prompts
                                         that lack one (agy invoke_subagent, Claude Code Agent)
     AGY_MITOSIS_DEBUG=1                 append one JSON line per hook call to
