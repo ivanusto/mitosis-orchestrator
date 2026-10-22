@@ -138,12 +138,31 @@ CJK_MUTATION_NOUN_AFTER_RE = re.compile(
 )
 
 
+# Transitive "X掉" (關掉 砍掉 清掉 撤掉 停掉 拔掉). Intransitive descriptions (掛掉 當掉 壞掉 斷掉 跳掉 爛掉) and
+# consumption verbs (吃掉 用掉 佔掉) are not requests; neither are particles in front of 掉.
+_CJK_INTRANSITIVE = "掛挂當当壞坏死斷断跳爛烂漏忘輸输走跑逃用佔占花吃耗"
+_CJK_NON_VERB = "會会被已不沒没有的得地而所"
+_CJK_TRANS_DIAO = r"(?:(?![" + _CJK_INTRANSITIVE + _CJK_NON_VERB + r"])[一-鿿])掉"
+
+
 # Negations ahead of a Chinese verb: 不要修改, 請勿刪除, 不需要任何改動.
 CJK_NEGATED_MUTATION_RE = re.compile(
     r"(?:不要|不得|不可|不能|不准|不需要?|不用|不是要你|並非要你|并非要你|無須|无须|毋須|別|别|勿|請勿|请勿|禁止|切勿|避免)\s*"
     r"(?:任何|去|再|重新|重|來|来)?\s*"
-    r"(?:" + CJK_MUTATION_RE.pattern + r"|[修改])"
+    r"(?:" + CJK_MUTATION_RE.pattern + r"|[修改]|" + _CJK_TRANS_DIAO + r")"
 )
+
+
+# A mutation verb inside a "whether" frame (要不要整個拿掉 old 目錄, 是否修改 X) or inside a why-question clause
+# (為什麼會把 scout 升級？) is the topic of the question, not a request. A "how" clause is not skipped:
+# 如何實作 X 可以是研究任務的一部分。
+_CJK_WHETHER_BEFORE_RE = re.compile(r"(?:要不要|是否|會不會|会不会|需不需要|該不該|该不该)[^把將将。？?！!，,；;\n]{0,4}$")
+_CJK_WHY_CLAUSE_RE = re.compile(r"(?:為什麼|为什么|為何|为何|怎麼會|怎么会)[^。？?！!，,；;\n]*$")
+
+
+def _cjk_topic_frame(text: str, start: int) -> bool:
+    before = text[:start]
+    return bool(_CJK_WHETHER_BEFORE_RE.search(before) or _CJK_WHY_CLAUSE_RE.search(before))
 
 
 # "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
@@ -308,12 +327,118 @@ def _is_readonly_question(text: str) -> bool:
     return True
 
 
+# Disposal construction: 把/將 + object + verb with a resultative complement (把 X 關掉, 搬到 Y, 弄乾淨, 調回, 清空).
+_CJK_BA_RE = re.compile(r"[把將将]")
+_CJK_COMPLEMENT_RE = re.compile(r"乾淨|干净|起來|起来|[掉好成到進进回上下開开空齊齐]")
+_CJK_CLAUSE_BREAK = "。？?！!，,；;\n"
+_CJK_NEG_PREFIX_RE = re.compile(
+    r"(?:不要|不得|不可|不能|不准|不需要?|不用|不必|無須|无须|毋須|無需|无需|別|别|勿|請勿|请勿|禁止|切勿|避免|不是要你|並非要你|并非要你)"
+)
+# Looking verbs never dispose of anything; 列/印/貼 only read when they report back (列出來, 貼上來, ... 給我).
+_CJK_READ_VERBS = "看讀读找查問问說说"
+_CJK_REPORT_VERBS = "列印貼贴"
+# In front of the complement these are not verbs: particles, locations (底下, 以上), prepositions, nouns (組成).
+_CJK_NOT_VERB_BEFORE = (_CJK_NON_VERB + "之以最更很太都也還还就才又再底裡里中內内外前後后邊边面在於于從从向往朝對对跟和與与或及並并用為为讓让給给直至等來来去組组構构形達达造促")
+_CJK_VIEW_VERBS = "當当視视算認认"
+_CJK_SUMMARY_VERB_PAIRS = ("整理", "彙整", "汇整", "歸納", "归纳", "總結", "总结", "統計", "统计", "比較", "比较", "輸出", "输出", "顯示", "显示")
+_CJK_PASSIVE_BEFORE_RE = re.compile(r"被[^。？?！!，,；;\n的]{0,12}$")
+_CJK_CLAUSE_LEAD_RE = re.compile(
+    r"^(?:(?:請|请|幫我|帮我|幫忙|帮忙|麻煩你?|麻烦你?|先|再|然後|然后|並|并|順便|顺便|你|可以|能不能)\s*)*$")
+_CJK_READ_ANY_RE = re.compile(
+    r"看|讀|读|找|列|查|印|貼|贴|告訴|告诉|回報|回报|給我|给我|說明|说明|顯示|显示|比對|比对|確認|确认|檢查|检查|統計|统计|"
+    r"整理|翻|解釋|解释|總結|总结|比較|比较")
+_CJK_NOUN_PHRASE_END_RE = re.compile(
+    r"(?:在哪|在哪裡|在哪里|的那段|的地方|是哪|是哪個|是哪个|是什麼|是什么|的位置|的內容|的内容|的名字|的檔名|的路徑|的路径|[了過过])\s*$")
+_CJK_REPORT_BACK_RE = re.compile(r"(?:給我|给我)\s*$")
+
+
+def _find_cjk_disposals(text: str) -> List[Tuple[int, str]]:
+    """Out-of-list Chinese actions: 把 + object + resultative verb, and transitive X掉."""
+    found: List[Tuple[int, str]] = []
+    for m in re.finditer(_CJK_TRANS_DIAO, text):
+        if text[m.end():m.end() + 1] in ("了", "的") or _cjk_topic_frame(text, m.start()):
+            continue
+        if _CJK_PASSIVE_BEFORE_RE.search(text[:m.start()]):
+            continue  # 被 OOM 砍掉: a description
+        if CJK_NOUN_BEFORE_RE.search(text[:m.start()]) or CJK_MUTATION_NOUN_AFTER_RE.match(text[m.end():]):
+            continue
+        found.append((m.start(), m.group(0)))
+    for ba in _CJK_BA_RE.finditer(text):
+        end = len(text)
+        for i in range(ba.end(), len(text)):
+            if text[i] in _CJK_CLAUSE_BREAK:
+                end = i
+                break
+        clause = text[ba.start():end]
+        clause_start = max([text.rfind(c, 0, ba.start()) for c in _CJK_CLAUSE_BREAK] + [-1]) + 1
+        if (_CJK_REPORT_BACK_RE.search(clause) or _CJK_NEG_PREFIX_RE.search(text[clause_start:ba.start()])
+                or _cjk_topic_frame(text, ba.start())):
+            continue
+        lead = text[clause_start:ba.start()].strip()
+        if (_CJK_CLAUSE_LEAD_RE.match(lead) and len(clause) >= 4 and not _CJK_READ_ANY_RE.search(clause)
+                and not _CJK_NOUN_PHRASE_END_RE.search(clause) and not _QUESTION_CJK_RE.search(clause)):
+            found.append((ba.start(), clause))  # clause-initial 把 + object + any verb: 把舊的 API key 作廢
+            continue
+        for comp in _CJK_COMPLEMENT_RE.finditer(clause, 3, 36):
+            idx = comp.start()
+            if idx < 3 or not "一" <= clause[idx - 1] <= "鿿":
+                continue
+            verb, nxt = clause[idx - 1], clause[comp.end():comp.end() + 1]
+            if verb == "一" or verb in _CJK_NOT_VERB_BEFORE or nxt in ("了", "的", "嗎", "吗"):
+                continue
+            if verb in _CJK_READ_VERBS or (verb in _CJK_REPORT_VERBS and nxt in ("來", "来")):
+                continue
+            if comp.group(0) == "成" and (verb in _CJK_VIEW_VERBS or clause[idx - 2:idx] in _CJK_SUMMARY_VERB_PAIRS):
+                continue
+            if comp.group(0) == "回" and nxt in ("報", "报", "信", "覆", "复", "答", "應", "应", "傳", "传", "來", "来"):
+                continue
+            found.append((ba.start(), clause[:comp.end()]))
+            break
+    return found
+
+
+# "the cache layer refactor", "our auth migration": a mutation word that closes a determiner noun phrase names a
+# topic. "do/perform/start the X refactor" and "work on the X migration" still ask for the work.
+_NP_HEAD_WORDS = {"refactor", "rewrite", "patch", "fix", "fixes", "rename", "edit", "migration", "replace"}
+_NP_DET_BEFORE_RE = re.compile(
+    r"\b(?:the|a|an|this|that|these|those|its|my|your|our|their)\s+(?:[\w-]+\s+){1,3}$", re.IGNORECASE)
+_NP_REQUEST_VERB_BEFORE_RE = re.compile(
+    r"\b(?:do|perform|carry out|complete|finish|start|begin|make|handle|run|execute|implement|land|ship|apply|"
+    r"work on|go ahead with|tackle|kick off|get|take care of|please|then|and)\s+(?:(?:the|a|an|this|that|our|my|your)\s+)?$",
+    re.IGNORECASE)
+_NP_AFTER_RE = re.compile(
+    r"^\s*(?:[.,;:!?)]|$|\b(?:and|or|but|to|before|for|of|in|on|at|that|which|is|was|will|needs?|has|have|should|"
+    r"from|by|so|because|since|with|first|next|later)\b)", re.IGNORECASE)
+
+
+def _is_np_head(text: str, match: "re.Match[str]") -> bool:
+    if match.group(0).lower() not in _NP_HEAD_WORDS:
+        return False
+    clause_start = max(text.rfind(c, 0, match.start()) for c in ".;:!?\n") + 1
+    before = text[clause_start:match.start()]
+    det = _NP_DET_BEFORE_RE.search(before)
+    if not det or not _NP_AFTER_RE.match(text[match.end():]):
+        return False
+    return not _NP_REQUEST_VERB_BEFORE_RE.search(before[:det.start()])
+
+
+# "Which call site should we migrate first?", "what should we rename it to", "where would you add": asking for a
+# choice or an opinion. A yes/no "can you X?" is a request and stays one.
+_WH_OPINION_BEFORE_RE = re.compile(
+    r"\b(?:which|what|where|how|when)\b[^.?!;\n]{0,60}?\b(?:should|would|could|shall|might|ought to)\s+"
+    r"(?:we|i|you|they|one|it|someone)\s+(?:(?:also|first|even|really|best|then)\s+)?$",
+    re.IGNORECASE,
+)
+
+
 def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, str]]:
     """Return (offset, phrase) for every mutation request in text, in order.
 
     Negated phrases ("do not edit", "不要修改") and noun uses ("the patch
     version") do not count. In a read-only question "migration" is a topic too
-    (question_nouns=False turns that off).
+    (question_nouns=False turns that off). Chinese verbs inside a "whether" or
+    why/how frame are topics as well, and the Chinese disposal construction
+    (把 X 關掉, 砍掉, 搬到 Y) counts although the verb is not in the word list.
     """
     stripped = _strip_negated_mutations(_blank_run_objects(text))
     skip_migration = question_nouns and _is_readonly_question(text)
@@ -321,7 +446,8 @@ def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, st
     for m in MUTATION_RE.finditer(stripped):
         if skip_migration and m.group(0).lower() == "migration":
             continue
-        if not _is_noun_use(stripped, m) and not _is_path_part(stripped, m):
+        if not _is_noun_use(stripped, m) and not _is_path_part(stripped, m) and not _is_np_head(stripped, m) \
+                and not _WH_OPINION_BEFORE_RE.search(stripped[max(0, m.start() - 90):m.start()]):
             found.append((m.start(), m.group(0)))
     for pattern in (IMPERATIVE_MUTATION_RE, GIT_MUTATION_RE, EXECUTION_RE, SOFT_REQUEST_RE):
         for m in pattern.finditer(stripped):
@@ -329,7 +455,10 @@ def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, st
     for m in CJK_MUTATION_RE.finditer(stripped):
         if CJK_NOUN_BEFORE_RE.search(stripped[:m.start()]) or CJK_MUTATION_NOUN_AFTER_RE.match(stripped[m.end():]):
             continue
+        if _cjk_topic_frame(stripped, m.start()):
+            continue
         found.append((m.start(), m.group(0).strip()))
+    found.extend(_find_cjk_disposals(stripped))
     found.sort()
     return found
 
@@ -386,22 +515,28 @@ _QUESTION_HEDGE_RE = re.compile(
     re.IGNORECASE,
 )
 _QUESTION_CJK_HEDGE_RE = re.compile(r"不確定|不确定|不知道|想知道|好奇")
+# Restriction phrases: "不用重現", "別跑", "不必實際執行", "不需要改".
+_CJK_RESTRICT = r"(?:不用|不必|不需要|別|别)\s*(?:實際|实际)?(?:重現|重现|執行|执行|跑|改|修)"
 _TRAILING_READONLY_RE = re.compile(
-    r"^\W*(?:(?:just|only|simply|please|and|then|also|first|先|請|请|只要|只|麻煩|麻烦|順便|顺便)\s*)*"
+    r"^\W*(?:(?:just|only|simply|please|and|then|also|first|先|請|请|只要|只|麻煩|麻烦|順便|顺便|幫我|帮我|幫忙|帮忙|只需要|只需|僅|仅)\s*)*"
     r"(?:tell me|show me|show|list|explain|describe|summari[sz]e|report(?: back)?|answer|point me|give me (?:the|a) (?:path|file|name|list)|"
     r"let me know|name|identify|locate|find (?:out|me)|look (?:at|in|into|through)|inspect|open(?!\s+(?:(?:a|an|the)\s+)?(?:new\s+)?(?:pr|prs|pull request|mr|merge request|issue|ticket|branch)\b)|view|check(?!\s+(?:out|in)\b)|consult|read|"
     r"(?:the )?(?:path|paths|file|files|name|names|command|commands|line|lines|list|answer|result|location|function)s?\b|"
-    r"告訴我|告诉我|列出|說明|说明|解釋|解释|回報|回报|報告|报告|看看|看一下|看就好|看|查看|找出|指出|回答)|"
+    r"告訴我|告诉我|列出|說明|说明|解釋|解释|回報|回报|報告|报告|看看|看一下|看就好|看|查看|找出|指出|回答|"
+    r"paste (?:the |its |their )?(?:output|result|results|contents?|text|diff|lines?)|貼出來|貼上來|贴出来|贴上来|"
+    r"讀|读|閱讀|阅读|查一下|查|找|搜尋|搜寻|確認|确认|檢查|检查|比對|比对|對照|对照|統計|统计|翻|列一下|列)|"
     r"\b(?:only|just) (?:report|tell|list|show|explain|look|read|check|answer)\b|"
     r"\b(?:do not|don't|dont|no need to|without) (?:change|modify|edit|touch|write|fix|run|alter)\b|"
     r"\bno (?:changes|edits|writes)\b|\bread[- ]?only\b|"
-    r"只要看|只看|只要告訴|只要告诉|不用改|不用修|不要改|不要動|不要动|先不要動|先不要动|不需要改|不用動|不用动|不必改|無須修改|无须修改|唯讀|只讀|只读",
+    + _CJK_RESTRICT +
+    r"|只要看|只看|只要告訴|只要告诉|不用改|不用修|不要改|不要動|不要动|先不要動|先不要动|不需要改|不用動|不用动|不必改|無須修改|无须修改|唯讀|只讀|只读",
     re.IGNORECASE,
 )
 # Looser hints that a follow-up clause only says how to look ("Paths only.", "git show 看就好", "不要執行").
 _READONLY_HINT_RE = re.compile(
     r"\bonly\b|\b(?:use|using|check|via|with|from)\s+(?:the\s+)?(?:`?(?:rg|grep|git|wc|cat|find|ls|head|tail|jq)\b|git log|blame)|"
     r"\b(?:is|are) fine\b|\bwill do\b|\bis enough\b|"
+    + _CJK_RESTRICT + r"|"
     r"就好|即可|就行|而已|不要\s*(?:build|執行|执行|跑|編譯|编译)|不用\s*(?:執行|执行|跑|build)|回報|回报|回答|說明|说明|摘要|簡單|简单|用\s*(?:rg|grep|git|wc|cat|find)\b",
     re.IGNORECASE,
 )
@@ -488,7 +623,7 @@ HEAVY_RE = re.compile(
     r"debug|bug|root[- ]cause|multi-file|across (?:files|modules|packages)|"
     r"call[- ]?graph|dependency|dependencies|trace|synthesi[sz]e|"
     r"benchmark|build|compile|integration|deep[- ]dive|investigate|diagnose|profil(?:e|ing)|memory leak|"
-    r"race condition|on the web|from the web|search the web|web search|"
+    r"race condition|(?:on|from) the web(?=\s*(?:$|[.,;:!?)\n]|\s(?:for|to|about|and|or|instead|first|too|as|if|when|then|using|with)\b))|search the web|web search|"
     r"search_web|read_url_content|documentation|docs? (?:for|on|about)"
     r")\b",
     re.IGNORECASE,
@@ -611,7 +746,7 @@ LOOKUP_SIGNAL_RE = re.compile(
     r"(?:^|[.;!\n])\s*(?:show|view|print|open|看|查看)\b|(?:^|[.;!\n])\s*(?:看|查看)|"
     r"\bcheck(?:ed|ing)? (?:whether|if)\b|\b(?:tail|read|summari[sz]e|explain|walk me through|tell me|display|cat)\b|"
     r"哪裡|哪里|哪個|哪个|哪些|哪幾|哪几|在哪|列出|找出|查找|有沒有|有没有|是不是|什麼|什么|多少|幾個|几个|有哪些|"
-    r"看一下|弄清楚|搞清楚|釐清|厘清|讀|读|摘要|總結|总结|解釋|解释|顯示|显示|告訴我|告诉我|說明|说明|了解|怎麼|怎么|如何",
+    r"看一下|貼上來|贴上来|貼出來|贴出来|弄清楚|搞清楚|釐清|厘清|讀|读|摘要|總結|总结|解釋|解释|顯示|显示|告訴我|告诉我|說明|说明|了解|怎麼|怎么|如何",
     re.IGNORECASE,
 )
 
@@ -647,7 +782,7 @@ DOCS_LOOKUP_RE = re.compile(
 
 # The scout has no web access: explicit web tools, vendor docs sites and release notes on a site need a worker.
 WEB_NEED_RE = re.compile(
-    r"\bweb ?fetch\b|\bweb ?search\b|\bsearch (?:the )?web\b|\b(?:on|from) the web\b|"
+    r"\bweb ?fetch\b|\bweb ?search\b|\bsearch (?:the )?web\b|\b(?:on|from) the web(?=\s*(?:$|[.,;:!?)\n]|\s(?:for|to|about|and|or|instead|first|too|as|if|when|then|using|with)\b))|"
     r"\b(?:search|look(?:ing)? (?:it |this |that )?up|check|find|read|browse|google)\b[^.\n]{0,40}\bonline\b|"
     r"\bonline (?:docs?|documentation|search|sources?)\b|"
     r"\b(?:vendor|official|upstream|project)(?:'s)? (?:docs?|documentation)(?: (?:site|website|page|pages))?\b|"
@@ -656,6 +791,35 @@ WEB_NEED_RE = re.compile(
     r"\b(?:site|website)\b[^.\n]{0,30}\brelease notes\b|上網查|上网查|網路上查|网路上查|官網|官网",
     re.IGNORECASE,
 )
+
+
+# A local file or path named like a doc ("CHANGELOG", "docs/guide.md", "CHANGELOG.md") is a read, not a web lookup.
+_LOCAL_PATH_RE = re.compile(r"(?<![\w:/.-])(?:\./|\.\./|~/)?[\w.-]+(?:/[\w.-]*)+")
+_DOMAINISH_RE = re.compile(r"^(?:www\.|[\w-]+\.(?:com|org|net|io|dev|app|ai|co|edu|gov|tw|jp)\b)", re.IGNORECASE)
+_LOCAL_DOC_FILE_RE = re.compile(
+    r"\b[\w-]*(?:changelog|release[-_]?notes|docs?|documentation|readme|history|news)[\w-]*\.(?:md|rst|txt|adoc)\b",
+    re.IGNORECASE,
+)
+_LOCAL_DOC_BARE_RE = re.compile(r"\b(?:CHANGELOG|RELEASE[-_]?NOTES|HISTORY|NEWS)\b")
+_LOCAL_DOC_DETERMINERS = {"the", "our", "this", "my", "local", "repo", "repo's", "project's"}
+
+
+def _blank_local_docs(text: str) -> str:
+    """Blank file names and paths, so a doc-like name does not read as a web lookup; lengths are kept."""
+    text = _LOCAL_PATH_RE.sub(lambda m: m.group(0) if _DOMAINISH_RE.match(m.group(0)) else _blank(m), text)
+    text = _LOCAL_DOC_FILE_RE.sub(_blank, text)
+    out = text
+    for m in _LOCAL_DOC_BARE_RE.finditer(text):
+        prev = re.search(r"([A-Za-z0-9_'.-]+)\s+$", text[max(0, m.start() - 20):m.start()])
+        if prev and prev.group(1).lower() not in _LOCAL_DOC_DETERMINERS:
+            continue  # "the requests CHANGELOG" names a library's changelog
+        out = out[:m.start()] + " " * len(m.group(0)) + out[m.end():]
+    return out
+
+
+def needs_web(text: str) -> bool:
+    """True when text asks for web access or a docs lookup (a scout has no web)."""
+    return bool(WEB_NEED_RE.search(text) or DOCS_LOOKUP_RE.search(_blank_local_docs(text)))
 
 
 # A run that is still asked for after the how-to-run phrases are blanked: "...and run it", "execute them", 跑一次.
@@ -802,6 +966,31 @@ POLITE_CJK_RE = re.compile(
 )
 
 
+# Any polite frame, bare 請/幫我 included ("請問" and 申請/邀請 are not frames). The first verb after a frame is an
+# action unless it is a read-only verb; 把/preposition openings are left to the windowed pattern above.
+_POLITE_CJK_ANY_FRAME_RE = re.compile(
+    r"(?<![申邀聘延敬約约催特])(?:" + _POLITE_CJK_FRAME + r"|請(?![問求假客教益示願])|请(?![问求假客教益示愿])|幫我|帮我)"
+)
+_POLITE_CJK_FILLER_RE = re.compile(
+    r"(?:[你您先再也就]|順便|顺便|具體|具体|精確|精确|明確|明确|完整|清楚|準確|准确|確實|确实|一併|一并|一起|同時|同时|另外|順手|顺手|一下|幫我|帮我|幫忙|帮忙|直接|仔細|仔细|詳細|详细|簡單|简单|盡量|尽量|務必|务必|能不能|可以|不妨|麻煩|麻烦)*"
+)
+_POLITE_CJK_READ_RE = re.compile(
+    r"看|查|找|讀|读|列|確認|确认|檢查|检查|比對|比对|對照|对照|統計|统计|說明|说明|解釋|解释|告訴|告诉|問|问|回報|回报|翻|搜尋|搜寻|閱讀|阅读|總結|总结|摘要|追蹤|追踪|追查|追|盤點|盘点|分析|研究|調查|调查|留意|注意|比較|比较|評估|评估|判斷|判断|推測|推测|確定|确定|了解|釐清|厘清|查證|查证|核對|核对|檢視|检视|審視|审视|掃|扫|瀏覽|浏览|計算|计算|數|数|估"
+)
+_POLITE_CJK_NOT_VERB = "把將将在於于從从對对用以依按針针不別别勿莫無无毋禁切避"
+
+
+def _polite_cjk_action(stripped: str) -> Optional[str]:
+    for m in _POLITE_CJK_ANY_FRAME_RE.finditer(stripped):
+        rest = stripped[m.end():]
+        rest = rest[_POLITE_CJK_FILLER_RE.match(rest).end():]
+        if not rest or not "\u4e00" <= rest[0] <= "\u9fff" or rest[0] in _POLITE_CJK_NOT_VERB:
+            continue
+        if not _POLITE_CJK_READ_RE.match(rest):
+            return m.group(0) + rest[:4]
+    return None
+
+
 def find_polite_request(text: str) -> Optional[str]:
     """Return the polite action request in text ("mind bumping", "麻煩你升級"), or None."""
     stripped = _strip_negated_mutations(text)
@@ -813,10 +1002,12 @@ def find_polite_request(text: str) -> Optional[str]:
         sentence = before[max(before.rfind(c) for c in ".;!?\n") + 1:]
         if not _POLITE_WEAK_OPEN_RE.match(sentence) and not _POLITE_WEAK_NEG_RE.search(before[-30:]):
             return m.group(0)
+    if CJK_NEGATED_MUTATION_RE.search(stripped) or _NEGATED_ACTION_CJK_RE.search(stripped):
+        return None
     m = POLITE_CJK_RE.search(stripped)
-    if m and not CJK_NEGATED_MUTATION_RE.search(stripped) and not _NEGATED_ACTION_CJK_RE.search(stripped):
+    if m:
         return m.group(0)
-    return None
+    return _polite_cjk_action(stripped)
 
 
 # Prior confidence per rule. Explicit signals are near certain; the prompt
@@ -842,6 +1033,7 @@ RULE_CONFIDENCE = {
     "polite-request": 0.9,
     "scout-web": 0.9,
     "scout-read-only": 0.7,
+    "worker-lookup": 0.7,
     "run-directive": 0.9,
     "default": 0.5,
 }
@@ -851,7 +1043,7 @@ RULE_CONFIDENCE = {
 # explicit-model rules state the caller's intent and are never sent to a judge.
 JUDGEABLE_RULES = {"mutation", "heavy", "heavy-noun", "lite", "long-prompt", "short-prompt",
                   "short-prompt-unknown", "docs-lookup", "default", "question-noun", "readonly-command",
-                  "scout-read-only"}
+                  "scout-read-only", "worker-lookup"}
 
 
 _JUDGE_MODULE: Any = None
@@ -895,11 +1087,15 @@ def _apply_judge(decision: Decision, prompt: str, scout_typed: bool, worker_type
         decision = decision._replace(reason=f"{decision.reason}; judge error {type(exc).__name__}")
     if verdict is None:
         # Unreachable or unsure judge: take the tier that cannot fail the task.
-        return Decision("flash", decision.type_override, _tier_effort("flash"), decision.confidence,
+        type_override = None if decision.rule == "worker-lookup" else decision.type_override
+        return Decision("flash", type_override, _tier_effort("flash"), decision.confidence,
                         "default", decision.rule, f"{decision.reason}; judge unavailable, conservative flash")
     tier, confidence = verdict
     type_override = decision.type_override
-    if scout_typed:
+    if decision.rule == "worker-lookup":
+        # A worker-typed lookup was downgraded to the scout: the judge confirms it, or vetoes it and the worker stays.
+        type_override = None if tier == "flash" else type_override
+    elif scout_typed:
         # Only a mutation verb reaches here for a scout: the judge confirms or vetoes the upgrade.
         type_override = worker_type_name if tier == "flash" else None
     return Decision(tier, type_override, _tier_effort(tier), round(confidence, 3), "judge", decision.rule,
@@ -931,21 +1127,157 @@ _SCOUT_IMPERATIVE_START_RE = re.compile(
 )
 
 
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-*\u2022]\s+|\d+[.)\u3001]\s*)")
+
+
+_SEQUENCED_RE = re.compile(
+    r"^\W*(?:and\s+then|then|after\s+that|afterwards?|next|once\s+(?:that'?s\s+)?(?:done|finished)|following\s+that)\b[,\s]*"
+    r"(?:(?:please|also|just)\s+)*([a-z][\w-]*)",
+    re.IGNORECASE,
+)
+_SEQUENCED_CJK_RE = re.compile(r"^\W*(?:然後|然后|接著|接着|之後|之后|再)\s*(?:請|请)?\s*(\S)")
+_SEQUENCED_READ_WORDS = {
+    "read", "look", "check", "list", "report", "tell", "show", "summarize", "summarise", "explain", "describe", "return",
+    "answer", "paste", "print", "note", "compare", "confirm", "verify", "find", "locate", "identify", "count", "trace",
+    "grep", "search", "inspect", "review", "see", "give", "name", "mention", "quote", "cite", "display", "point",
+    "i", "we", "you", "it", "they", "the", "a", "an", "this", "that", "there", "these", "those", "my", "our", "your",
+}
+
+
+def _sequenced_action(clause: str) -> bool:
+    """A clause that opens with then/next/然後/再 plus a verb that is not a read verb is an action."""
+    m = _SEQUENCED_RE.match(clause)
+    if m:
+        return m.group(1).lower() not in _SEQUENCED_READ_WORDS
+    m = _SEQUENCED_CJK_RE.match(clause)
+    return bool(m and "\u4e00" <= m.group(1) <= "\u9fff" and not _POLITE_CJK_READ_RE.match(clause[m.start(1):]))
+
+
 def _scout_trailing_imperative(text: str, prompt: str) -> Optional[str]:
     """Trailing imperative for a scout-typed prompt, with stricter guards than for untyped ones.
 
     Scout prompts are often long structured briefs whose later list items are noun phrases, so the clause
-    must open with a verb, and a read-only declaration or a long brief rules the check out.
+    must open with a verb, and a read-only declaration after it rules the check out. Past 600 chars only the
+    final paragraph (at most 400 chars, not a list) is examined.
     """
+    subject = prompt
     if len(prompt) > 600:
-        return None
-    clause = find_trailing_imperative(prompt)
-    if not clause or not _SCOUT_IMPERATIVE_START_RE.match(clause):
+        # A long brief: only its closing paragraph can carry the ask, and only when it is prose, not a list.
+        paragraphs = re.split(r"\n[ \t]*\n", prompt.strip())
+        subject = paragraphs[-1].strip()
+        if len(paragraphs) < 2 or len(subject) > 400 or any(_LIST_LINE_RE.match(ln) for ln in subject.splitlines()):
+            return None
+    clause = find_trailing_imperative(subject)
+    if not clause or not (_SCOUT_IMPERATIVE_START_RE.match(clause) or _sequenced_action(clause)):
         return None
     at = max(text.find(clause), 0)
     if any(m.start() >= at for m in READ_ONLY_RE.finditer(text)):
         return None  # a read-only declaration at or after the clause has the last word
     return clause
+
+
+# A verb outside the word lists that opens a clause and takes an object ("...and raise it to 30s", "make it faster").
+_WORKER_ACTION_EN_RE = re.compile(
+    r"(?:^|[.;!?\n]\s*|\b(?:and|then|also|please)\s+(?:(?:then|also|please)\s+)*)"
+    r"([a-z][\w-]*)\s+(?:it|them|that|this|those|these|its|the|a|an|to)\b",
+    re.IGNORECASE,
+)
+_WORKER_READ_WORDS = {
+    "tell", "show", "list", "give", "report", "print", "explain", "return", "say", "answer", "name", "describe",
+    "summarize", "summarise", "count", "find", "check", "read", "look", "see", "identify", "point", "include",
+    "note", "mention", "paste", "quote", "cite", "display", "let", "is", "are", "was", "were", "does", "do", "did",
+    "has", "have", "can", "could", "which", "what", "where", "who", "how", "why", "whether", "if", "the", "a", "an",
+    "to", "of", "in", "on", "for", "with", "it", "this", "that", "these", "those", "there", "i", "we", "you", "so",
+    "but", "or", "not", "no", "yes", "just", "only", "please", "also", "then", "and",
+}
+_WORKER_ACTION_CJK_RE = re.compile(
+    r"(?:並|并|然後|然后|再|順便|顺便|接著|接着)(?!\s*(?:告訴|告诉|說明|说明|回報|回报|列|查|看|找|確認|确认|比對|比对|統計|统计|整理|報告|报告|回答))"
+)
+
+
+# Research that spans the codebase is a worker job even when it only reads.
+_WORKER_BROAD_RE = re.compile(r"\bacross\b|\bend[- ]to[- ]end\b|\bmap out\b|\bflows? (?:from|through)\b|\btrace\b", re.IGNORECASE)
+
+
+def _opens_with_read_verb(prompt: str) -> bool:
+    return bool(_TRAILING_READONLY_RE.search(re.split(r"[。.;；，,\n]", prompt.strip(), 1)[0].strip()))
+
+
+# Commands the scout's Bash cannot run: any CLI tool outside the read-only set, in a code span, a "$ " line or bare.
+_CLI_WORDS = ("pip3?|npm|pnpm|yarn|uv|poetry|cargo|docker|kubectl|curl|wget|pytest|tox|terraform|helm|gh|aws|gcloud|"
+              "python3?|node|npx|brew|apt(?:-get)?|systemctl|ansible|gradle|mvn|bundle|gem|composer|dotnet|"
+              "go (?:build|test|run|mod|vet|get|install|env|list)|make\\s+(?:-\\w+|test|build|lint|install|clean|all|check|deploy|run)")
+_CLI_BARE_RE = re.compile(r"(?<![\w./-])(?:" + _CLI_WORDS + r")\s+\S", re.IGNORECASE)
+_CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+_SHELL_LINE_RE = re.compile(r"(?m)^\s*[$>]\s+(\S.*)$")
+
+
+def _names_non_readonly_command(prompt: str) -> bool:
+    for span in _CODE_SPAN_RE.findall(prompt) + _SHELL_LINE_RE.findall(prompt):
+        span = span.strip()
+        if re.match(r"(?:" + _CLI_WORDS + r")\b", span, re.IGNORECASE) and not is_read_only_command(span):
+            return True
+    return bool(_CLI_BARE_RE.search(_CODE_SPAN_RE.sub(" ", prompt)))
+
+
+_WORKER_READ_START_RE = re.compile(
+    r"^\W*(?:(?:please|just|also|and|then|first)\s+)*(?:find|list|show|tell|give|print|read|look|check|explain|describe|"
+    r"summari[sz]e|count|identify|name|display|locate|grep|search|cat|report|answer|return|point|open|view)\b|"
+    r"^\W*(?:用\s*\S+\s*)?(?:列出|找出|查|看|讀|读|告訴|告诉|說明|说明|解釋|解释|比對|比对|確認|确认|檢查|检查|統計|统计|搜尋|搜寻)")
+
+
+def _all_clauses_read_only(prompt: str) -> bool:
+    """True when every non-question clause is a read-only instruction, courtesy or reference.
+
+    "I need you to wire the retry wrapper" opens with a subject and is no read-only clause here.
+    """
+    protected = _ABBREV_RE.sub(lambda m: m.group(0).replace(".", "\u2024"), prompt)
+    pos, clauses = 0, []
+    for m in _SENTENCE_SPLIT_RE.finditer(protected):
+        before = protected[:m.start()]
+        if before.count("(") > before.count(")"):
+            continue
+        clauses.append((protected[pos:m.start()], m.group(0)))
+        pos = m.end()
+    clauses.append((protected[pos:], ""))
+    for clause, terminator in clauses:
+        clause = clause.strip()
+        if not clause or not re.search(r"[A-Za-z]{2}|[\u4e00-\u9fff]", clause):
+            continue
+        if _is_question_clause(clause, terminator) or _COURTESY_RE.match(clause) or _REFERENCE_RE.match(clause):
+            continue
+        if not _RO_COMPOUND_ACTION_RE.search(clause) and (
+                _TRAILING_READONLY_RE.search(clause) or _READONLY_HINT_RE.search(clause)
+                or READ_ONLY_RE.search(clause) or _WORKER_READ_START_RE.match(clause)):
+            continue
+        return False
+    return True
+
+
+def _worker_lookup(text: str, prompt: str, workspace: str, requested: str, lite: Optional[str]) -> bool:
+    """True when a flash-worker typed call is a plain read-only lookup the scout can answer.
+
+    Conservative: a short prompt, no sign of an edit, a run, a shell write, web access, heavy research or a
+    trailing action clause, and positive evidence of a lookup that asks for no action on what it names.
+    """
+    if len(prompt) > 600 or workspace in ("branch", "share") or requested not in ("", "inherit", "flash_lite"):
+        return False  # an explicit stronger model (flash, sonnet, ...) is the caller's choice
+    if (find_mutation(text, False) or find_heavy_ex(text, lite is not None, False)[0] or find_shell_mutation(text)
+            or find_polite_request(text) or find_run_task(text) or find_run_directive(text)
+            or EXECUTION_RE.search(_blank_run_objects(text)) or needs_web(text) or find_trailing_imperative(prompt)):
+        return False
+    if _WORKER_BROAD_RE.search(prompt) or _WORKER_ACTION_CJK_RE.search(prompt) or any(
+            m.group(1).lower() not in _WORKER_READ_WORDS for m in _WORKER_ACTION_EN_RE.finditer(prompt)):
+        return False
+    read_command = is_read_only_command(prompt)
+    if not read_command and (_names_non_readonly_command(prompt) or not _all_clauses_read_only(prompt)):
+        return False
+    if not (lite or LOOKUP_SIGNAL_RE.search(text) or read_command):
+        return False
+    stripped = prompt.strip()
+    question = _is_question_clause(stripped, "?" if stripped[-1:] in ("?", "？") else "")
+    return bool(_is_readonly_question(text) or READ_ONLY_RE.search(text) or read_command or question
+                or _opens_with_read_verb(prompt))
 
 
 def decide_subagent(subagent: Dict[str, Any]) -> Decision:
@@ -964,12 +1296,17 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     """Keyword rules. Returns (decision, role+prompt text, scout_typed, worker type name).
 
     Precedence (first match wins):
-      1. flash-worker type                      -> flash
-      2. mutation verbs in prompt               -> flash  (scout type is upgraded to worker)
-      2b. polite action request ("would you mind bumping...") -> flash
+      1. flash-worker type                      -> flash, except a plain read-only lookup (short, no edit, run,
+         web, heavy or trailing-action signal, positive lookup evidence): flash_lite with the scout type
+         (worker-lookup; AGY_MITOSIS_WORKER_DOWNGRADE=0 turns that off; a judge may veto it)
+      2. mutation verbs in prompt               -> flash  (scout type is upgraded to worker); includes the Chinese
+         disposal construction (把 X 關掉/搬到 Y) and transitive X掉; a verb inside a 要不要/是否 frame or a
+         why-question clause is a topic
+      2b. polite action request ("would you mind bumping...", 請/幫我 + any verb that is not a read verb) -> flash
       2c. run directive left after "command to run X" phrases are blanked, scout type -> flash (upgraded)
       3. flash-lite-scout type                  -> flash_lite, unless it needs web access (scout-web), ends
-         in an action clause after a question (trailing-imperative) or still asks for a run (run-directive);
+         in an action clause after a question (trailing-imperative; for a prompt over 600 chars only the final
+         paragraph counts) or still asks for a run (run-directive);
          a scout type that declares read-only with the last word keeps the scout (scout-read-only)
       4. Workspace branch/share                 -> flash
       5. heavy signals (tests, debug, trace...) -> flash  (beats lite keywords)
@@ -1007,11 +1344,15 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         find_mutation(text, False) or find_heavy_ex(text, lite is not None, False)[0])
 
     if bare_type == WORKER_TYPE:
+        if _get_env("AGY_MITOSIS_WORKER_DOWNGRADE", default="1") != "0" and _worker_lookup(
+                text, prompt, workspace, requested, lite):
+            scout_type = f"{prefix}{SCOUT_TYPE}" if prefix else SCOUT_TYPE
+            return done(_rule_decision("flash_lite", scout_type, "worker-lookup",
+                                       "flash-worker type on a plain read-only lookup; downgraded to the scout"))
         return done(_rule_decision("flash", None, "worker-type", "flash-worker type"))
     worker_upgrade = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
     if mutation:
-        if (bare_type == SCOUT_TYPE and _read_only_has_last_word(text, "mutation") and not WEB_NEED_RE.search(text)
-                and not DOCS_LOOKUP_RE.search(text)
+        if (bare_type == SCOUT_TYPE and _read_only_has_last_word(text, "mutation") and not needs_web(text)
                 and not find_run_directive(text) and not find_run_task(text) and not EXECUTION_RE.search(_blank_run_objects(text))
                 and not find_shell_mutation(text) and not find_polite_request(text)):
             return done(_rule_decision("flash_lite", None, "scout-read-only",
@@ -1031,7 +1372,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         upgrade_type = (f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE) if bare_type == SCOUT_TYPE else None
         return done(_rule_decision("flash", upgrade_type, "polite-request", f"polite action request '{polite}'"))
     if bare_type == SCOUT_TYPE:
-        if WEB_NEED_RE.search(text) or DOCS_LOOKUP_RE.search(text):
+        if needs_web(text):
             return done(_rule_decision("flash", worker_upgrade, "scout-web",
                                        "scout has no web access; upgraded to flash-worker"))
         trailing = _scout_trailing_imperative(text, prompt)
@@ -1053,7 +1394,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         return done(_rule_decision("flash", None, "self-type", "self type carries the full tool set"))
     if requested in ALLOWED_SUBAGENT_MODELS:
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
-    if DOCS_LOOKUP_RE.search(text):
+    if DOCS_LOOKUP_RE.search(_blank_local_docs(text)):
         return done(_rule_decision("flash", None, "docs-lookup", "docs or web lookup needs web access"))
     trailing = find_trailing_imperative(prompt)
     if trailing:

@@ -2111,3 +2111,185 @@ class TestNegatedMutationAndSubagentCalls(ClaudeHookBase):
         self.assertEqual(res, {})
         # primary budget untouched by subagent edits
         self.assertEqual(eo.load_state(self.payload).get("turn_edited_files"), [])
+
+
+class _StubJudge:
+    def __init__(self, verdict):
+        self.verdict = verdict
+
+    def judge_tier(self, prompt):
+        if isinstance(self.verdict, Exception):
+            raise self.verdict
+        return self.verdict
+
+
+class TestWorkerLookupDowngrade(unittest.TestCase):
+    PREFIXED = "mitosis-orchestrator:flash-worker"
+    LOOKUP = "Where is decide_subagent defined? Just give me the file and line."
+
+    def setUp(self):
+        self._env = dict(os.environ)
+        for k in list(os.environ.keys()):
+            if k.startswith(("AGY_", "CLAUDE_", "CODEX_", "MITOSIS_")):
+                os.environ.pop(k, None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env)
+        eo.routing._JUDGE_MODULE = None
+
+    def _decide(self, prompt, type_name=None, **extra):
+        return eo.decide_subagent({"prompt": prompt, "subagent_type": type_name or self.PREFIXED, **extra})
+
+    def _judge(self, verdict):
+        eo.routing._JUDGE_MODULE = _StubJudge(verdict)
+        os.environ["MITOSIS_JUDGE_URL"] = "http://judge.test/v1"
+
+    def test_lookup_downgrades_with_prefixed_scout_type(self):
+        d = self._decide(self.LOOKUP)
+        self.assertEqual((d.tier, d.type_override, d.rule), ("flash_lite", "mitosis-orchestrator:flash-lite-scout", "worker-lookup"))
+        self.assertEqual(d.confidence, 0.7)
+        self.assertIn("worker-lookup", eo.JUDGEABLE_RULES)
+
+    def test_unprefixed_worker_gives_unprefixed_scout(self):
+        d = self._decide(self.LOOKUP, "flash-worker")
+        self.assertEqual((d.tier, d.type_override, d.rule), ("flash_lite", "flash-lite-scout", "worker-lookup"))
+
+    def test_env_switch_disables_downgrade(self):
+        os.environ["CLAUDE_MITOSIS_WORKER_DOWNGRADE"] = "0"
+        d = self._decide(self.LOOKUP)
+        self.assertEqual((d.tier, d.type_override, d.rule), ("flash", None, "worker-type"))
+        os.environ.pop("CLAUDE_MITOSIS_WORKER_DOWNGRADE")
+        os.environ["AGY_MITOSIS_WORKER_DOWNGRADE"] = "0"
+        self.assertEqual(self._decide(self.LOOKUP).rule, "worker-type")
+
+    def test_branch_workspace_and_explicit_flash_keep_worker(self):
+        self.assertEqual(self._decide(self.LOOKUP, workspace="branch").rule, "worker-type")
+        self.assertEqual(self._decide(self.LOOKUP, model="flash").rule, "worker-type")
+        self.assertEqual(self._decide(self.LOOKUP, model="sonnet").rule, "worker-type")
+
+    def test_real_work_keeps_worker(self):
+        for prompt in (
+            "Where is decide_subagent defined? Add a docstring to it.",
+            "Find where the timeout is set and raise it to 30s.",
+            "Which tests cover routing? Run them and tell me what fails.",
+            "Look up the Codex hooks docs online and tell me whether SubagentStop supports block.",
+            "x" * 700,
+        ):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.type_override, d.rule), ("flash", None, "worker-type"), prompt)
+
+    def test_judge_flash_keeps_worker(self):
+        self._judge(("flash", 0.95))
+        d = self._decide(self.LOOKUP)
+        self.assertEqual((d.tier, d.type_override, d.source), ("flash", None, "judge"))
+
+    def test_judge_lite_keeps_scout_type(self):
+        self._judge(("flash_lite", 0.95))
+        d = self._decide(self.LOOKUP)
+        self.assertEqual((d.tier, d.type_override), ("flash_lite", "mitosis-orchestrator:flash-lite-scout"))
+
+    def test_judge_unavailable_never_pairs_flash_with_scout_type(self):
+        for verdict in (None, RuntimeError("boom")):
+            self._judge(verdict)
+            d = self._decide(self.LOOKUP)
+            self.assertEqual((d.tier, d.type_override), ("flash", None), repr(verdict))
+
+
+class TestClaudeWorkerLookupHandler(ClaudeHookBase):
+    def test_worker_typed_lookup_becomes_haiku_scout(self):
+        call = self.tool("Task", {
+            "prompt": "Which file sets the default timeout for the HTTP client? Paths only.",
+            "description": "Timeout lookup",
+            "subagent_type": "mitosis-orchestrator:flash-worker",
+            "model": "inherit",
+        })
+        res = eo.handle_pre_tool_use(call)
+        updated = res["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["subagent_type"], "mitosis-orchestrator:flash-lite-scout")
+        self.assertEqual(updated["model"], "haiku")
+
+    def test_worker_typed_edit_is_not_downgraded(self):
+        call = self.tool("Task", {
+            "prompt": "Where is decide_subagent defined? Add a docstring to it.",
+            "description": "Docstring",
+            "subagent_type": "mitosis-orchestrator:flash-worker",
+            "model": "inherit",
+        })
+        updated = eo.handle_pre_tool_use(call)["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated.get("subagent_type"), "mitosis-orchestrator:flash-worker")
+        self.assertNotEqual(updated.get("model"), "haiku")
+
+
+class TestLongScoutBriefAndChineseActions(unittest.TestCase):
+    SCOUT = "mitosis-orchestrator:flash-lite-scout"
+    BRIEF = ("Context: we are auditing the fixture layout before the 3.0 cleanup. The repo keeps fixtures in three "
+             "places: tests/fixtures/, tests/fixtures/old/ and inline JSON blobs inside tests/test_loader.py. The loader "
+             "in src/loader/fixtures.py resolves names through FIXTURE_PATHS, which is built at import time from the "
+             "FIXTURES_DIR environment variable and two hard-coded fallbacks. Some of the old fixtures date from the 1.x "
+             "schema and may no longer be referenced. Look at how FIXTURE_PATHS is built, which helpers call "
+             "load_fixture(), and whether any test still names a file that lives under tests/fixtures/old/. Pay "
+             "attention to parametrize decorators, since they build names from string templates.")
+
+    def _decide(self, prompt, type_name=None):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            spec_ = {"prompt": prompt}
+            if type_name:
+                spec_["subagent_type"] = type_name
+            return eo.decide_subagent(spec_)
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+    def test_long_brief_closing_action_clause_upgrades(self):
+        self.assertGreater(len(self.BRIEF), 600)
+        for tail in ("Is the old loader path still used anywhere? Then clean up the stale fixtures under tests/fixtures/old/.",
+                     "Does anything still read LEGACY_MODE? Then skip the legacy fixture tests in CI."):
+            d = self._decide(self.BRIEF + "\n\n" + tail, self.SCOUT)
+            self.assertEqual((d.tier, d.rule), ("flash", "trailing-imperative"), tail)
+
+    def test_long_brief_read_only_endings_keep_scout(self):
+        for tail in ("Report back with:\n1. the file paths\n2. the line numbers\n3. whether each fixture is referenced",
+                     "Which fallback wins when FIXTURES_DIR is unset? Do not edit anything; just answer.",
+                     "Is anything under tests/fixtures/old/ still referenced? Return a list of paths, nothing else."):
+            d = self._decide(self.BRIEF + "\n\n" + tail, self.SCOUT)
+            self.assertEqual((d.tier, d.rule), ("flash_lite", "scout-type"), tail)
+
+    def test_long_brief_without_a_final_paragraph_is_not_examined(self):
+        d = self._decide(self.BRIEF + " Is the old loader path still used anywhere? Then clean up the stale fixtures.", self.SCOUT)
+        self.assertEqual(d.tier, "flash_lite")
+
+    def test_whether_and_why_frames_are_topics(self):
+        for prompt in ("這份盤點會決定 3.0 要不要整個拿掉 old 目錄，請列出每個引用點。",
+                       "decide_subagent 為什麼會把 scout 升級？"):
+            self.assertIsNone(eo.find_mutation(prompt), prompt)
+
+    def test_chinese_disposal_construction_is_a_mutation(self):
+        for prompt in ("把 settings.py 裡的 DEBUG 關掉。", "把舊的 migration 檔砍掉。", "將 logs/ 底下超過 30 天的檔案清空。",
+                       "把 utils.py 的 helper 搬到 common/ 底下。", "把 config 還原成上一版。", "把 webhook 接上新的 endpoint。",
+                       "幫我把 .env.example 弄乾淨。", "請停用舊的 cron job。", "看一下 Makefile，然後停掉 flake8 那一步。"):
+            d = self._decide(prompt, self.SCOUT)
+            self.assertEqual(d.tier, "flash", prompt)
+            self.assertEqual(d.type_override, "mitosis-orchestrator:flash-worker", prompt)
+
+    def test_chinese_descriptions_and_read_requests_are_not(self):
+        for prompt in ("測試掛掉了，是哪個 commit 開始的？用 git log 查就好。", "服務昨天當掉，相關的設定在哪個檔案？",
+                       "把 routing.py 裡所有正規表示式的名字列出來。", "把用到 _get_env 的檔名找出來給我。",
+                       "把 decide_subagent 的 docstring 貼上來。", "請問 SCOUT_TYPE 在哪裡定義？",
+                       "幫我看 hooks/ 目錄有哪些檔案。", "連線斷掉之後的重試邏輯寫在哪？",
+                       "幫我查一下 CHANGELOG 最新一版是幾號。", "只要讀程式碼，不用實際跑。"):
+            self.assertEqual(self._decide(prompt, self.SCOUT).tier, "flash_lite", prompt)
+
+    def test_chinese_restriction_clauses(self):
+        for prompt in ("Codex hook 是哪裡註冊的？幫我找一下就好。", "版本號在哪幾個檔案出現？幫忙列一下。",
+                       "這個 regex 會不會誤判中文？只需確認邏輯，不必重現。"):
+            self.assertEqual(self._decide(prompt, self.SCOUT).tier, "flash_lite", prompt)
+        for prompt in ("哪個常數控制 600 字上限？只要改成 800 就好。", "routing.py 哪裡處理禮貌句？幫我順便把「拜託」加進去。"):
+            self.assertEqual(self._decide(prompt, self.SCOUT).tier, "flash", prompt)
+
+    def test_polite_frame_turns_any_non_read_verb_into_an_action(self):
+        for prompt in ("請停用舊的 cron job。", "幫我關閉 CI 的 nightly 排程。", "麻煩你搬走 old/ 目錄。"):
+            self.assertEqual(self._decide(prompt).rule, "polite-request", prompt)
+        for prompt in ("請問 SCOUT_TYPE 在哪裡定義？", "請列出所有用到 _get_env 的檔案。", "幫我確認版本號。"):
+            self.assertIsNone(eo.find_polite_request(prompt), prompt)
