@@ -38,6 +38,50 @@ The routing eval (`python3 tests/test_routing_eval.py`): no worker task reaches 
 
 ---
 
+
+## Quick Start
+
+Pick the CLI you use. Each block has the install commands and a one-line update command.
+
+**Claude Code**
+
+```bash
+# Install
+claude plugin marketplace add ivanusto/mitosis-orchestrator
+claude plugin install mitosis-orchestrator@mitosis-orchestrator
+
+# Update (then start a new session)
+claude plugin marketplace update mitosis-orchestrator && claude plugin update mitosis-orchestrator@mitosis-orchestrator
+```
+
+**OpenAI Codex CLI**
+
+```bash
+# Install
+git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
+python3 ~/mitosis-orchestrator/scripts/setup-codex.py
+codex plugin marketplace add ~/mitosis-orchestrator
+codex plugin add mitosis-orchestrator@mitosis-orchestrator
+# Then set hooks = true under [features] in ~/.codex/config.toml, open Codex and approve the plugin hooks in /hooks
+
+# Update (re-adding refreshes the plugin snapshot; approve again in /hooks if Codex asks)
+git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
+```
+
+**Google Antigravity (`agy`)**
+
+```bash
+# Install (agy loads every directory under its plugin folder)
+git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/.gemini/config/plugins/mitosis-orchestrator
+
+# Update
+git -C ~/.gemini/config/plugins/mitosis-orchestrator pull
+```
+
+Check that it is active: a new session prints `[Mitosis Orchestrator Active] ...` and lists `/orchestrate`. Full options, requirements and what each installer changes are in [Installation & Setup](#installation--setup).
+
+---
+
 ## Supported Frontier Primary Models
 
 Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platforms. It preserves the frontier model you select while filtering out lightweight models from acting as the primary orchestrator:
@@ -53,90 +97,6 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 > [!NOTE]
 > Boundary-aware regex filtering (`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`) rejects lightweight variants across hyphen, space, or underscore naming conventions while never false-matching `gemini`.
-
----
-
-## Unified 3-Platform Context Routing Matrix (v1.5.0)
-
-| Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
-| :--- | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
-| **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
-| **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). |
-
-
-### Confidence-graded routing and the optional judge (v1.5.0)
-
-Every routing decision is a `Decision`: `tier`, `effort`, `confidence`, `source` (`rule`, `judge` or `default`), `rule` and `reason`. With `*_MITOSIS_DEBUG=1` each one is written to the debug log under `decisions`, so you can see which rule fired and how sure it was.
-
-```
-keyword rules ──► confidence ≥ 0.9 ──────────────────────────────► use the rule
-      │
-      └─ confidence < 0.9 and MITOSIS_JUDGE_URL set ──► judge ──► sure  ──► use the judge
-                                                          └────► unsure / error ──► flash (cannot fail the task)
-```
-
-- **Rule confidence.** Explicit types, workspace and explicit models score 0.95 and are never judged. Mutation verbs score 0.95, heavy signals 0.9, lite signals 0.85, and the prompt-length fallbacks 0.5.
-- **Read-only declarations.** A prompt that says it is read-only (`read-only`, `do not modify anything`, `唯讀`) drops mutation and heavy hits to 0.6, because in such prompts those words are usually the topic ("review the fixes", "plan the migration").
-- **Wider negation.** `Do NOT git fetch/pull or modify` and `never delete or rename` now count as prohibitions; `don't X and fix Y` still asks for a fix.
-- **The judge is off by default.** Setting `MITOSIS_JUDGE_URL` turns it on. It speaks the Jev `choice` request format, so TypeSafe Jev, a self-hosted Jev-compatible gateway and Ollaya are interchangeable. A judge may veto a scout's mutation upgrade, but never overrides explicit types, workspace modes or models. Without a URL, routing is identical to v1.4.1 apart from the wider negation.
-- **Privacy.** The judge receives the first 2000 characters of the prompt after secrets, e-mail and IP addresses and home directories are masked ([`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)). Use a local gateway if prompts must not leave the machine.
-- **When it matters.** On Claude Code the primary nearly always picks a typed agent, so the judge mostly sees untyped calls and Codex `spawn_agent` prompts. In a 66-prompt sample of real sessions, typed calls never reached it.
-
-### Routing eval
-
-Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dangerous" means a worker task routed to the read-only scout).
-
-| Set | Role | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| routing_cases (183 -> 281 -> 361 -> 562) | training | 183/183, 0 dangerous | 281/281, 0 dangerous | 361/361, 0 dangerous | 562/562, 0 dangerous |
-| 2.1 hand-written counterexamples (80, inside routing_cases) | training in 2.1.0 | | 44/80, 15, 21 | 80/80, 0, 0 | 80/80, 0, 0 |
-| 2.2 hand-written cases and review probes (201, inside routing_cases) | training in 2.2.0 | | | 130/201, 27, 44 | 201/201, 0, 0 |
-| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 40/40, 0, 0 |
-| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 | 38/40, 2, 0 | 38/40, 2, 0 |
-| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
-| holdout v5 (40) | sealed blind, scored once; tuned in 2.0.0 | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
-| holdout v6 (40) | sealed blind, scored once per version; used to pick the 2.2 gaps | | 29/40, 8, 3 | 32/40, 8, 0 | 35/40, 5, 0 |
-| holdout v7 (40) | sealed blind, scored once per version; two misses fixed afterwards | | | 31/40, 7, 2 | first contact 34/40, 4, 2; final 36/40, 4, 0 |
-
-v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
-
-v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`) was written blind by a subagent, sealed in commit 1c5d524 and scored once on 2026-10-22 in separate processes: 2.0.0 29/40, 8 cost, 3 dangerous; 2.1.0 32/40, 8 cost, 0 dangerous. Four of the cost errors are lookups typed `flash-worker`, which always routes to the worker. It was not tuned on afterwards.
-
-v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`) was written blind by a subagent, sealed in commit 7dffeb0 and scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; the 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous. v7 is therefore no longer blind. The remaining cost errors include one lookup typed `flash-worker` that is kept on the worker and a read-only question that mentions fix/pytest.
-
-**2.1 routing additions.**
-- Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades.
-- A `flash-lite-scout` typed call is upgraded to the worker when it needs web access (`scout-web`, 0.9), ends with an action after a question (`trailing-imperative`) or still asks for a run (`run-directive`, 0.9).
-- A scout-typed call that declares read-only with its last word keeps the scout (`scout-read-only`, 0.7, judgeable).
-- New soft-request frames: "would it be possible to", "appreciate it if you" + past tense, "it would be great if you" + verb.
-- Questions without "?" (auxiliary inversion, "I wonder", "not sure", "curious", 不確定 / 不知道 / 想知道 / 好奇) arm the trailing-imperative check.
-- New Chinese verbs (弄成, 弄好, 搞定, 拉到, 換掉, 改掉, 調成, 調大, 調小) and lookups (弄清楚, 搞清楚, 釐清).
-- Known gaps (closed in 2.2): lookups typed `flash-worker`, scout prompts over 600 characters skipping the trailing-imperative check, and Chinese verbs outside the list.
-
-**2.2 routing additions.**
-- `worker-lookup`: a short, plain read-only lookup typed `flash-worker` goes to the scout with the scout type (0.7, judgeable). `*_MITOSIS_WORKER_DOWNGRADE=0` turns it off. Any edit, run, non-read-only command, web need, broad research or non-read clause keeps the worker.
-- Long scout briefs (over 600 characters) check the final paragraph for an action clause.
-- `scout-imperative` (0.85): a scout-typed prompt whose first clause opens with a non-read verb is upgraded, in English and Chinese.
-- `run-directive` also covers run/跑/執行 + a command the scout cannot run; "you may run", "feel free to run" and 可以執行 are permission, not a request.
-- Chinese 把/將 disposal constructions, transitive X掉 and resultative complements count as edits; 被 passives, 要不要/是否 frames and why/where questions are topics.
-- Polite frames (請/幫我) take any non-read verb.
-- Read-only follow-ups: 只要讀, 只需確認, 不必重現, "paste the output".
-- "from the web process" and local CHANGELOG reads no longer count as web needs.
-- Known gaps: the rule layer is still lexical, with no embedding stage; unlisted English verbs with a plain lowercase object; Chinese action verbs outside the lexicon when the clause does not use 把/將 or a resultative complement.
-
-Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
-
-| Set | Role in 1.7.0 | v1.6.0 | v1.7.0 |
-| :--- | :--- | :--- | :--- |
-| routing_cases (120 -> 183) | training | 119/120, 0 dangerous | 183/183, 0 dangerous |
-| holdout v1 (40) | tuned in 1.5.1 and 1.7.0 | 32/40, 0 | 39/40, 0 |
-| holdout v2 (40) | blind baseline, then training | 25/40, 4 | 39/40, 0 |
-| holdout v3 (40) | blind first contact after the first tuning round, then training | 25/40, 9 | 29/40, 6 at first contact; 36/40, 0 after |
-| holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
-
-The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors were lookups sent to the worker (cost, not failure): read-only questions that name debug, migration or build words. 2.0.0 fixes that class in the rule layer (see the table above).
 
 ---
 
@@ -344,6 +304,90 @@ Provides the structured `/orchestrate` workflow:
 2. **Phase 2: Architecture & Decomposition (Primary Frontier Agent)**: Synthesize recon findings, design interfaces, and partition work units.
 3. **Phase 3: Scoped Execution & Testing (Workers)**: Parallel workers implement changes within explicit file allowlists and run verification commands.
 4. **Phase 4: Synthesis & Branch Cleanup (Primary Frontier Agent)**: Review diffs, verify integration, and terminate branch worktrees.
+
+---
+
+## Unified 3-Platform Context Routing Matrix (v1.5.0)
+
+| Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
+| :--- | :--- | :--- | :--- | :--- |
+| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
+| **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
+| **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). |
+
+
+### Confidence-graded routing and the optional judge (v1.5.0)
+
+Every routing decision is a `Decision`: `tier`, `effort`, `confidence`, `source` (`rule`, `judge` or `default`), `rule` and `reason`. With `*_MITOSIS_DEBUG=1` each one is written to the debug log under `decisions`, so you can see which rule fired and how sure it was.
+
+```
+keyword rules ──► confidence ≥ 0.9 ──────────────────────────────► use the rule
+      │
+      └─ confidence < 0.9 and MITOSIS_JUDGE_URL set ──► judge ──► sure  ──► use the judge
+                                                          └────► unsure / error ──► flash (cannot fail the task)
+```
+
+- **Rule confidence.** Explicit types, workspace and explicit models score 0.95 and are never judged. Mutation verbs score 0.95, heavy signals 0.9, lite signals 0.85, and the prompt-length fallbacks 0.5.
+- **Read-only declarations.** A prompt that says it is read-only (`read-only`, `do not modify anything`, `唯讀`) drops mutation and heavy hits to 0.6, because in such prompts those words are usually the topic ("review the fixes", "plan the migration").
+- **Wider negation.** `Do NOT git fetch/pull or modify` and `never delete or rename` now count as prohibitions; `don't X and fix Y` still asks for a fix.
+- **The judge is off by default.** Setting `MITOSIS_JUDGE_URL` turns it on. It speaks the Jev `choice` request format, so TypeSafe Jev, a self-hosted Jev-compatible gateway and Ollaya are interchangeable. A judge may veto a scout's mutation upgrade, but never overrides explicit types, workspace modes or models. Without a URL, routing is identical to v1.4.1 apart from the wider negation.
+- **Privacy.** The judge receives the first 2000 characters of the prompt after secrets, e-mail and IP addresses and home directories are masked ([`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)). Use a local gateway if prompts must not leave the machine.
+- **When it matters.** On Claude Code the primary nearly always picks a typed agent, so the judge mostly sees untyped calls and Codex `spawn_agent` prompts. In a 66-prompt sample of real sessions, typed calls never reached it.
+
+### Routing eval
+
+Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dangerous" means a worker task routed to the read-only scout).
+
+| Set | Role | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| routing_cases (183 -> 281 -> 361 -> 562) | training | 183/183, 0 dangerous | 281/281, 0 dangerous | 361/361, 0 dangerous | 562/562, 0 dangerous |
+| 2.1 hand-written counterexamples (80, inside routing_cases) | training in 2.1.0 | | 44/80, 15, 21 | 80/80, 0, 0 | 80/80, 0, 0 |
+| 2.2 hand-written cases and review probes (201, inside routing_cases) | training in 2.2.0 | | | 130/201, 27, 44 | 201/201, 0, 0 |
+| holdout v1 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v2 (40) | tuned | 39/40, 1, 0 | 39/40, 1, 0 | 39/40, 1, 0 | 40/40, 0, 0 |
+| holdout v3 (40) | tuned | 36/40, 4, 0 | 38/40, 2, 0 | 38/40, 2, 0 | 38/40, 2, 0 |
+| holdout v4 (40) | tuned in 2.0.0 | 33/40, 7, 0 | 40/40, 0, 0 | 40/40, 0, 0 | 40/40, 0, 0 |
+| holdout v5 (40) | sealed blind, scored once; tuned in 2.0.0 | 29/40, 10, 1 | first contact 37/40, 2, 1; final 38/40, 2, 0 | 39/40, 1, 0 | 39/40, 1, 0 |
+| holdout v6 (40) | sealed blind, scored once per version; used to pick the 2.2 gaps | | 29/40, 8, 3 | 32/40, 8, 0 | 35/40, 5, 0 |
+| holdout v7 (40) | sealed blind, scored once per version; two misses fixed afterwards | | | 31/40, 7, 2 | first contact 34/40, 4, 2; final 36/40, 4, 0 |
+
+v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
+
+v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`) was written blind by a subagent, sealed in commit 1c5d524 and scored once on 2026-10-22 in separate processes: 2.0.0 29/40, 8 cost, 3 dangerous; 2.1.0 32/40, 8 cost, 0 dangerous. Four of the cost errors are lookups typed `flash-worker`, which always routes to the worker. It was not tuned on afterwards.
+
+v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`) was written blind by a subagent, sealed in commit 7dffeb0 and scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; the 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous. v7 is therefore no longer blind. The remaining cost errors include one lookup typed `flash-worker` that is kept on the worker and a read-only question that mentions fix/pytest.
+
+**2.1 routing additions.**
+- Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades.
+- A `flash-lite-scout` typed call is upgraded to the worker when it needs web access (`scout-web`, 0.9), ends with an action after a question (`trailing-imperative`) or still asks for a run (`run-directive`, 0.9).
+- A scout-typed call that declares read-only with its last word keeps the scout (`scout-read-only`, 0.7, judgeable).
+- New soft-request frames: "would it be possible to", "appreciate it if you" + past tense, "it would be great if you" + verb.
+- Questions without "?" (auxiliary inversion, "I wonder", "not sure", "curious", 不確定 / 不知道 / 想知道 / 好奇) arm the trailing-imperative check.
+- New Chinese verbs (弄成, 弄好, 搞定, 拉到, 換掉, 改掉, 調成, 調大, 調小) and lookups (弄清楚, 搞清楚, 釐清).
+- Known gaps (closed in 2.2): lookups typed `flash-worker`, scout prompts over 600 characters skipping the trailing-imperative check, and Chinese verbs outside the list.
+
+**2.2 routing additions.**
+- `worker-lookup`: a short, plain read-only lookup typed `flash-worker` goes to the scout with the scout type (0.7, judgeable). `*_MITOSIS_WORKER_DOWNGRADE=0` turns it off. Any edit, run, non-read-only command, web need, broad research or non-read clause keeps the worker.
+- Long scout briefs (over 600 characters) check the final paragraph for an action clause.
+- `scout-imperative` (0.85): a scout-typed prompt whose first clause opens with a non-read verb is upgraded, in English and Chinese.
+- `run-directive` also covers run/跑/執行 + a command the scout cannot run; "you may run", "feel free to run" and 可以執行 are permission, not a request.
+- Chinese 把/將 disposal constructions, transitive X掉 and resultative complements count as edits; 被 passives, 要不要/是否 frames and why/where questions are topics.
+- Polite frames (請/幫我) take any non-read verb.
+- Read-only follow-ups: 只要讀, 只需確認, 不必重現, "paste the output".
+- "from the web process" and local CHANGELOG reads no longer count as web needs.
+- Known gaps: the rule layer is still lexical, with no embedding stage; unlisted English verbs with a plain lowercase object; Chinese action verbs outside the lexicon when the clause does not use 把/將 or a resultative complement.
+
+Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
+
+| Set | Role in 1.7.0 | v1.6.0 | v1.7.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases (120 -> 183) | training | 119/120, 0 dangerous | 183/183, 0 dangerous |
+| holdout v1 (40) | tuned in 1.5.1 and 1.7.0 | 32/40, 0 | 39/40, 0 |
+| holdout v2 (40) | blind baseline, then training | 25/40, 4 | 39/40, 0 |
+| holdout v3 (40) | blind first contact after the first tuning round, then training | 25/40, 9 | 29/40, 6 at first contact; 36/40, 0 after |
+| holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
+
+The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors were lookups sent to the worker (cost, not failure): read-only questions that name debug, migration or build words. 2.0.0 fixes that class in the rule layer (see the table above).
 
 ---
 

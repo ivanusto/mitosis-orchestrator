@@ -38,6 +38,50 @@
 
 ---
 
+
+## 快速開始
+
+選你使用的 CLI。每一段都有安裝指令，以及一行更新指令。
+
+**Claude Code**
+
+```bash
+# 安裝
+claude plugin marketplace add ivanusto/mitosis-orchestrator
+claude plugin install mitosis-orchestrator@mitosis-orchestrator
+
+# 更新（完成後開新 session）
+claude plugin marketplace update mitosis-orchestrator && claude plugin update mitosis-orchestrator@mitosis-orchestrator
+```
+
+**OpenAI Codex CLI**
+
+```bash
+# 安裝
+git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
+python3 ~/mitosis-orchestrator/scripts/setup-codex.py
+codex plugin marketplace add ~/mitosis-orchestrator
+codex plugin add mitosis-orchestrator@mitosis-orchestrator
+# 接著在 ~/.codex/config.toml 的 [features] 設 hooks = true，開啟 Codex 並在 /hooks 核准外掛 hook
+
+# 更新（重新 add 會刷新外掛快照；Codex 若要求，請到 /hooks 重新核准）
+git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
+```
+
+**Google Antigravity（`agy`）**
+
+```bash
+# 安裝（agy 會自動載入外掛目錄下的每個子目錄）
+git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/.gemini/config/plugins/mitosis-orchestrator
+
+# 更新
+git -C ~/.gemini/config/plugins/mitosis-orchestrator pull
+```
+
+確認是否生效：開新 session 會出現 `[Mitosis Orchestrator Active] ...` 橫幅，指令清單裡有 `/orchestrate`。完整選項、需求與各安裝腳本會改動的內容，請見[安裝與設定方式](#安裝與設定方式)。
+
+---
+
 ## 支援的主核尖端模型清單
 
 Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，並透過邊界正規表示式攔截輕量模型擔任主代理：
@@ -53,97 +97,6 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 > [!NOTE]
 > 內建邊界過濾器（`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`）排除 `mini`、`flash`、`lite`、`haiku`、`nano`、`luna`、`spark` 輕量模型，同時確保 `gemini` 不會誤判。
-
----
-
-## 三平台情境路由矩陣 (v1.5.0)
-
-| 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
-| :--- | :--- | :--- | :--- | :--- |
-| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
-| **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
-| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
-
-
-### 信心分級分流與選用判斷器（v1.5.0）
-
-每次分流都會產生一個 `Decision`，欄位包括 `tier`、`effort`、`confidence`、`source`（`rule`、`judge` 或 `default`）、`rule` 與 `reason`。開啟 `*_MITOSIS_DEBUG=1` 後，每筆決策會以 `decisions` 欄位寫進除錯日誌，從中可以看出是哪條規則觸發、信心多高。
-
-```
-關鍵字規則 ──► 信心 ≥ 0.9 ────────────────────────────────► 採用規則
-      │
-      └─ 信心 < 0.9 且設了 MITOSIS_JUDGE_URL ──► 判斷器 ──► 有把握 ──► 採用判斷器
-                                                  └──► 不確定或錯誤 ──► flash（不會讓任務失敗）
-```
-
-- **規則信心值。**
-  - 0.95：明確型別、工作區模式、明確指定模型（這三類永遠不送判斷器），以及修改動詞
-  - 0.9：重型訊號
-  - 0.85：輕型訊號
-  - 0.5：提示詞長度後備
-- **唯讀宣告。** 提示詞若宣告唯讀（`read-only`、`do not modify anything`、`唯讀`），修改動詞與重型訊號的信心會降到 0.6。這類提示詞裡的那些字通常只是題目，例如「審查這些修正」「規劃遷移」。
-- **否定規則放寬。** `Do NOT git fetch/pull or modify`、`never delete or rename` 現在都算禁止句；`don't X and fix Y` 仍視為要求修改。
-- **判斷器預設關閉。**
-  - 設定 `MITOSIS_JUDGE_URL` 就會啟用。請求採 Jev 的 `choice` 格式，所以 TypeSafe Jev、自架的 Jev 相容閘道與 Ollaya 可以互換。
-  - 判斷器可以否決 scout 因修改動詞而升級，但不會推翻明確型別、工作區模式或明確指定的模型。
-  - 沒有設定 URL 時，除了否定規則放寬之外，分流結果與 v1.4.1 相同。
-- **隱私。** 送給判斷器的是提示詞前 2000 字元，並先遮蔽金鑰、電子郵件、IP 位址與家目錄路徑（見 [`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)）。如果提示詞不能離開本機，請改用本機閘道。
-- **實際作用範圍。** Claude Code 的主核幾乎都會指定型別，所以判斷器主要處理未指定型別的呼叫與 Codex 的 `spawn_agent`。在 66 筆真實工作階段樣本中，帶型別的呼叫一次都沒有送到判斷器。
-
-### 路由評測
-
-只看規則層，判斷器關閉。儲存格格式為正確數/40、成本誤差、危險（「危險」指把應由執行者處理的任務送給唯讀的偵察者）。
-
-| 資料集 | 角色 | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| routing_cases（183 -> 281 -> 361 -> 562） | 訓練 | 183/183，0 危險 | 281/281，0 危險 | 361/361，0 危險 | 562/562，0 危險 |
-| 2.1 手寫反例（80，已併入 routing_cases） | 於 2.1.0 訓練 | | 44/80，15，21 | 80/80，0，0 | 80/80，0，0 |
-| 2.2 手寫案例與審查探測（201，已併入 routing_cases） | 於 2.2.0 訓練 | | | 130/201，27，44 | 201/201，0，0 |
-| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
-| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 40/40，0，0 |
-| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 | 38/40，2，0 | 38/40，2，0 |
-| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 | 40/40，0，0 | 40/40，0，0 |
-| holdout v5（40） | 封存盲測，只評分一次；於 2.0.0 調校 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 | 39/40，1，0 | 39/40，1，0 |
-| holdout v6（40） | 封存盲測，每版只評分一次；用來挑出 2.2 的缺口 | | 29/40，8，3 | 32/40，8，0 | 35/40，5，0 |
-| holdout v7（40） | 封存盲測，每版只評分一次；兩筆誤判於事後修正 | | | 31/40，7，2 | 首次 34/40，4，2；最終 36/40，4，0 |
-
-v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
-
-v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`）由子代理盲寫，於 commit 1c5d524 封存，並於 2026-10-22 以獨立程序各評分一次：2.0.0 為 29/40，8 筆成本誤差，3 筆危險；2.1.0 為 32/40，8 筆成本誤差，0 筆危險。其中 4 筆成本誤差是標為 `flash-worker` 的查詢，這類呼叫一律交給執行者。封存後未再依 v6 調校。
-
-v7（sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`）由子代理盲寫，於 commit 7dffeb0 封存，並於 2026-10-22 以獨立程序各評分一次：2.1.0 為 31/40，7 筆成本誤差，2 筆危險；2.2 候選版（c648116）為 34/40，4 筆成本誤差，2 筆危險。兩筆危險誤判（標為偵察者、卻以行動開頭或執行寫入指令的提示詞）隨後依新的手寫案例以通用規則修正（416f754）：36/40，4 筆成本誤差，0 筆危險。因此 v7 已不再是盲測。其餘成本誤差包括一筆標為 `flash-worker` 的查詢（維持交給執行者），以及一筆提到 fix/pytest 的唯讀問題。
-
-**2.1 路由新增項目。**
-- 只是詢問「哪個指令會執行某事」的執行用語視為主題；若仍殘留「並執行它」之類的要求，仍會升級。
-- 標為 `flash-lite-scout` 的呼叫，若需要網路存取（`scout-web`，0.9）、在問句之後以行動結尾（`trailing-imperative`），或仍要求執行（`run-directive`，0.9），會升級給執行者。
-- 標為偵察者的呼叫若在最後一句聲明唯讀，則維持由偵察者處理（`scout-read-only`，0.7，可交由判斷器裁決）。
-- 新增委婉請求句型："would it be possible to"、"appreciate it if you" 加過去式、"it would be great if you" 加動詞。
-- 沒有問號的問句（助動詞倒裝、"I wonder"、"not sure"、"curious"、不確定／不知道／想知道／好奇）也會啟動 trailing-imperative 檢查。
-- 新增中文動詞（弄成、弄好、搞定、拉到、換掉、改掉、調成、調大、調小）與查詢用語（弄清楚、搞清楚、釐清）。
-- 已知缺口（2.2 已補上）：標為 `flash-worker` 的查詢、超過 600 字元的偵察者提示詞略過 trailing-imperative 檢查、清單以外的中文動詞。
-
-**2.2 路由新增項目。**
-- `worker-lookup`：標為 `flash-worker`、簡短且單純唯讀的查詢，改以偵察者類型交給偵察者（0.7，可交由判斷器裁決）。設定 `*_MITOSIS_WORKER_DOWNGRADE=0` 可關閉。任何修改、執行、非唯讀指令、需要網路、大範圍研究或含非讀取子句的呼叫，仍留在執行者。
-- 過長（超過 600 字元）的偵察者簡報會檢查最後一段是否含行動子句。
-- `scout-imperative`（0.85）：標為偵察者、第一個子句以非讀取動詞開頭的提示詞會升級，中英文皆適用。
-- `run-directive` 也涵蓋 run／跑／執行 加上偵察者無法執行的指令；"you may run"、"feel free to run"、可以執行 屬於許可，不算要求。
-- 中文的把／將處置式、及物的 X掉 與結果補語視為修改；被字句、要不要／是否句型與為什麼／在哪裡的問句視為主題。
-- 禮貌句型（請／幫我）可接任何非讀取動詞。
-- 唯讀的後續要求：只要讀、只需確認、不必重現、"paste the output"。
-- "from the web process" 與讀取本機 CHANGELOG 不再被視為需要網路。
-- 已知缺口：規則層仍以字面比對為主，尚無 embedding 階段；未列入清單的英文動詞搭配一般小寫受詞；子句未使用把／將或結果補語時，清單以外的中文動作動詞。
-
-先前輪次（1.6.0 到 1.7.0），儲存格格式為正確數/40、危險：
-
-| 資料集 | 1.7.0 中的角色 | v1.6.0 | v1.7.0 |
-| :--- | :--- | :--- | :--- |
-| routing_cases（120 -> 183） | 訓練 | 119/120，0 危險 | 183/183，0 危險 |
-| holdout v1（40） | 於 1.5.1 與 1.7.0 調校 | 32/40，0 | 39/40，0 |
-| holdout v2（40） | 盲測基準，之後轉為訓練 | 25/40，4 | 39/40，0 |
-| holdout v3（40） | 第一輪調校後的首次盲測，之後轉為訓練 | 25/40，9 | 首次 29/40，6；調校後 36/40，0 |
-| holdout v4（40） | 盲測，只評分一次，未調校 | 25/40，8 | 33/40，0 |
-
-1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 當時剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗），也就是提到 debug、migration 或 build 等字眼的唯讀問題；2.0.0 已在規則層修正這一類（見上表）。
 
 ---
 
@@ -350,6 +303,97 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 2. **階段二：架構設計與拆解 (Primary Master Nucleus)**：由主核彙整偵察結果、制定架構介面並切分獨立工作單元。
 3. **階段三：範圍執行與測試 (Workers)**：派發執行子代理於指定檔案清單內完成實作與測試驗證。
 4. **階段四：統合驗證與分支清理 (Primary Master Nucleus)**：檢視差異、完成最終驗證並清理工作樹。
+
+---
+
+## 三平台情境路由矩陣 (v1.5.0)
+
+| 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
+| :--- | :--- | :--- | :--- | :--- |
+| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
+| **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
+| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
+
+
+### 信心分級分流與選用判斷器（v1.5.0）
+
+每次分流都會產生一個 `Decision`，欄位包括 `tier`、`effort`、`confidence`、`source`（`rule`、`judge` 或 `default`）、`rule` 與 `reason`。開啟 `*_MITOSIS_DEBUG=1` 後，每筆決策會以 `decisions` 欄位寫進除錯日誌，從中可以看出是哪條規則觸發、信心多高。
+
+```
+關鍵字規則 ──► 信心 ≥ 0.9 ────────────────────────────────► 採用規則
+      │
+      └─ 信心 < 0.9 且設了 MITOSIS_JUDGE_URL ──► 判斷器 ──► 有把握 ──► 採用判斷器
+                                                  └──► 不確定或錯誤 ──► flash（不會讓任務失敗）
+```
+
+- **規則信心值。**
+  - 0.95：明確型別、工作區模式、明確指定模型（這三類永遠不送判斷器），以及修改動詞
+  - 0.9：重型訊號
+  - 0.85：輕型訊號
+  - 0.5：提示詞長度後備
+- **唯讀宣告。** 提示詞若宣告唯讀（`read-only`、`do not modify anything`、`唯讀`），修改動詞與重型訊號的信心會降到 0.6。這類提示詞裡的那些字通常只是題目，例如「審查這些修正」「規劃遷移」。
+- **否定規則放寬。** `Do NOT git fetch/pull or modify`、`never delete or rename` 現在都算禁止句；`don't X and fix Y` 仍視為要求修改。
+- **判斷器預設關閉。**
+  - 設定 `MITOSIS_JUDGE_URL` 就會啟用。請求採 Jev 的 `choice` 格式，所以 TypeSafe Jev、自架的 Jev 相容閘道與 Ollaya 可以互換。
+  - 判斷器可以否決 scout 因修改動詞而升級，但不會推翻明確型別、工作區模式或明確指定的模型。
+  - 沒有設定 URL 時，除了否定規則放寬之外，分流結果與 v1.4.1 相同。
+- **隱私。** 送給判斷器的是提示詞前 2000 字元，並先遮蔽金鑰、電子郵件、IP 位址與家目錄路徑（見 [`scripts/mitosis_judge.py`](./scripts/mitosis_judge.py)）。如果提示詞不能離開本機，請改用本機閘道。
+- **實際作用範圍。** Claude Code 的主核幾乎都會指定型別，所以判斷器主要處理未指定型別的呼叫與 Codex 的 `spawn_agent`。在 66 筆真實工作階段樣本中，帶型別的呼叫一次都沒有送到判斷器。
+
+### 路由評測
+
+只看規則層，判斷器關閉。儲存格格式為正確數/40、成本誤差、危險（「危險」指把應由執行者處理的任務送給唯讀的偵察者）。
+
+| 資料集 | 角色 | v1.8.1 | v2.0.0 | v2.1.0 | v2.2.0 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| routing_cases（183 -> 281 -> 361 -> 562） | 訓練 | 183/183，0 危險 | 281/281，0 危險 | 361/361，0 危險 | 562/562，0 危險 |
+| 2.1 手寫反例（80，已併入 routing_cases） | 於 2.1.0 訓練 | | 44/80，15，21 | 80/80，0，0 | 80/80，0，0 |
+| 2.2 手寫案例與審查探測（201，已併入 routing_cases） | 於 2.2.0 訓練 | | | 130/201，27，44 | 201/201，0，0 |
+| holdout v1（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v2（40） | 已調校 | 39/40，1，0 | 39/40，1，0 | 39/40，1，0 | 40/40，0，0 |
+| holdout v3（40） | 已調校 | 36/40，4，0 | 38/40，2，0 | 38/40，2，0 | 38/40，2，0 |
+| holdout v4（40） | 於 2.0.0 調校 | 33/40，7，0 | 40/40，0，0 | 40/40，0，0 | 40/40，0，0 |
+| holdout v5（40） | 封存盲測，只評分一次；於 2.0.0 調校 | 29/40，10，1 | 首次 37/40，2，1；最終 38/40，2，0 | 39/40，1，0 | 39/40，1，0 |
+| holdout v6（40） | 封存盲測，每版只評分一次；用來挑出 2.2 的缺口 | | 29/40，8，3 | 32/40，8，0 | 35/40，5，0 |
+| holdout v7（40） | 封存盲測，每版只評分一次；兩筆誤判於事後修正 | | | 31/40，7，2 | 首次 34/40，4，2；最終 36/40，4，0 |
+
+v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
+
+v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`）由子代理盲寫，於 commit 1c5d524 封存，並於 2026-10-22 以獨立程序各評分一次：2.0.0 為 29/40，8 筆成本誤差，3 筆危險；2.1.0 為 32/40，8 筆成本誤差，0 筆危險。其中 4 筆成本誤差是標為 `flash-worker` 的查詢，這類呼叫一律交給執行者。封存後未再依 v6 調校。
+
+v7（sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`）由子代理盲寫，於 commit 7dffeb0 封存，並於 2026-10-22 以獨立程序各評分一次：2.1.0 為 31/40，7 筆成本誤差，2 筆危險；2.2 候選版（c648116）為 34/40，4 筆成本誤差，2 筆危險。兩筆危險誤判（標為偵察者、卻以行動開頭或執行寫入指令的提示詞）隨後依新的手寫案例以通用規則修正（416f754）：36/40，4 筆成本誤差，0 筆危險。因此 v7 已不再是盲測。其餘成本誤差包括一筆標為 `flash-worker` 的查詢（維持交給執行者），以及一筆提到 fix/pytest 的唯讀問題。
+
+**2.1 路由新增項目。**
+- 只是詢問「哪個指令會執行某事」的執行用語視為主題；若仍殘留「並執行它」之類的要求，仍會升級。
+- 標為 `flash-lite-scout` 的呼叫，若需要網路存取（`scout-web`，0.9）、在問句之後以行動結尾（`trailing-imperative`），或仍要求執行（`run-directive`，0.9），會升級給執行者。
+- 標為偵察者的呼叫若在最後一句聲明唯讀，則維持由偵察者處理（`scout-read-only`，0.7，可交由判斷器裁決）。
+- 新增委婉請求句型："would it be possible to"、"appreciate it if you" 加過去式、"it would be great if you" 加動詞。
+- 沒有問號的問句（助動詞倒裝、"I wonder"、"not sure"、"curious"、不確定／不知道／想知道／好奇）也會啟動 trailing-imperative 檢查。
+- 新增中文動詞（弄成、弄好、搞定、拉到、換掉、改掉、調成、調大、調小）與查詢用語（弄清楚、搞清楚、釐清）。
+- 已知缺口（2.2 已補上）：標為 `flash-worker` 的查詢、超過 600 字元的偵察者提示詞略過 trailing-imperative 檢查、清單以外的中文動詞。
+
+**2.2 路由新增項目。**
+- `worker-lookup`：標為 `flash-worker`、簡短且單純唯讀的查詢，改以偵察者類型交給偵察者（0.7，可交由判斷器裁決）。設定 `*_MITOSIS_WORKER_DOWNGRADE=0` 可關閉。任何修改、執行、非唯讀指令、需要網路、大範圍研究或含非讀取子句的呼叫，仍留在執行者。
+- 過長（超過 600 字元）的偵察者簡報會檢查最後一段是否含行動子句。
+- `scout-imperative`（0.85）：標為偵察者、第一個子句以非讀取動詞開頭的提示詞會升級，中英文皆適用。
+- `run-directive` 也涵蓋 run／跑／執行 加上偵察者無法執行的指令；"you may run"、"feel free to run"、可以執行 屬於許可，不算要求。
+- 中文的把／將處置式、及物的 X掉 與結果補語視為修改；被字句、要不要／是否句型與為什麼／在哪裡的問句視為主題。
+- 禮貌句型（請／幫我）可接任何非讀取動詞。
+- 唯讀的後續要求：只要讀、只需確認、不必重現、"paste the output"。
+- "from the web process" 與讀取本機 CHANGELOG 不再被視為需要網路。
+- 已知缺口：規則層仍以字面比對為主，尚無 embedding 階段；未列入清單的英文動詞搭配一般小寫受詞；子句未使用把／將或結果補語時，清單以外的中文動作動詞。
+
+先前輪次（1.6.0 到 1.7.0），儲存格格式為正確數/40、危險：
+
+| 資料集 | 1.7.0 中的角色 | v1.6.0 | v1.7.0 |
+| :--- | :--- | :--- | :--- |
+| routing_cases（120 -> 183） | 訓練 | 119/120，0 危險 | 183/183，0 危險 |
+| holdout v1（40） | 於 1.5.1 與 1.7.0 調校 | 32/40，0 | 39/40，0 |
+| holdout v2（40） | 盲測基準，之後轉為訓練 | 25/40，4 | 39/40，0 |
+| holdout v3（40） | 第一輪調校後的首次盲測，之後轉為訓練 | 25/40，9 | 首次 29/40，6；調校後 36/40，0 |
+| holdout v4（40） | 盲測，只評分一次，未調校 | 25/40，8 | 33/40，0 |
+
+1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 當時剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗），也就是提到 debug、migration 或 build 等字眼的唯讀問題；2.0.0 已在規則層修正這一類（見上表）。
 
 ---
 
