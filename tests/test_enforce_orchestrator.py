@@ -2293,3 +2293,71 @@ class TestLongScoutBriefAndChineseActions(unittest.TestCase):
             self.assertEqual(self._decide(prompt).rule, "polite-request", prompt)
         for prompt in ("請問 SCOUT_TYPE 在哪裡定義？", "請列出所有用到 _get_env 的檔案。", "幫我確認版本號。"):
             self.assertIsNone(eo.find_polite_request(prompt), prompt)
+
+
+class _ScoutDecideMixin:
+    SCOUT = "mitosis-orchestrator:flash-lite-scout"
+
+    def _decide(self, prompt):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt, "subagent_type": self.SCOUT})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+
+class TestScoutOpeningActionAndRunCommand(_ScoutDecideMixin, unittest.TestCase):
+    def test_opening_action_clause_upgrades(self):
+        d = self._decide("Turn the cache off in config/dev.toml.")
+        self.assertEqual((d.tier, d.rule, d.type_override), ("flash", "scout-imperative", "mitosis-orchestrator:flash-worker"))
+        self.assertNotIn("scout-imperative", eo.JUDGEABLE_RULES)
+        self.assertEqual(self._decide("設定檔裡的重試次數改大一點。").tier, "flash")
+        self.assertEqual(self._decide("讓 dev 環境預設關掉快取。").tier, "flash")
+
+    def test_opening_read_clause_stays_on_scout(self):
+        for prompt in ("Make a list of every caller of parse_config.", "Show me the nginx upstream block for staging.",
+                       "Find where the retry limit is set and tell me its value.", "Context: Turn the cache off is a TODO.",
+                       "看一下 api/settings.py 的逾時是幾秒。", "列出 dev 環境所有跟快取有關的設定。",
+                       "確認一下 .env.example 有沒有 LOG_LEVEL。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_run_of_a_non_read_only_command_upgrades(self):
+        d = self._decide("Try `docker compose up -d db` and report what happens.")
+        self.assertEqual(d.tier, "flash")
+        self.assertEqual(self._decide("用 terraform apply 套一次，看看輸出。").tier, "flash")
+
+    def test_run_of_a_read_only_command_stays_on_scout(self):
+        for prompt in ("Run `git log --oneline -10 -- api/` and summarize the changes.",
+                       "Run rg -n 'TODO' src/ and count the hits per file.", "跑 git log -5 看最近誰改了 settings.py。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+
+class TestOpeningVerbsPermissionAndWhereFrame(_ScoutDecideMixin, unittest.TestCase):
+    def test_every_scout_start_verb_opens_an_action(self):
+        for prompt in ("Comment out the flaky assertion in tests/test_sync.py.", "Skip flaky tests in CI.",
+                       "Disable the nightly job.", "Uncomment the import in app.py."):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        self.assertEqual(self._decide("Start by reading app.py and list its routes.").tier, "flash_lite")
+
+    def test_permission_to_run_is_not_a_request(self):
+        for prompt in ("Read-only review of server.py. You may run `python3 -m py_compile server.py` as a static check. Report bugs.",
+                       "唯讀檢查 server.py，可以執行 python3 -m py_compile 做語法檢查，回報問題清單。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("Please run `python3 -m py_compile server.py` and report.").tier, "flash")
+
+    def test_cjk_verb_closing_a_where_question_is_a_topic(self):
+        self.assertEqual(self._decide("追一下 metrics registry 第一次在哪裡建立。").tier, "flash_lite")
+        self.assertEqual(self._decide("在哪裡建立一個新的 registry 檔案。").tier, "flash")
+
+    def test_chinese_opening_verb_upgrades_but_noun_use_does_not(self):
+        for prompt in ("取消註解 app/main.py 的 debug logger。", "請先重啟 worker 服務。", "把 timeout 調高到 60。"):
+            d = self._decide(prompt)
+            self.assertEqual(d.tier, "flash", prompt)
+        for prompt in ("取消的訂單在哪個表？", "取消註解的規則寫在哪？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("取消註解 app/main.py 的 debug logger。").rule, "scout-imperative")
+
+    def test_feel_free_to_run_is_permission(self):
+        self.assertEqual(self._decide("Feel free to run `ls -R docs/`. Which pages mention the CLI?").tier, "flash_lite")
+        self.assertEqual(self._decide("Feel free to bump the version in setup.py.").tier, "flash")

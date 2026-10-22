@@ -113,9 +113,21 @@ _RUN_OBJECT_CJK_RE = re.compile(
 )
 
 
+# Permission is not a request: "you may run `python3 -m py_compile`", "feel free to run", 可以執行, 允許跑.
+_RUN_PERMISSION_RE = re.compile(
+    r"\b(?:you\s+(?:may|can|could|might)|feel\s+free\s+to|it'?s\s+(?:ok|okay|fine)(?:\s+for\s+you)?\s+to|"
+    r"(?:you\s+(?:are|'re)\s+|is\s+|are\s+)?(?:allowed|permitted)\s+to)\s+(?:also\s+)?(?:re-?run|run|execute|exec)\b|"
+    r"(?:可以|允許|允许|可)(?:再|也)?(?:重跑|跑|執行|执行|運行|运行)",
+    re.IGNORECASE,
+)
+
+
 def _blank_run_objects(text: str) -> str:
-    """Blank the run phrases that only ask how or with which command to run; lengths are preserved."""
-    return _RUN_OBJECT_CJK_RE.sub(_blank, _RUN_OBJECT_EN_RE.sub(_blank, text))
+    """Blank the run phrases that only ask how or with which command to run, and permissions to run.
+
+    Lengths are preserved.
+    """
+    return _RUN_PERMISSION_RE.sub(_blank, _RUN_OBJECT_CJK_RE.sub(_blank, _RUN_OBJECT_EN_RE.sub(_blank, text)))
 
 
 # CJK has no word boundaries, so these run without \b. Traditional and Simplified forms.
@@ -160,9 +172,18 @@ _CJK_WHETHER_BEFORE_RE = re.compile(r"(?:要不要|是否|會不會|会不会|�
 _CJK_WHY_CLAUSE_RE = re.compile(r"(?:為什麼|为什么|為何|为何|怎麼會|怎么会)[^。？?！!，,；;\n]*$")
 
 
-def _cjk_topic_frame(text: str, start: int) -> bool:
+# 在哪裡建立 / 哪個檔案 X / 什麼時候 X: a verb that closes a where/which/when question is the topic; with an
+# object after it ("在哪裡建立一個 X") it stays a request.
+_CJK_WHERE_CLAUSE_RE = re.compile(
+    r"(?:在哪裡|在哪里|在哪|哪裡|哪里|哪個|哪个|哪些|什麼時候|什么时候|何時|何时|什麼時間|什么时间)[^。？?！!，,；;\n]*$")
+_CJK_QUESTION_TAIL_RE = re.compile(r"^(?:的|了|過|过|嗎|吗|呢|\s)*(?:[。？?！!，,；;\n]|$)")
+
+
+def _cjk_topic_frame(text: str, start: int, end: Optional[int] = None) -> bool:
     before = text[:start]
-    return bool(_CJK_WHETHER_BEFORE_RE.search(before) or _CJK_WHY_CLAUSE_RE.search(before))
+    if _CJK_WHETHER_BEFORE_RE.search(before) or _CJK_WHY_CLAUSE_RE.search(before):
+        return True
+    return end is not None and bool(_CJK_WHERE_CLAUSE_RE.search(before) and _CJK_QUESTION_TAIL_RE.match(text[end:]))
 
 
 # "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
@@ -352,9 +373,21 @@ _CJK_NOUN_PHRASE_END_RE = re.compile(
 _CJK_REPORT_BACK_RE = re.compile(r"(?:給我|给我)\s*$")
 
 
+# "改大一點", "調成..." style degree edits; 讓 X 打開/關閉; a clause that opens with a setting toggle (停用 X).
+_CJK_DEGREE_EDIT_RE = re.compile(r"改[大小長短多少高低快慢寬窄嚴鬆久早晚]\s*(?:一點|一些|點|些)")
+_CJK_LET_TOGGLE_RE = re.compile(
+    r"[讓让使][^。？?！!，,；;\n]{1,20}?(?:打開|打开|開啟|开启|關閉|关闭|啟用|启用|停用|禁用|變成|变成)")
+_CJK_TOGGLE_OPEN_RE = re.compile(
+    r"(?:^|[。！；\n，,])\s*(?:(?:先|再|然後|然后|並|并|順便|顺便)\s*)*(?:關閉|关闭|啟用|启用|停用|禁用)(?!的|狀態|状态|後|后|時|时)")
+
+
 def _find_cjk_disposals(text: str) -> List[Tuple[int, str]]:
     """Out-of-list Chinese actions: 把 + object + resultative verb, and transitive X掉."""
     found: List[Tuple[int, str]] = []
+    for pattern in (_CJK_DEGREE_EDIT_RE, _CJK_LET_TOGGLE_RE, _CJK_TOGGLE_OPEN_RE):
+        for m in pattern.finditer(text):
+            if not _cjk_topic_frame(text, m.start()) and not CJK_NOUN_BEFORE_RE.search(text[:m.start()]):
+                found.append((m.start(), m.group(0).strip(" 。！；，,\n")))
     for m in re.finditer(_CJK_TRANS_DIAO, text):
         if text[m.end():m.end() + 1] in ("了", "的") or _cjk_topic_frame(text, m.start()):
             continue
@@ -455,7 +488,7 @@ def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, st
     for m in CJK_MUTATION_RE.finditer(stripped):
         if CJK_NOUN_BEFORE_RE.search(stripped[:m.start()]) or CJK_MUTATION_NOUN_AFTER_RE.match(stripped[m.end():]):
             continue
-        if _cjk_topic_frame(stripped, m.start()):
+        if _cjk_topic_frame(stripped, m.start(), m.end()):
             continue
         found.append((m.start(), m.group(0).strip()))
     found.extend(_find_cjk_disposals(stripped))
@@ -991,9 +1024,12 @@ def _polite_cjk_action(stripped: str) -> Optional[str]:
     return None
 
 
+_FEEL_FREE_RE = re.compile(r"\bfeel\s+free\s+to\s+(?:also\s+)?(?:re-?run|run|execute|exec)\b", re.IGNORECASE)
+
+
 def find_polite_request(text: str) -> Optional[str]:
     """Return the polite action request in text ("mind bumping", "麻煩你升級"), or None."""
-    stripped = _strip_negated_mutations(text)
+    stripped = _FEEL_FREE_RE.sub(_blank, _strip_negated_mutations(text))  # "feel free to run" is permission
     m = POLITE_STRONG_EN_RE.search(stripped)
     if m:
         return m.group(0)
@@ -1033,6 +1069,7 @@ RULE_CONFIDENCE = {
     "polite-request": 0.9,
     "scout-web": 0.9,
     "scout-read-only": 0.7,
+    "scout-imperative": 0.85,
     "worker-lookup": 0.7,
     "run-directive": 0.9,
     "default": 0.5,
@@ -1151,6 +1188,88 @@ def _sequenced_action(clause: str) -> bool:
         return m.group(1).lower() not in _SEQUENCED_READ_WORDS
     m = _SEQUENCED_CJK_RE.match(clause)
     return bool(m and "\u4e00" <= m.group(1) <= "\u9fff" and not _POLITE_CJK_READ_RE.match(clause[m.start(1):]))
+
+
+_OPENING_SKIP = {
+    # read and research verbs
+    *(_SEQUENCED_READ_WORDS - {"point"}), "run", "execute", "exec", "rerun", "invoke", "launch", "research", "investigate", "analyze", "analyse", "examine", "explore", "study", "survey",
+    "audit", "assess", "evaluate", "diagnose", "debug", "understand", "determine", "gather", "collect", "compile",
+    "enumerate", "scan", "map", "outline", "walk", "go", "dig", "scout", "browse", "fetch", "get", "grab", "learn",
+    "figure", "work", "tracing", "survey", "catalog", "catalogue", "inventory", "diff", "view", "open", "cat",
+    "state", "provide", "specify", "spell", "extract", "highlight", "flag", "capture", "record", "calculate",
+    "ls", "rg", "git", "sed", "awk", "wc", "head", "tail", "do", "use", "keep", "remember", "ensure", "be", "put",
+    "take", "set", "try",
+    # openers that are not verbs
+    "context", "background", "task", "goal", "objective", "question", "summary", "overview", "project", "repo",
+    "repository", "current", "currently", "all", "any", "each", "every", "some", "no", "not", "if", "when", "while",
+    "for", "in", "on", "at", "with", "by", "from", "of", "as", "so", "but", "or", "and", "because", "since", "after",
+    "before", "once", "until", "unless", "which", "what", "who", "whom", "whose", "why", "how", "where", "is", "are",
+    "was", "were", "does", "did", "can", "could", "would", "should", "will", "may", "might", "been", "being", "have",
+    "has", "had", "my", "its", "their", "here", "step", "part", "phase", "plan", "note", "notes", "important",
+}
+_OPENING_RE = re.compile(r"^\W*(?:(?:please|just|also|kindly|and|then)\s+)*([A-Za-z][\w-]*)\s+([^\s,.;:!?]+)")
+_OPENING_OBJECT_RE = re.compile(
+    r"^(?:the|a|an|this|that|these|those|all|every|each|any|both|its|their|our|my|your|it|them|`.*|.*[_./\d`'\"-].*|[A-Z][A-Z_]{2,})$")
+_OPENING_READ_PHRASE_RE = re.compile(
+    r"^\W*(?:(?:please|just|also|kindly)\s+)*(?:(?:make|build|generate)\s+(?:a|an|the|some)\s+(?:\w+\s+)?(?:list|note|notes|summary|table|"
+    r"inventory|map|overview|report|diagram|outline|comparison|count|tally|checklist)\b|set\s+aside\b|"
+    r"take\s+(?:a|an|the)\s+(?:look|peek|glance|note)\b|put\s+together\b)",
+    re.IGNORECASE)
+
+
+# Verbs of _SCOUT_IMPERATIVE_START_RE that are never read verbs: they fire without an object check.
+_OPENING_FORCE_RE = re.compile(
+    r"^\W*(?:(?:please|then|also|and|just)\s+)*(?:comment\s+out|uncomment|speed\s+up|clear|kill|bring|turn|restart|reset|"
+    r"clean|tidy|squash|generate|build|skip|disable|enable|mark|unpin|raise|lower|increase|decrease|mute|silence|"
+    r"quarantine|xfail|stop|start(?!\s+(?:by|with|from|at)\b)|check\s+(?:out|in)|"
+    r"open(?:\s+(?:a|an|the))?\s+(?:new\s+)?(?:pr|pull request|mr|issue|ticket|branch))\b",
+    re.IGNORECASE,
+)
+
+
+# Chinese opening verbs that change something; a read verb (看 查 找 列出 確認 檢查 告訴 ...) is not in the list.
+_CJK_OPENING_VERBS = (
+    "取消註解|取消注释|取消|註解掉|注釋掉|注释掉|解除|停用|啟用|启用|關閉|关闭|開啟|开启|打開|打开|重設|重设|重置|重啟|重启|重開|"
+    "啟動|启动|停止|暫停|暂停|恢復|恢复|回滾|回滚|回退|還原|还原|清除|清空|清理|搬移|移動|移动|複製|复制|匯入|导入|匯出|导出|"
+    "產生|产生|生成|部署|發佈|发布|標記|标记|跳過|跳过|忽略|鎖定|锁定|固定|套用|封存|歸檔|归档|合併|合并|拆分|拆成|調整|调整|"
+    "調高|调高|調低|调低|放寬|放宽|收緊|收紧|縮短|缩短|延長|延长|加大|加長|加长|降低|提高|升|降")
+_CJK_OPENING_RE = re.compile(
+    r"^\W*(?:(?:請|请|幫我|帮我|幫忙|帮忙|麻煩你?|麻烦你?|先|直接|再|然後|然后)\s*)*(?:" + _CJK_OPENING_VERBS + r")(?!的)")
+
+
+def _scout_opening_action(prompt: str) -> Optional[str]:
+    """First clause of a scout prompt that opens with a verb outside the read list ("Make the timeout 30 seconds")."""
+    cjk_clause = re.split(r"[。？！；\n]", prompt.strip(), 1)[0]
+    if (_CJK_OPENING_RE.match(cjk_clause) and not _QUESTION_CJK_RE.search(cjk_clause)
+            and not re.search(r"[?？]", cjk_clause)):
+        return cjk_clause[:60]
+    clause = re.split(r"[.?!;\n]|:\s", prompt.strip(), 1)[0]
+    if _OPENING_READ_PHRASE_RE.match(clause):
+        return None
+    if _OPENING_FORCE_RE.match(clause) and not _is_question_clause(clause, ""):
+        return clause[:60]
+    m = _OPENING_RE.match(clause)
+    if not m or m.group(1).lower() in _OPENING_SKIP or not m.group(1).islower() and not m.group(1).istitle():
+        return None
+    if _is_question_clause(clause, "") or not _OPENING_OBJECT_RE.match(m.group(2)):
+        return None
+    return clause[:60]
+
+
+# Programs a scout's Bash cannot run, named after a run verb: "Run `npm run build`", "Try docker compose up", 用 terraform apply.
+_RUN_PROGRAMS = (r"pip3?|npm|npx|pnpm|yarn|uv|poetry|cargo|docker|docker-compose|kubectl|curl|wget|pytest|tox|terraform|helm|"
+                 r"gh|aws|gcloud|python3?|node|brew|apt(?:-get)?|systemctl|ansible|gradle|mvn|bundle|gem|composer|dotnet|"
+                 r"make|alembic|rake|flask|django-admin|manage\.py|go|sh|bash|zsh|sudo|\./\S+|\S+\.sh|\S+\.py|psql|mysql|redis-cli")
+_RUN_COMMAND_RE = re.compile(
+    r"(?:\b(?:run|execute|exec|try|invoke|launch)\b|跑一下|跑|執行|执行|運行|运行|用)\s*[:：]?\s*`?\$?\s*(?:" + _RUN_PROGRAMS + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def find_run_command(text: str) -> Optional[str]:
+    """A run verb followed by a program a read-only scout cannot run ("Run `npm run build`", 用 terraform apply 套一次)."""
+    m = _RUN_COMMAND_RE.search(_blank_run_objects(text))
+    return m.group(0).strip() if m else None
 
 
 def _scout_trailing_imperative(text: str, prompt: str) -> Optional[str]:
@@ -1353,7 +1472,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     worker_upgrade = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
     if mutation:
         if (bare_type == SCOUT_TYPE and _read_only_has_last_word(text, "mutation") and not needs_web(text)
-                and not find_run_directive(text) and not find_run_task(text) and not EXECUTION_RE.search(_blank_run_objects(text))
+                and not find_run_directive(text) and not find_run_command(text) and not find_run_task(text) and not EXECUTION_RE.search(_blank_run_objects(text))
                 and not find_shell_mutation(text) and not find_polite_request(text)):
             return done(_rule_decision("flash_lite", None, "scout-read-only",
                                        f"scout declares read-only; '{mutation}' is the topic"))
@@ -1375,11 +1494,15 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         if needs_web(text):
             return done(_rule_decision("flash", worker_upgrade, "scout-web",
                                        "scout has no web access; upgraded to flash-worker"))
+        opening = _scout_opening_action(prompt)
+        if opening:
+            return done(_rule_decision("flash", worker_upgrade, "scout-imperative",
+                                       f"opening clause '{opening}' is an action; upgraded to flash-worker"))
         trailing = _scout_trailing_imperative(text, prompt)
         if trailing:
             return done(_rule_decision("flash", worker_upgrade, "trailing-imperative",
                                        f"action clause '{trailing}' follows a question; upgraded to flash-worker"))
-        directive = find_run_directive(text)
+        directive = find_run_directive(text) or find_run_command(text)
         if directive:
             return done(_rule_decision("flash", worker_upgrade, "run-directive",
                                        f"run request '{directive}' on read-only scout; upgraded to flash-worker"))

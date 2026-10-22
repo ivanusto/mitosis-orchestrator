@@ -489,3 +489,74 @@
 {"id": "p22-probe-c16", "prompt": "把 README 的安裝步驟看一遍，跟我說缺了什麼。", "expected": "flash_lite", "lang": "zh", "category": "probe"}
 {"id": "p22-probe-c17", "prompt": "把 Makefile 跟 justfile 比對一下，列出差異。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
 {"id": "p22-probe-c18", "prompt": "把 Makefile 跟 justfile 合在一起。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-01", "prompt": "Make the request timeout in api/settings.py 30 seconds.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-02", "prompt": "Set LOG_LEVEL to DEBUG in .env.example.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-03", "prompt": "Turn the cache off in config/dev.toml.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-04", "prompt": "Point the staging upstream at the new load balancer in nginx/staging.conf.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-05", "prompt": "Swap the order of the two middleware entries in app.py.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-06", "prompt": "把 api/settings.py 的逾時改到 30 秒。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-07", "prompt": "讓 dev 環境預設關掉快取。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-08", "prompt": "設定檔裡的重試次數改大一點。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-09", "prompt": "Run `npm run build` and tell me if it fails.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-10", "prompt": "Execute make migrate and paste any errors back.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-11", "prompt": "Try `docker compose up -d db` and report what happens.", "expected": "flash", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-12", "prompt": "跑一下 npm install 看會不會失敗，把錯誤貼回來。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-13", "prompt": "執行 python manage.py migrate，回報結果。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-14", "prompt": "用 terraform apply 套一次，看看輸出。", "expected": "flash", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-15", "prompt": "Make a list of every caller of parse_config.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-16", "prompt": "Run `git log --oneline -10 -- api/` and summarize the changes.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-17", "prompt": "Run rg -n 'TODO' src/ and count the hits per file.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-18", "prompt": "Find where the retry limit is set and tell me its value.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-19", "prompt": "Show me the nginx upstream block for staging.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-20", "prompt": "Check whether the cache is enabled in config/dev.toml.", "expected": "flash_lite", "lang": "en", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-21", "prompt": "跑 git log -5 看最近誰改了 settings.py。", "expected": "flash_lite", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-22", "prompt": "看一下 api/settings.py 的逾時是幾秒。", "expected": "flash_lite", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-23", "prompt": "列出 dev 環境所有跟快取有關的設定。", "expected": "flash_lite", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-scout-lead-24", "prompt": "確認一下 .env.example 有沒有 LOG_LEVEL。", "expected": "flash_lite", "lang": "zh", "category": "scout-lead", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d03", "prompt": "Comment out the flaky assertion in tests/test_sync.py.", "expected": "flash", "lang": "en", "category": "p22-probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d17", "prompt": "追一下 metrics registry 第一次在哪裡建立。", "expected": "flash_lite", "lang": "zh", "category": "p22-probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-perm-01", "prompt": "Read-only review of server.py. Do not run anything that hits the GPU. You may run `python3 -m py_compile server.py` as a static check. Report a prioritized list of bugs with file:line.", "expected": "flash_lite", "lang": "en", "category": "p22-probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-perm-02", "prompt": "唯讀檢查 server.py，可以執行 python3 -m py_compile 做語法檢查，回報問題清單。", "expected": "flash_lite", "lang": "zh", "category": "p22-probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e01", "prompt": "Uncomment the debug logger in app/main.py.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e02", "prompt": "Disable the nightly job in .github/workflows/nightly.yml.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e03", "prompt": "Mark test_upload as xfail on Windows.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e04", "prompt": "Lower the default page size to 20.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e05", "prompt": "Feel free to run `ls -R docs/`. Which pages mention the CLI?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e06", "prompt": "You can run git grep if it helps. Where is CLI_VERSION read?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e07", "prompt": "You need to run `make test` first, then tell me which suite fails.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e08", "prompt": "Inspect app/main.py and list the routes it registers.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e09", "prompt": "Summarize what tests/test_upload.py covers.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e10", "prompt": "取消註解 app/main.py 的 debug logger。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e11", "prompt": "停掉 nightly 那個 workflow。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e12", "prompt": "可以用 rg 搜，CLI_VERSION 在哪裡被讀取？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e13", "prompt": "需要先跑 make test，再告訴我哪個 suite 失敗。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e14", "prompt": "test_upload 是什麼時候被加進來的？用 git log 查。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-e15", "prompt": "說明 app/main.py 註冊了哪些 route。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d01", "prompt": "Raise the worker pool size in deploy/values.yaml to 8.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d02", "prompt": "Pin urllib3 below 2.0 in requirements.txt.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d04", "prompt": "Wire the new exporter into the metrics registry.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d05", "prompt": "Run `pytest -k cache -x` and paste the first failure.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d06", "prompt": "Try `cargo build --release` and tell me how long it takes.", "expected": "flash", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d07", "prompt": "Look at deploy/values.yaml and tell me the worker pool size.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d08", "prompt": "Count how many tests are marked xfail.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d09", "prompt": "Trace where the metrics registry is first created.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d10", "prompt": "Run `git diff --stat HEAD~3` and summarize.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d11", "prompt": "Note which config keys are unused; no edits.", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d12", "prompt": "把 deploy/values.yaml 的 worker 數拉到 8。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d13", "prompt": "註解掉 tests/test_sync.py 那個不穩的斷言。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d14", "prompt": "跑 pytest -k cache 看第一個失敗在哪。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d15", "prompt": "跑 git diff --stat HEAD~3 看改了哪些檔。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d16", "prompt": "數一下有幾個測試標了 xfail。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-d18", "prompt": "比對 values.yaml 和 values-prod.yaml 的差異。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f01", "prompt": "取消訂單的 API 在哪個檔案？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f02", "prompt": "部署流程寫在哪份文件？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f03", "prompt": "重試次數的預設值是多少？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f04", "prompt": "匯出 CSV 的函式叫什麼名字？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f05", "prompt": "停用的帳號會被哪個 job 清掉？", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f06", "prompt": "標記為 deprecated 的函式有哪些，列出來。", "expected": "flash_lite", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f07", "prompt": "直接停用 legacy 登入流程。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f08", "prompt": "先封存 old/ 底下的腳本。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f09", "prompt": "調低 log 的保留天數到 7 天。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f10", "prompt": "忽略 tests/legacy/ 不要讓 pytest 收集。", "expected": "flash", "lang": "zh", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f11", "prompt": "Feel free to open any file. Which module owns billing?", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p22-probe-f12", "prompt": "Start with api/billing.py and tell me who calls charge().", "expected": "flash_lite", "lang": "en", "category": "probe", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
