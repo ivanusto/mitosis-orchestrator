@@ -1,0 +1,40 @@
+{"id": "v8-en-01", "prompt": "Where is `retry_with_backoff` defined and which modules import it?", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-02", "prompt": "Fix the off-by-one in paginate() in src/utils/page.ts, add a regression test, and run `npm test -- page`.", "expected": "flash", "lang": "en"}
+{"id": "v8-en-03", "prompt": "git log --oneline -15 -- src/auth/ and tell me who last touched session.py", "expected": "flash_lite", "lang": "en"}
+{"id": "v8-en-04", "prompt": "Upgrade pydantic to 2.9 in pyproject.toml, regenerate poetry.lock, and run the suite to see what breaks.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-en-05", "prompt": "Read .github/workflows/ci.yml and tell me which Node versions the test matrix covers. Don't change anything.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-en-06", "prompt": "Compare how FastAPI, Litestar and Starlette document lifespan events in their current docs and summarize the differences.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-07", "prompt": "What does `test_migrate_users` in tests/db/test_migrations.py assert? Just read it and summarize, no need to run it.", "expected": "flash_lite", "lang": "en"}
+{"id": "v8-en-08", "prompt": "Run `make bench` on the parser branch before and after my patch and report the throughput numbers.", "expected": "flash", "lang": "en"}
+{"id": "v8-en-09", "prompt": "Check git status and tell me whether there are uncommitted changes in packages/api.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-10", "prompt": "Create scripts/seed_dev.py that inserts 50 fake users, and commit it on a new branch dev-seed.", "expected": "flash", "lang": "en"}
+{"id": "v8-en-11", "prompt": "Find the file that sets the default for DATABASE_URL and quote the line.", "expected": "flash_lite", "lang": "en"}
+{"id": "v8-en-12", "prompt": "CI is red on main with 'ModuleNotFoundError: yaml'. Reproduce it locally, find the cause and fix it.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-13", "prompt": "How does the Dockerfile in services/worker pin its base image? Quote the FROM lines.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-en-14", "prompt": "Please rename the `UserDTO` class to `AccountDTO` across the repo and update all imports.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-en-15", "prompt": "Which package.json scripts handle build and lint? I only need the script names and commands, don't run them.", "expected": "flash_lite", "lang": "en"}
+{"id": "v8-en-16", "prompt": "Check whether the latest sqlx release fixes the connection pool leak from issue 2874; read the changelog online.", "expected": "flash", "lang": "en"}
+{"id": "v8-en-17", "prompt": "List the files under src/components that import from '@/lib/analytics'.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-18", "prompt": "Quick one: does `docker compose up` come up cleanly with the new redis service? Try it and tell me.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-en-19", "prompt": "Show me what changed in config/settings.toml between HEAD~1 and HEAD: which keys?", "expected": "flash_lite", "lang": "en"}
+{"id": "v8-en-20", "prompt": "Write a migration adding a nullable `deleted_at` column to orders, apply it to the local sqlite db, and verify the rollback works.", "expected": "flash", "lang": "en"}
+{"id": "v8-zh-01", "prompt": "幫我找 `load_config` 在哪個檔案定義，哪些地方有呼叫它。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-02", "prompt": "把 utils/date.py 的時區處理修掉，補一個單元測試，然後跑 pytest 確認通過。", "expected": "flash", "lang": "zh"}
+{"id": "v8-zh-03", "prompt": "看一下 git log 最近 10 筆，哪一筆動過 deploy/helm/values.yaml？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v8-zh-04", "prompt": "請升級 eslint 到 9 版，修正設定檔相容問題並跑一遍 lint。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-zh-05", "prompt": "讀 src/server/router.go，告訴我 /healthz 這個路由掛在哪個 handler。不要改任何東西。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v8-zh-06", "prompt": "上網查一下 PostgreSQL 17 對 logical replication 的新功能，整理成重點，附官方文件連結。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-07", "prompt": "tests/e2e/login.spec.ts 的測試在驗證什麼？只要讀程式碼說明，不用跑。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-zh-08", "prompt": "跑 npm run build，如果失敗就找出原因並修好。", "expected": "flash", "lang": "zh"}
+{"id": "v8-zh-09", "prompt": "目前 working tree 有沒有未 commit 的變更？", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-10", "prompt": "新增 docs/CONTRIBUTING.md，寫入提交流程，然后 commit 並 push 到 origin。", "expected": "flash", "lang": "zh"}
+{"id": "v8-zh-11", "prompt": "这个仓库的 CI 是用哪个 workflow 跑 lint 的？给我文件路径就好。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v8-zh-12", "prompt": "為什麼 integration test 在 CI 上偶爾逾時？去重現看看，必要時加 log 追蹤。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-13", "prompt": "requirements.txt 裡 numpy 被釘在哪個版本？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v8-zh-14", "prompt": "幫我把 src/legacy/ 下所有 print 改成 logging.info，再確認沒有破壞測試。", "expected": "flash", "lang": "zh"}
+{"id": "v8-zh-15", "prompt": "後端的 CORS allowed origins 設在哪個檔案？貼出那幾行。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-16", "prompt": "比較 Redis、Valkey 與 KeyDB 目前的授權與社群狀況，需要查官方網站和 GitHub。", "expected": "flash", "lang": "zh"}
+{"id": "v8-zh-17", "prompt": "Makefile 裡有哪些 target？列名稱就好，不要執行。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v8-zh-18", "prompt": "在測試資料庫跑一下 alembic upgrade head，確認 migration 沒問題。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v8-zh-19", "prompt": "看 git diff main..feature/billing，只告訴我有動到哪些檔案名稱。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v8-zh-20", "prompt": "git stash 之後 rebase 到 origin/main，解掉衝突。", "expected": "flash", "lang": "zh"}
