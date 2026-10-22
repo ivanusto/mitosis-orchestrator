@@ -1,0 +1,40 @@
+{"id": "v6-en-01", "prompt": "Where is retry_with_backoff defined? Just give me the file and line, don't change anything.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-en-02", "prompt": "Bump pydantic to 2.9 in pyproject.toml, run uv lock, then run pytest tests/api and tell me which tests fail.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-en-03", "prompt": "Which test file covers src/auth/token.py? I only need the path.", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-04", "prompt": "rename getUser to fetchUser across packages/web/src", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-en-05", "prompt": "git log -5 --oneline for services/billing/ and tell me who last touched invoice.go", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-06", "prompt": "Look up the official Postgres 16 docs on logical replication slot failover and summarize the config parameters we would need to set on the replicas.", "expected": "flash", "lang": "en"}
+{"id": "v6-en-07", "prompt": "Read .github/workflows/ci.yml and tell me which Node version the build job uses, and whether the lint step could be producing 'ESLint: Parsing error' because of its config. Config reading only, don't run any workflow or lint.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-en-08", "prompt": "The nightly build is red with 'undefined reference to zstd_decompress'. Reproduce it locally with make -j8 and work out which link flag is missing.", "expected": "flash", "lang": "en"}
+{"id": "v6-en-09", "prompt": "Is there a Dockerfile for the worker service? grep for it, one line answer.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-en-10", "prompt": "Add a unit test for parseDuration covering the empty string and negative values in lib/time_test.go, then run go test ./lib/... and make sure it passes.", "expected": "flash", "lang": "en"}
+{"id": "v6-en-11", "prompt": "Check git status and tell me if there are uncommitted changes in infra/terraform.", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-12", "prompt": "Please commit the changes in docs/ with the message 'docs: fix typos' and push to origin/docs-cleanup.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-en-13", "prompt": "How does cache invalidation work in CacheManager.evict()? Read the method and its callers in the same file and explain briefly. No need to run the cache tests.", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-14", "prompt": "Compare how tracing, log and slog handle structured fields in Rust and recommend one for our service. Check their current docs online, not just from memory.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-en-15", "prompt": "List every file under migrations/ that mentions 'users_email_idx'. Do not run the migrations.", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-16", "prompt": "Fix the typo 'recieve' in README.md.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-en-17", "prompt": "What's the default value of MAX_POOL_SIZE in config/settings.py?", "expected": "flash_lite", "lang": "en"}
+{"id": "v6-en-18", "prompt": "Run scripts/bench_parser.sh on the current tree and again after applying /tmp/patch.diff, then give me the before/after numbers.", "expected": "flash", "lang": "en"}
+{"id": "v6-en-19", "prompt": "Is there a test mentioning flaky retries in tests/integration? Locate it and tell me the name, but do not run it.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-en-20", "prompt": "Trace the call graph from handle_webhook() through all modules in app/ to find every place a DB write can happen, and write the findings into notes/webhook_writes.md.", "expected": "flash", "lang": "en"}
+{"id": "v6-zh-01", "prompt": "幫我找一下 `UserService.update_profile` 定義在哪個檔案，只要路徑和行號。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-zh-02", "prompt": "把 package.json 裡的 react 升到 19，執行 npm install 和 npm test，回報失敗的測試。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-03", "prompt": "git diff HEAD~1 看一下 src/router.ts 這次改了什麼，簡單說明就好，不要改動任何東西。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-04", "prompt": "查一下 Kubernetes 1.33 官方文件，sidecar container 的啟動順序保證是怎麼定義的，整理成重點給我。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-zh-05", "prompt": "tests/ 底下有沒有測試用到 mock_redis？列出檔名。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-06", "prompt": "修掉 config/app.yaml 裡 timeout 單位寫錯的問題（應為毫秒），再跑 make lint 確認通過。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-07", "prompt": "CI 的 build 步驟用的是哪個 Python 版本？看 .gitlab-ci.yml 回答就好，別跑 pipeline。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-zh-08", "prompt": "跑一下 pytest -x tests/payments，失敗的話找出原因。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-zh-09", "prompt": "这个仓库的入口函数是哪个？帮我看 cmd/ 目录。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-10", "prompt": "请把 utils/date.py 里的 parse_date 改成支持带时区的 ISO 8601，并补两个单元测试，跑通为止。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-11", "prompt": "docker-compose.yml 裡 redis 的 port mapping 是多少？", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "v6-zh-12", "prompt": "把 feature/login-fix 分支 rebase 到 main，解完衝突後用 --force-with-lease push 上去。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-13", "prompt": "請讀 src/db/pool.py，說明連線逾時時會拋出什麼例外。只要讀程式碼，不用重現錯誤。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-14", "prompt": "新建 scripts/export_users.py，把 users 表匯出成 CSV，寫好後實際跑一次確認輸出格式正確。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-zh-15", "prompt": "最近三個 commit 是誰提交的？", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-16", "prompt": "比較 Prometheus remote write 和 OpenTelemetry collector 目前官方的建議用法，上網查資料後給我一份比較表。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-17", "prompt": "找出 repo 裡所有 TODO(security) 註解的位置。", "expected": "flash_lite", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-worker"}
+{"id": "v6-zh-18", "prompt": "資料庫 migration 0042 在 staging 報 'column already exists'，請在本機容器重現並修好 migration 檔。", "expected": "flash", "lang": "zh"}
+{"id": "v6-zh-19", "prompt": "build.gradle 裡有沒有設定 -Werror？只回答有或沒有，附行號。", "expected": "flash_lite", "lang": "zh"}
+{"id": "v6-zh-20", "prompt": "把 legacy/ 底下三個模組的 logger 呼叫全部改成 structlog，涉及多個檔案，改完跑 tox。", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
