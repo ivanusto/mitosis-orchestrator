@@ -1639,17 +1639,49 @@ class TestTrailingImperativeAndShellMutation(unittest.TestCase):
             if saved is not None:
                 os.environ["MITOSIS_JUDGE_URL"] = saved
 
+    def _decide_typed(self, prompt):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt, "subagent_type": "mitosis-orchestrator:flash-lite-scout"})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
     def test_question_then_action_clause_is_a_task(self):
         for prompt in (
             "Why is the build broken? Please get it green.",
             "Which migration adds the users.email index? Then squash it into 0042.",
             "Is there a migration for orders? If not, generate one.",
             "Where is the config loaded? Point it at the staging bucket.",
-            "測試哪裡失敗？弄好它",
+            "測試哪裡失敗？讓它通過",
             "有沒有 README？沒有的話就補一份",
         ):
             d = self._decide(prompt)
             self.assertEqual((d.tier, d.rule), ("flash", "trailing-imperative"), prompt)
+
+    def test_run_phrase_as_object_of_a_how_question_is_not_a_run(self):
+        for prompt in ("How do I run the linter locally?", "Which script do we use to run the benchmarks?",
+                       "跑測試的指令是什麼？", "執行基準測試要用哪個腳本？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        for prompt in ("Figure out how to run the tests, then run them.", "查一下怎麼跑測試，然後跑一次並回報結果"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_scout_upgrades_and_read_only_keep(self):
+        def scout(prompt):
+            return self._decide_typed(prompt)
+        self.assertEqual(scout("Which test is flaky in tests/test_api.py? Get it green.").rule, "trailing-imperative")
+        self.assertEqual(scout("Check the latest release notes on the vendor docs site.").rule, "scout-web")
+        self.assertEqual(scout("Read-only audit of auth/: which functions should change if we switch to argon2? Do not edit anything.").rule, "scout-read-only")
+        self.assertEqual(scout("Do not edit anything yet. Actually, fix the typo in README.").rule, "mutation")
+
+    def test_soft_frames_and_cjk_verbs(self):
+        for prompt in ("Would it be possible to bump lodash and regenerate the lockfile?",
+                       "I'd appreciate it if you renamed get_user to fetch_user.",
+                       "把 config.yaml 的 port 弄成 8080"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("It would be great if you could explain how the cookie is signed.",
+                       "弄清楚 session 是在哪裡建立的", "換行符號是在哪裡統一處理的？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
 
     def test_readonly_courtesy_and_reference_followups_stay_scout(self):
         for prompt in (

@@ -279,3 +279,83 @@
 {"id": "p1-polite-lite-10", "prompt": "哪個檔案負責 updating 快取的邏輯？", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
 {"id": "p1-polite-lite-11", "prompt": "請你說明 config/retry.py 裡 backoff 的運作方式。", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
 {"id": "p1-polite-lite-12", "prompt": "可以幫我看一下哪個函式處理 token 過期嗎？", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
+{"id": "p21-cmd-lite-01", "prompt": "State the exact command to run the test suite. Do not edit anything.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-lite-02", "prompt": "What command runs the unit tests in this repo?", "expected": "flash_lite", "lang": "en", "category": "v21-cmd"}
+{"id": "p21-cmd-lite-03", "prompt": "Find out how to run the integration tests; check the Makefile and the CI config. Report the command only.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-lite-04", "prompt": "Which script do we use to run the benchmarks? Just the path.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd"}
+{"id": "p21-cmd-lite-05", "prompt": "跑測試的指令是什麼？看 Makefile 跟 package.json 就好", "expected": "flash_lite", "lang": "zh", "category": "v21-cmd"}
+{"id": "p21-cmd-lite-06", "prompt": "查一下這個專案怎麼執行測試，只要回報指令", "expected": "flash_lite", "lang": "zh", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-lite-07", "prompt": "How do I run the linter locally? Look at pyproject.toml.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-lite-08", "prompt": "Tell me the npm script used to run the e2e tests.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd"}
+{"id": "p21-cmd-lite-09", "prompt": "Look in the README for the steps to run the dev server and list them.", "expected": "flash_lite", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-lite-10", "prompt": "執行基準測試要用哪個腳本？告訴我路徑就好", "expected": "flash_lite", "lang": "zh", "category": "v21-cmd"}
+{"id": "p21-cmd-work-01", "prompt": "Find the command to run the test suite and run it; report the failures.", "expected": "flash", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-work-02", "prompt": "Figure out how to run the tests, then run them.", "expected": "flash", "lang": "en", "category": "v21-cmd"}
+{"id": "p21-cmd-work-03", "prompt": "查一下怎麼跑測試，然後跑一次並回報結果", "expected": "flash", "lang": "zh", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-work-04", "prompt": "What command runs the tests? Run it and paste the output.", "expected": "flash", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-work-05", "prompt": "Look up the command to run the benchmarks and execute it with --quick.", "expected": "flash", "lang": "en", "category": "v21-cmd"}
+{"id": "p21-cmd-work-06", "prompt": "Find the script that runs the migrations and run it against the staging database.", "expected": "flash", "lang": "en", "category": "v21-cmd", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cmd-work-07", "prompt": "找出跑 e2e 測試的指令，跑一下", "expected": "flash", "lang": "zh", "category": "v21-cmd"}
+{"id": "p21-soft-work-01", "prompt": "Would it be possible to update the README install section for Python 3.13?", "expected": "flash", "lang": "en", "category": "v21-soft"}
+{"id": "p21-soft-lite-01", "prompt": "Would it be possible to tell me where the retry logic lives?", "expected": "flash_lite", "lang": "en", "category": "v21-soft"}
+{"id": "p21-soft-work-02", "prompt": "I'd appreciate it if you renamed get_user to fetch_user across the package.", "expected": "flash", "lang": "en", "category": "v21-soft"}
+{"id": "p21-soft-lite-02", "prompt": "I'd appreciate it if you pointed me to the file that defines the CLI entry point.", "expected": "flash_lite", "lang": "en", "category": "v21-soft", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-soft-work-03", "prompt": "We would appreciate it if you added type hints to utils/dates.py.", "expected": "flash", "lang": "en", "category": "v21-soft", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-soft-work-04", "prompt": "Would it be possible to bump lodash and regenerate the lockfile?", "expected": "flash", "lang": "en", "category": "v21-soft", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-soft-work-05", "prompt": "It would be great if you cleaned up the unused imports in api/.", "expected": "flash", "lang": "en", "category": "v21-soft"}
+{"id": "p21-soft-lite-03", "prompt": "It would be great if you could explain how the session cookie is signed.", "expected": "flash_lite", "lang": "en", "category": "v21-soft"}
+{"id": "p21-noq-work-01", "prompt": "Not sure the flaky test in tests/test_api.py is worth keeping. Get it green.", "expected": "flash", "lang": "en", "category": "v21-noq"}
+{"id": "p21-noq-work-02", "prompt": "Is the logger configured twice in app.py. If so get rid of the second one.", "expected": "flash", "lang": "en", "category": "v21-noq"}
+{"id": "p21-noq-work-03", "prompt": "I wonder if the cache key includes the locale. Make it include it.", "expected": "flash", "lang": "en", "category": "v21-noq"}
+{"id": "p21-noq-lite-01", "prompt": "I wonder if the date parser handles time zones. Just tell me which function does the parsing.", "expected": "flash_lite", "lang": "en", "category": "v21-noq"}
+{"id": "p21-noq-lite-02", "prompt": "Not sure where the feature flags are read. Point me to the file.", "expected": "flash_lite", "lang": "en", "category": "v21-noq"}
+{"id": "p21-noq-work-04", "prompt": "不確定 timeout 設多少，幫我調成 30 秒", "expected": "flash", "lang": "zh", "category": "v21-noq"}
+{"id": "p21-cjk-work-01", "prompt": "把 config.yaml 的 port 弄成 8080", "expected": "flash", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-work-02", "prompt": "README 的安裝步驟搞定一下", "expected": "flash", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-work-03", "prompt": "補上 utils/date.py 缺的型別註記", "expected": "flash", "lang": "zh", "category": "v21-cjk", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cjk-work-04", "prompt": "把 lockfile 拉到最新", "expected": "flash", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-work-05", "prompt": "把那個 deprecated 的 API 換掉", "expected": "flash", "lang": "zh", "category": "v21-cjk", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cjk-work-06", "prompt": "把 debug log 拿掉", "expected": "flash", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-work-07", "prompt": "幫 api/users.py 加個分頁", "expected": "flash", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-work-08", "prompt": "把 timeout 調大一點，順便把重試次數改成 5", "expected": "flash", "lang": "zh", "category": "v21-cjk", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cjk-lite-01", "prompt": "弄清楚 session 是在哪裡建立的", "expected": "flash_lite", "lang": "zh", "category": "v21-cjk", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-cjk-lite-02", "prompt": "搞清楚 retry 的流程，回報檔案位置", "expected": "flash_lite", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-lite-03", "prompt": "拿 git log 看一下 utils/date.py 最近誰動過", "expected": "flash_lite", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-cjk-lite-04", "prompt": "換行符號是在哪裡統一處理的？", "expected": "flash_lite", "lang": "zh", "category": "v21-cjk"}
+{"id": "p21-st-work-01", "prompt": "Which test is flaky in tests/test_api.py? Get it green.", "expected": "flash", "lang": "en", "category": "v21-st", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-st-work-02", "prompt": "Where's the stale cache entry for user 42? Clear it out.", "expected": "flash", "lang": "en", "category": "v21-st", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-st-work-03", "prompt": "設定檔在哪？順便把 log level 調成 debug", "expected": "flash", "lang": "zh", "category": "v21-st", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-st-lite-01", "prompt": "Where is the retry config? Just tell me the file.", "expected": "flash_lite", "lang": "en", "category": "v21-st", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-lite-01", "prompt": "Read-only review of scripts/deploy.sh: list steps that would fail on a fresh host and suggest fixes. Do not modify anything.", "expected": "flash_lite", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-lite-02", "prompt": "Read-only: summarize what the migration in db/0042_add_index.py changes.", "expected": "flash_lite", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-lite-03", "prompt": "Read-only audit of auth/: which functions should change if we switch to argon2? Do not edit anything.", "expected": "flash_lite", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-lite-04", "prompt": "唯讀：整理 PR #12 修了哪些 bug，列出檔案就好", "expected": "flash_lite", "lang": "zh", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-work-01", "prompt": "Do not edit anything yet. Actually, fix the typo in README line 3.", "expected": "flash", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-work-02", "prompt": "Read-only research: check the latest release notes on the vendor docs site for breaking changes.", "expected": "flash", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-ro-work-03", "prompt": "Read-only first: find where the version is defined, then bump it to 2.1.0.", "expected": "flash", "lang": "en", "category": "v21-ro", "subagent_type": "mitosis-orchestrator:flash-lite-scout"}
+{"id": "p21-probe-00", "prompt": "How do I run the migrations? Then run them on staging.", "expected": "flash", "lang": "en", "category": "v21-probe"}
+{"id": "p21-probe-01", "prompt": "Tell me the command to run the tests, and run it too.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-02", "prompt": "Which command builds the docs? Build them.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-03", "prompt": "Check how to run the formatter and apply it to src/.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-04", "prompt": "What's the command to run the linter? Use it to clean up src/.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-05", "prompt": "怎麼跑測試？跑完把失敗的修掉", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-06", "prompt": "找出跑測試的指令並執行", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-07", "prompt": "Document how to run the e2e tests in docs/testing.md.", "expected": "flash", "lang": "en", "category": "v21-probe"}
+{"id": "p21-probe-08", "prompt": "Add a section to the README explaining how to run the tests.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-09", "prompt": "Write down the command to run the tests in CONTRIBUTING.md.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-10", "prompt": "Where is the changelog? Open a PR that bumps the version.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-11", "prompt": "Where is the feature branch? Check out a new branch from it.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-12", "prompt": "Do not modify anything yet. Where is the flaky test? Get it green.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-13", "prompt": "Where is the flaky test? Skip it for now.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-14", "prompt": "Is retry configured in client.py. Turn it off.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-15", "prompt": "不知道 log level 在哪設，找到後調成 debug", "expected": "flash", "lang": "zh", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-16", "prompt": "Where are the fixtures? The files under tests/data need regenerating; regenerate them.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-17", "prompt": "Which test is slow? Make it faster.", "expected": "flash", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-18", "prompt": "Would it be possible to see where the config is loaded?", "expected": "flash_lite", "lang": "en", "category": "v21-probe"}
+{"id": "p21-probe-19", "prompt": "I'd appreciate it if you checked whether the cache is enabled.", "expected": "flash_lite", "lang": "en", "category": "v21-probe"}
+{"id": "p21-probe-20", "prompt": "Where is the flaky test? Thanks!", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-21", "prompt": "Where is the version defined? The file path is enough.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-22", "prompt": "How do I run a single pytest test by node id here? Check pytest.ini.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
+{"id": "p21-probe-23", "prompt": "Which make target runs the integration tests?", "expected": "flash_lite", "lang": "en", "category": "v21-probe"}
+{"id": "p21-probe-24", "prompt": "請問執行 lint 要用哪個指令？", "expected": "flash_lite", "lang": "zh", "category": "v21-probe"}
+{"id": "p21-probe-25", "prompt": "What is the right way to run the dev server with hot reload? Read the README.", "expected": "flash_lite", "lang": "en", "subagent_type": "mitosis-orchestrator:flash-lite-scout", "category": "v21-probe"}
