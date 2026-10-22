@@ -643,6 +643,84 @@ def is_read_only_command(prompt: str) -> bool:
     return scout_command_is_read_only(text)[0]
 
 
+# Polite request frames: "Would you mind bumping X and making sure Y?" asks for work in gerunds,
+# which the imperative vocabulary above does not see. The -ing forms are built from the verb lists.
+_ING_DOUBLE = {"commit", "rerun", "format", "reformat", "submit", "tag", "drop", "plan", "strip", "wrap", "ship",
+               "stop", "map", "cut", "put", "set", "run", "pin", "log", "trim", "zip", "skip", "swap", "re-run", "reset", "spin", "split"}
+_POLITE_BASE_VERBS = (
+    "implement refactor rewrite edit modify patch fix delete remove rename replace insert append migrate "
+    "add apply bump commit push install uninstall reinstall wire set change update upgrade downgrade write create move "
+    "revert rollback merge rebase format reformat deploy publish release tag adjust tweak convert switch port lint "
+    "typecheck run rerun re-run execute profile benchmark measure build rebuild recompile regenerate reproduce "
+    "make_sure clean_up wire_up set_up roll_back double-check verify ensure test retest restart resolve "
+    "sync pin drop strip split extract tidy bring_up spin_up clear reset re-add"
+).split()
+
+
+def _ing(word: str) -> str:
+    head, sep, tail = word.partition("_")
+    sep = " " if sep else ""
+    if head.endswith("ie"):
+        head = head[:-2] + "y"
+    elif head.endswith("e") and not head.endswith("ee"):
+        head = head[:-1]
+    elif head in _ING_DOUBLE:
+        head += head[-1]
+    return head + "ing" + sep + tail
+
+
+_POLITE_BASE_ALT = "|".join(v.replace("_", " ") for v in _POLITE_BASE_VERBS)
+_POLITE_ING_ALT = "|".join(_ing(v) for v in _POLITE_BASE_VERBS)
+_POLITE_ADV = r"(?:(?:also|just|first|then|please|now|again)\s+)?"
+
+# Strong frames: the gerund or base verb after them is a request. "mind" keeps its force under a
+# negation ("don't mind bumping"); "mind not bumping" never matches because "not" blocks the gerund.
+_POLITE_STRONG_EN = (
+    r"\b(?:would you mind|do you mind|did you mind|mind|appreciate(?: it if you| you)?|go ahead with)\s+"
+    + _POLITE_ADV + r"(?:" + _POLITE_ING_ALT + r")\b|"
+    r"\b(?:could you be so kind as to|can you go ahead and|could you go ahead and|go ahead and|feel free to|"
+    r"it would be (?:great|nice|good|helpful) if you could|i'?d appreciate it if you could|"
+    r"i'?d appreciate it if you(?: could| would)?|i would appreciate it if you(?: could| would)?)\s+"
+    + _POLITE_ADV + r"(?:" + _POLITE_BASE_ALT + r")\b"
+)
+POLITE_STRONG_EN_RE = re.compile(_POLITE_STRONG_EN, re.IGNORECASE)
+# Weaker frames also open lookups ("When does it start running?"); a wh- or auxiliary question opening
+# the sentence, and any negation just before the frame, cancel them.
+POLITE_WEAK_EN_RE = re.compile(
+    r"\b(?:try|start|begin|keep|finish|continue|consider|proceed with)\s+(?:by\s+)?" + _POLITE_ADV
+    + r"(?:" + _POLITE_ING_ALT + r")\b",
+    re.IGNORECASE,
+)
+_POLITE_WEAK_OPEN_RE = re.compile(
+    r"^\s*(?:what|which|where|when|why|how|who|does|did|do|is|are|was|were|will|can)\b", re.IGNORECASE)
+_POLITE_WEAK_NEG_RE = re.compile(r"(?:n't|\bnot|\bnever|\bwithout|\bno)\s+(?:\w+\s+){0,2}$", re.IGNORECASE)
+_POLITE_CJK_FRAME = (r"(?:麻煩你|麻烦你|麻煩|麻烦|能不能幫我|能不能帮我|可以幫我|可以帮我|能不能幫忙|能不能帮忙|可以幫忙|可以帮忙|"
+                     r"幫忙|帮忙|請你|请你|勞煩|劳烦|拜託你|拜托你)")
+_POLITE_CJK_ACTION = (CJK_MUTATION_RE.pattern + r"|更新|清理|整理|調整|调整|重跑|重新|升|確保|确保|補|补|換|换|裝|装|"
+                      r"設定|设定|設置|设置|處理|处理|優化|优化|搬|移動|移动|發布|发布|部署|測試|测试|驗證|验证|跑|執行|执行|運行|运行|寫|写|改|刪|删|修")
+POLITE_CJK_RE = re.compile(
+    _POLITE_CJK_FRAME + r"(?:(?!說明|说明|解釋|解释|了解|介紹|介绍|哪|查|看|找|列出|告訴|告诉|是什麼|是什么|[。？?！!，,]).){0,20}?"
+    r"(?:" + _POLITE_CJK_ACTION + r")"
+)
+
+
+def find_polite_request(text: str) -> Optional[str]:
+    """Return the polite action request in text ("mind bumping", "麻煩你升級"), or None."""
+    stripped = _strip_negated_mutations(text)
+    m = POLITE_STRONG_EN_RE.search(stripped)
+    if m:
+        return m.group(0)
+    for m in POLITE_WEAK_EN_RE.finditer(stripped):
+        before = stripped[:m.start()]
+        sentence = before[max(before.rfind(c) for c in ".;!?\n") + 1:]
+        if not _POLITE_WEAK_OPEN_RE.match(sentence) and not _POLITE_WEAK_NEG_RE.search(before[-30:]):
+            return m.group(0)
+    m = POLITE_CJK_RE.search(stripped)
+    if m and not CJK_NEGATED_MUTATION_RE.search(stripped) and not _NEGATED_ACTION_CJK_RE.search(stripped):
+        return m.group(0)
+    return None
+
+
 # Prior confidence per rule. Explicit signals are near certain; the prompt
 # length fallbacks are guesses and are the cases a judge should take over.
 RULE_CONFIDENCE = {
@@ -663,6 +741,7 @@ RULE_CONFIDENCE = {
     "readonly-command": 0.8,
     "shell-mutation": 0.95,
     "trailing-imperative": 0.85,
+    "polite-request": 0.9,
     "default": 0.5,
 }
 
@@ -759,6 +838,7 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     Precedence (first match wins):
       1. flash-worker type                      -> flash
       2. mutation verbs in prompt               -> flash  (scout type is upgraded to worker)
+      2b. polite action request ("would you mind bumping...") -> flash
       3. flash-lite-scout type                  -> flash_lite
       4. Workspace branch/share                 -> flash
       5. heavy signals (tests, debug, trace...) -> flash  (beats lite keywords)
@@ -808,6 +888,10 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         upgrade_type = (f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE) if bare_type == SCOUT_TYPE else None
         return done(_rule_decision("flash", upgrade_type, "shell-mutation",
                                    f"shell mutation '{shell_mutation}'"))
+    polite = find_polite_request(text)
+    if polite:
+        upgrade_type = (f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE) if bare_type == SCOUT_TYPE else None
+        return done(_rule_decision("flash", upgrade_type, "polite-request", f"polite action request '{polite}'"))
     if bare_type == SCOUT_TYPE:
         return done(_rule_decision("flash_lite", None, "scout-type", "flash-lite-scout type"))
     if workspace in ("branch", "share"):

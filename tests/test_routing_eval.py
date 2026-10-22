@@ -21,6 +21,7 @@ HOLDOUT = Path(__file__).resolve().parent / "routing_holdout.jsonl"
 HOLDOUT_V2 = Path(__file__).resolve().parent / "routing_holdout_v2.jsonl"
 HOLDOUT_V3 = Path(__file__).resolve().parent / "routing_holdout_v3.jsonl"
 HOLDOUT_V4 = Path(__file__).resolve().parent / "routing_holdout_v4.jsonl"
+HOLDOUT_V5 = Path(__file__).resolve().parent / "routing_holdout_v5.jsonl"
 
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_eval", ROOT / "scripts" / "enforce-orchestrator.py")
 eo = importlib.util.module_from_spec(spec)
@@ -150,8 +151,25 @@ class TestRoutingHoldoutV4(unittest.TestCase):
         self.assertEqual(set(split.values()), {10}, split)
 
 
+class TestRoutingHoldoutV5(unittest.TestCase):
+    """v5 first scored once on 2026-10-22 against the 2.0 candidate rules: 37/40, 2 cost, 1 dangerous (v5-en-19, a polite gerund request also misrouted by 1.8.1, which scored 29/40, 10 cost, 1 dangerous). The polite-request rule was then written from new cases only; v5 is no longer blind."""
+
+    def test_no_worker_task_reaches_a_scout(self):
+        cases = load(HOLDOUT_V5)
+        matrix, misses = evaluate(cases)
+        failing = [m for m in misses if m[1] == "flash"]
+        self.assertEqual(failing, [], report("routing_holdout_v5", cases, matrix, misses))
+
+    def test_dataset_is_well_formed(self):
+        cases = load(HOLDOUT_V5)
+        self.assertEqual(len(cases), 40)
+        self.assertEqual(len({c["id"] for c in cases}), 40)
+        split = collections.Counter((c["lang"], c["expected"]) for c in cases)
+        self.assertEqual(set(split.values()), {10}, split)
+
+
 if __name__ == "__main__":
-    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3), ("routing_holdout_v4", HOLDOUT_V4)):
+    for name, path in (("routing_cases", CASES), ("routing_holdout", HOLDOUT), ("routing_holdout_v2", HOLDOUT_V2), ("routing_holdout_v3", HOLDOUT_V3), ("routing_holdout_v4", HOLDOUT_V4), ("routing_holdout_v5", HOLDOUT_V5)):
         if path.exists():
             data = load(path)
             print(report(name, data, *evaluate(data)), end="\n\n")

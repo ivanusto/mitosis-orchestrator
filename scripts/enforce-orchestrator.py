@@ -216,6 +216,9 @@ from mitosis_hook.routing import (  # noqa: F401,E402
     NEGATED_MUTATION_RE,
     NOUNISH_KEYWORDS,
     NUMBERED_RULE_RE,
+    POLITE_CJK_RE,
+    POLITE_STRONG_EN_RE,
+    POLITE_WEAK_EN_RE,
     QUESTION_RE,
     READ_ONLY_CONFIDENCE,
     READ_ONLY_RE,
@@ -250,6 +253,7 @@ from mitosis_hook.routing import (  # noqa: F401,E402
     find_shell_mutation,
     find_trailing_imperative,
     find_mutations,
+    find_polite_request,
     find_run_task,
 )
 from mitosis_hook.state import (  # noqa: F401,E402

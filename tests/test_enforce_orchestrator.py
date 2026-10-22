@@ -1684,6 +1684,56 @@ class TestTrailingImperativeAndShellMutation(unittest.TestCase):
         self.assertIsNone(eo.find_trailing_imperative("Where is it? Thanks."))
 
 
+class TestPoliteRequest(unittest.TestCase):
+    def _decide(self, prompt, **extra):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt, **extra})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+    def test_polite_gerund_request_is_a_task(self):
+        for prompt in (
+            "Would you mind bumping the lodash version and making sure the build still passes?",
+            "Do you mind rerunning the migrations and cleaning up the temp tables?",
+            "I'd appreciate it if you could clean up the cache dir.",
+            "Try updating the lockfile.",
+            "Go ahead with upgrading the base image.",
+            "麻煩你把 numpy 升到 2.1。",
+            "勞煩你整理 docs/ 底下的連結。",
+        ):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        d = self._decide("Would you mind bumping the version and committing?")
+        self.assertEqual((d.tier, d.rule), ("flash", "polite-request"))
+
+    def test_polite_request_upgrades_a_scout(self):
+        d = self._decide("Mind dropping the unused index and rerunning the seed?", subagent_type="flash-lite-scout")
+        self.assertEqual((d.tier, d.type_override is not None), ("flash", True))
+
+    def test_gerund_topics_and_negations_stay_lookups(self):
+        for prompt in (
+            "Which file handles retrying?",
+            "Where is the logic for updating the cache?",
+            "What's the bumping policy in renovate.json?",
+            "When does the job start running the migrations?",
+            "Would you mind not bumping anything, just report the current versions?",
+            "Please don't try updating the lockfile; just list the dependencies.",
+            "說明一下 retrying 的邏輯在哪",
+        ):
+            self.assertIsNone(eo.find_polite_request(prompt), prompt)
+
+    def test_gerund_forms(self):
+        for base, ing in (("run", "running"), ("set", "setting"), ("commit", "committing"), ("make sure", "making sure"),
+                          ("update", "updating"), ("clean up", "cleaning up"), ("rerun", "rerunning"),
+                          ("write", "writing"), ("remove", "removing"), ("add", "adding")):
+            self.assertIsNotNone(eo.find_polite_request(f"Would you mind {ing} the thing"), base)
+
+    def test_polite_rule_is_never_judged(self):
+        self.assertNotIn("polite-request", eo.JUDGEABLE_RULES)
+        self.assertEqual(eo.RULE_CONFIDENCE["polite-request"], 0.9)
+
+
 if __name__ == "__main__":
     unittest.main()
 

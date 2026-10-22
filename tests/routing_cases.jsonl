@@ -249,3 +249,33 @@
 {"id": "v8-trailing-ro-09", "prompt": "哪個檔案有 retry？先不要動，列出來就好", "expected": "flash_lite", "lang": "zh", "category": "trailing-readonly"}
 {"id": "v8-trailing-ro-10", "prompt": "Which function parses headers? Show me the signature.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
 {"id": "v8-trailing-ro-11", "prompt": "grep -rn TODO src | wc -l", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "p1-polite-flash-01", "prompt": "Would you mind pinning axios to 1.7.2 in package.json and re-running the install to refresh the lockfile?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-02", "prompt": "Do you mind renaming the env var API_HOST to SERVICE_HOST and updating the docker-compose file accordingly?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-03", "prompt": "I'd appreciate it if you could clean up the stale feature flags in config/flags.yaml and make sure nothing still reads them.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-04", "prompt": "Could you be so kind as to upgrade pydantic to v2 and fix whatever breaks?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-05", "prompt": "Feel free to refactor the retry helper in utils/net.py so it takes a backoff argument.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-06", "prompt": "Can you go ahead and delete the deprecated /v1/status route and its handler?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-07", "prompt": "It would be great if you could add a CI job that runs ruff on every push.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-08", "prompt": "Would you mind rewriting the README install section and committing the change?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-09", "prompt": "Go ahead with migrating the settings loader to pydantic-settings and rerunning the unit suite.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-10", "prompt": "Please start by installing the missing type stubs, then try fixing the mypy errors in app/models.py.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-11", "prompt": "Mind dropping the unused index in the migration script and rerunning the seed?", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-12", "prompt": "I'd appreciate you tidying up the imports in src/api/ and making sure the formatter is happy.", "expected": "flash", "lang": "en", "category": "polite-request"}
+{"id": "p1-polite-flash-13", "prompt": "麻煩你把 requirements.txt 裡的 numpy 升到 2.1 並重跑一次建置。", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-flash-14", "prompt": "能不能幫我把 logger 的輸出格式改成 JSON，再補一個測試？", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-flash-15", "prompt": "可以幫我清理 dist/ 底下過期的檔案，並確認 CI 設定沒有再引用它們嗎？", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-flash-16", "prompt": "勞煩你刪掉 scripts/old_deploy.sh，並把 README 裡的相關段落一併更新。", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-flash-17", "prompt": "請你把 config.toml 的 timeout 調成 30 秒，順便跑一下 lint。", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-flash-18", "prompt": "幫忙把 Dockerfile 的 base image 換成 python:3.12-slim，然後重新 build。", "expected": "flash", "lang": "zh", "category": "polite-request"}
+{"id": "p1-polite-lite-01", "prompt": "Which file handles retrying?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-02", "prompt": "Where is the logic for updating the cache?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-03", "prompt": "What's the bumping policy in renovate.json?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-04", "prompt": "Which module is responsible for rerunning failed jobs?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-05", "prompt": "Where does the code start parsing the config file?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-06", "prompt": "How does the worker decide when to stop retrying?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-07", "prompt": "What does the README say about cleaning up temp files?", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-08", "prompt": "Show me where the logging setup is defined; do not change anything.", "expected": "flash_lite", "lang": "en", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-09", "prompt": "說明一下 retrying 的邏輯在哪", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-10", "prompt": "哪個檔案負責 updating 快取的邏輯？", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-11", "prompt": "請你說明 config/retry.py 裡 backoff 的運作方式。", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
+{"id": "p1-polite-lite-12", "prompt": "可以幫我看一下哪個函式處理 token 過期嗎？", "expected": "flash_lite", "lang": "zh", "category": "polite-gerund-noun"}
