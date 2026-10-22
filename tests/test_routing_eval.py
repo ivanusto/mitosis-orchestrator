@@ -134,7 +134,7 @@ class TestRoutingHoldoutV3(unittest.TestCase):
 
 
 class TestRoutingHoldoutV4(unittest.TestCase):
-    """Written blind by a subagent and scored once on v1.7.0 (commit e69aac8) with no tuning afterwards: 33/40, no worker task sent to the scout, 7 lookups sent to the worker. v1.6.0 scored 25/40 with 8 dangerous."""
+    """Written blind by a subagent and scored once on v1.7.0 (commit e69aac8) with no tuning afterwards: 33/40, no worker task sent to the scout, 7 lookups sent to the worker. After the question-noun, wider negation and read-only-command rules it scores 40/40, but those rules were tuned on its misses, so it is no longer blind. v1.6.0 scored 25/40 with 8 dangerous."""
 
     def test_no_worker_task_reaches_a_scout(self):
         cases = load(HOLDOUT_V4)

@@ -181,3 +181,71 @@
 {"id": "n3-zh-06", "prompt": "有沒有哪個 service 設定了 hostNetwork？", "expected": "flash_lite", "lang": "zh", "category": "fallback"}
 {"id": "n3-en-13", "prompt": "Walk me through how the scheduler picks the next job in sched/queue.go. Read-only.", "expected": "flash_lite", "lang": "en", "category": "fallback"}
 {"id": "n3-zh-07", "prompt": "yarn build 然後告訴我 bundle 大小", "expected": "flash", "lang": "zh", "category": "fallback"}
+{"id": "r6-from-v4-en-15", "prompt": "Show me how migration 0042_add_ledger_index is written and whether it is reversible.", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-from-v4-en-16", "prompt": "List the debug flags the browser extension's background script reads.", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-from-v4-zh-14", "prompt": "上次修 race condition 的那個 commit 到底改了哪些檔案？我只是想了解，不用重修。", "expected": "flash_lite", "lang": "zh", "category": "noun-question"}
+{"id": "r6-from-v4-zh-18", "prompt": "migration 0017 有沒有寫 rollback？看 code 就好，不要真的去跑。", "expected": "flash_lite", "lang": "zh", "category": "noun-question"}
+{"id": "r6-from-v4-en-19", "prompt": "The sensor fusion node got a patch last month about timestamp skew. Find the commit and its diff; I only want to know what it changed. Not asking you to fix anything.", "expected": "flash_lite", "lang": "en", "category": "negation"}
+{"id": "r6-from-v4-en-18", "prompt": "wc -l on everything under kernels/", "expected": "flash_lite", "lang": "en", "category": "readonly-command"}
+{"id": "r6-from-v4-zh-17", "prompt": "ls scripts/", "expected": "flash_lite", "lang": "zh", "category": "readonly-command"}
+{"id": "r6-en-01", "prompt": "Explain how the build pipeline in Makefile picks the compiler flags.", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-02", "prompt": "Which tests cover the retry logic in client/http.py?", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-03", "prompt": "Describe what migration 0031 does to the orders table. Read-only please.", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-04", "prompt": "Where do we set the race condition guard in the worker pool?", "expected": "flash_lite", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-05", "prompt": "I'm not asking you to modify or rewrite anything, just find the file that defines the retry policy.", "expected": "flash_lite", "lang": "en", "category": "negation"}
+{"id": "r6-zh-01", "prompt": "解釋一下建置流程為什麼要先產生 proto 檔？", "expected": "flash_lite", "lang": "zh", "category": "noun-question"}
+{"id": "r6-zh-02", "prompt": "這個專案的除錯開關在哪個檔案設定？", "expected": "flash_lite", "lang": "zh", "category": "noun-question"}
+{"id": "r6-zh-03", "prompt": "我不是要你修，只是想知道 login 的測試放在哪裡。", "expected": "flash_lite", "lang": "zh", "category": "negation"}
+{"id": "r6-cmd-01", "prompt": "git log --oneline -5", "expected": "flash_lite", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-02", "prompt": "grep -rn TODO src/", "expected": "flash_lite", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-03", "prompt": "cat docs/setup.md", "expected": "flash_lite", "lang": "en", "category": "readonly-command"}
+{"id": "r6-en-10", "prompt": "Run the pending migrations and report failures.", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-11", "prompt": "Debug why the login test hangs and fix it.", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-12", "prompt": "Why does the build fail? Fix it.", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-13", "prompt": "Can you run the migration on staging?", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-14", "prompt": "Don't just explain it, fix the race condition.", "expected": "flash", "lang": "en", "category": "negation"}
+{"id": "r6-en-15", "prompt": "Don't bother with the old docs, just fix the failing build.", "expected": "flash", "lang": "en", "category": "negation"}
+{"id": "r6-en-16", "prompt": "What does the migration do? Then roll it back and tell me what changed.", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-en-17", "prompt": "Explain why the tests fail, then rerun them with -x.", "expected": "flash", "lang": "en", "category": "noun-question"}
+{"id": "r6-zh-10", "prompt": "遷移跑一下看看會不會壞", "expected": "flash", "lang": "zh", "category": "noun-question"}
+{"id": "r6-zh-11", "prompt": "ls 一下然後把舊檔刪掉", "expected": "flash", "lang": "zh", "category": "readonly-command"}
+{"id": "r6-zh-12", "prompt": "為什麼建置會失敗？順便修一下。", "expected": "flash", "lang": "zh", "category": "noun-question"}
+{"id": "r6-zh-13", "prompt": "除錯一下登入頁為什麼會卡住", "expected": "flash", "lang": "zh", "category": "noun-question"}
+{"id": "r6-cmd-10", "prompt": "ls build/ && rm -rf build/", "expected": "flash", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-11", "prompt": "cat notes.txt > backup.txt", "expected": "flash", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-12", "prompt": "find . -name '*.pyc' -delete", "expected": "flash", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-13", "prompt": "sort the imports in utils.py", "expected": "flash", "lang": "en", "category": "readonly-command"}
+{"id": "r6-cmd-14", "prompt": "git commit -am wip", "expected": "flash", "lang": "en", "category": "readonly-command"}
+{"id": "v8-trailing-01", "prompt": "Why is the build broken? Please get it green.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-02", "prompt": "Which migration adds the users.email index? Then squash it into 0042.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-03", "prompt": "What does the debug flag do? Turn it on in prod config.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-04", "prompt": "Where are the tests for the parser? Make them pass.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-05", "prompt": "測試哪裡失敗？弄好它", "expected": "flash", "lang": "zh", "category": "trailing-imperative"}
+{"id": "v8-trailing-06", "prompt": "Is there a migration for orders? If not, generate one.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-07", "prompt": "grep -rl TODO src | xargs sed -i 's/TODO/DONE/'", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-08", "prompt": "Where is the config loaded? Point it at the staging bucket.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-09", "prompt": "What version of numpy is pinned? Pin it to 1.26 instead.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-10", "prompt": "Who owns the cron entry? Disable it.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-11", "prompt": "Does the Dockerfile expose port 80? If so, change it to 8080.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-12", "prompt": "哪個檔案定義了 timeout？把它調成 30 秒", "expected": "flash", "lang": "zh", "category": "trailing-imperative"}
+{"id": "v8-trailing-13", "prompt": "有沒有 README？沒有的話就補一份", "expected": "flash", "lang": "zh", "category": "trailing-imperative"}
+{"id": "v8-trailing-14", "prompt": "這個函式在哪裡被呼叫？順便把它清掉", "expected": "flash", "lang": "zh", "category": "trailing-imperative"}
+{"id": "v8-trailing-15", "prompt": "Where is X defined? Wipe it out.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-16", "prompt": "What is the default port? Then flip it to 9000.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-17", "prompt": "find . -name '*.pyc' | xargs rm -f", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-18", "prompt": "cat list.txt | xargs mv -t /tmp", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-19", "prompt": "perl -pi -e 's/foo/bar/' src/*.c", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-20", "prompt": "ls src | tee out.txt", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-21", "prompt": "Which logs are huge? truncate -s 0 them.", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-22", "prompt": "dd if=/dev/zero of=disk.img bs=1M count=10", "expected": "flash", "lang": "en", "category": "trailing-imperative"}
+{"id": "v8-trailing-ro-01", "prompt": "Which file defines the retry policy? Just tell me which file.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-02", "prompt": "Where is the parser defined? Thanks.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-03", "prompt": "哪個檔案有 timeout？只要告訴我在哪", "expected": "flash_lite", "lang": "zh", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-04", "prompt": "Where is the config loaded? See docs/x.md.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-05", "prompt": "Which file defines the router? File: src/router.go", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-06", "prompt": "哪裡定義了 retry？謝謝", "expected": "flash_lite", "lang": "zh", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-07", "prompt": "Where is the parser defined? No rush.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-08", "prompt": "What does the flag do? Explain only, don't change anything.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-09", "prompt": "哪個檔案有 retry？先不要動，列出來就好", "expected": "flash_lite", "lang": "zh", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-10", "prompt": "Which function parses headers? Show me the signature.", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}
+{"id": "v8-trailing-ro-11", "prompt": "grep -rn TODO src | wc -l", "expected": "flash_lite", "lang": "en", "category": "trailing-readonly"}

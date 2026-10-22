@@ -163,6 +163,37 @@ class TestLintReproAndIndirectRequests(unittest.TestCase):
                 self.assertIsNone(eo.find_mutation(prompt))
 
 
+class TestReadOnlyQuestionRules(unittest.TestCase):
+    def _decide(self, prompt):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+    def test_question_noun_goes_to_scout(self):
+        d = self._decide("Show me how migration 0042_add_ledger_index is written and whether it is reversible.")
+        self.assertEqual((d.tier, d.rule), ("flash_lite", "question-noun"))
+        self.assertEqual(self._decide("List the debug flags the extension reads.").tier, "flash_lite")
+
+    def test_question_with_action_stays_on_worker(self):
+        for prompt in ("Can you run the migration on staging?", "Why does the build fail? Fix it.",
+                       "Explain the tests, then rerun them.", "為什麼建置會失敗？順便修一下。"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_negation_reaches_four_words_but_not_across_but(self):
+        self.assertEqual(self._decide("Find the commit. Not asking you to fix anything.").tier, "flash_lite")
+        self.assertEqual(self._decide("Don't bother with the docs, just fix the build.").tier, "flash")
+
+    def test_read_only_command(self):
+        for ok in ("ls scripts/", "wc -l on everything under kernels/", "git log --oneline -5"):
+            self.assertTrue(eo.is_read_only_command(ok), ok)
+        for bad in ("cat a > b", "find . -delete", "sort the imports in x.py", "git commit -am x", "ls && rm -rf x"):
+            self.assertFalse(eo.is_read_only_command(bad), bad)
+        self.assertEqual(self._decide("ls scripts/").rule, "readonly-command")
+
+
 class HookBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1597,6 +1628,60 @@ class TestMitosisMCPServer(unittest.TestCase):
         })
         self.assertTrue(res["result"]["isError"])
         self.assertIn("[Validation:", res["result"]["content"][0]["text"])
+
+
+class TestTrailingImperativeAndShellMutation(unittest.TestCase):
+    def _decide(self, prompt):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+    def test_question_then_action_clause_is_a_task(self):
+        for prompt in (
+            "Why is the build broken? Please get it green.",
+            "Which migration adds the users.email index? Then squash it into 0042.",
+            "Is there a migration for orders? If not, generate one.",
+            "Where is the config loaded? Point it at the staging bucket.",
+            "測試哪裡失敗？弄好它",
+            "有沒有 README？沒有的話就補一份",
+        ):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash", "trailing-imperative"), prompt)
+
+    def test_readonly_courtesy_and_reference_followups_stay_scout(self):
+        for prompt in (
+            "Which file defines the retry policy? Just tell me which file.",
+            "Where is the parser defined? Thanks.",
+            "Where is the parser defined? No rush.",
+            "Where is the config loaded? See docs/x.md.",
+            "Which file defines the router? File: src/router.go",
+            "哪裡定義了 retry？謝謝",
+            "哪個檔案有 timeout？只要告訴我在哪",
+        ):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_trailing_rules_are_never_judged(self):
+        self.assertNotIn("trailing-imperative", eo.JUDGEABLE_RULES)
+        self.assertNotIn("shell-mutation", eo.JUDGEABLE_RULES)
+        self.assertIn("trailing-imperative", eo.RULE_CONFIDENCE)
+        self.assertIn("shell-mutation", eo.RULE_CONFIDENCE)
+
+    def test_shell_mutation_in_pipelines(self):
+        for prompt in (
+            "grep -rl TODO src | xargs sed -i 's/TODO/DONE/'",
+            "find . -name '*.pyc' | xargs rm -f",
+            "perl -pi -e 's/foo/bar/' src/*.c",
+            "ls src | tee out.txt",
+            "dd if=/dev/zero of=disk.img bs=1M",
+        ):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash", "shell-mutation"), prompt)
+        self.assertEqual(self._decide("grep -rn TODO src | wc -l").tier, "flash_lite")
+        self.assertIsNone(eo.find_shell_mutation("sed -n 1,5p file.txt"))
+        self.assertIsNone(eo.find_trailing_imperative("Where is it? Thanks."))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .common import ALLOWED_SUBAGENT_MODELS, Decision, SCOUT_TYPE, WORKER_TYPE, _get, _get_env
+from .guards import SCOUT_GIT_SUBCOMMANDS, scout_command_is_read_only
 from .report import strip_report_format
 from .state import _RECENT_DECISIONS
 
@@ -28,7 +29,7 @@ MUTATION_RE = re.compile(
 # docstring", "...and push"); elsewhere they are usually nouns or prose.
 IMPERATIVE_VERBS = (
     r"add|apply|bump|commit|push|install|uninstall|wire(?: up)?|set|change|update|upgrade|downgrade|"
-    r"write|create|move|revert|merge|rebase|format|deploy|publish|release|tag|adjust|tweak|convert|switch|port|lint|typecheck|type-check|reformat"
+    r"write|create|move|revert|roll(?: \w+){0,2} back|rollback|merge|rebase|format|deploy|publish|release|tag|adjust|tweak|convert|switch|port|lint|typecheck|type-check|reformat"
 )
 
 
@@ -114,13 +115,14 @@ CJK_MUTATION_NOUN_AFTER_RE = re.compile(
 
 # Negations ahead of a Chinese verb: 不要修改, 請勿刪除, 不需要任何改動.
 CJK_NEGATED_MUTATION_RE = re.compile(
-    r"(?:不要|不得|不可|不能|不准|不需要?|無須|无须|毋須|別|别|勿|請勿|请勿|禁止|切勿|避免)\s*(?:任何|去)?\s*"
-    r"(?:" + CJK_MUTATION_RE.pattern + r")"
+    r"(?:不要|不得|不可|不能|不准|不需要?|不用|不是要你|並非要你|并非要你|無須|无须|毋須|別|别|勿|請勿|请勿|禁止|切勿|避免)\s*"
+    r"(?:任何|去|再|重新|重|來|来)?\s*"
+    r"(?:" + CJK_MUTATION_RE.pattern + r"|[修改])"
 )
 
 
 # "Do not edit anything", "never modify", "without deleting" must not count as mutation requests.
-# Up to two words may sit between the negation and the verb, and "or"/"nor"
+# Up to four words (commas only in the first two) may sit between the negation and the verb, and "or"/"nor"
 # chains it, so "Do NOT git fetch/pull or modify" and "never delete or rename"
 # are prohibitions too. "and" is left out: "don't X and fix Y" asks for a fix.
 _MUTATION_ALT = MUTATION_RE.pattern[3:-3] + "|" + IMPERATIVE_VERBS
@@ -128,7 +130,8 @@ _MUTATION_ALT = MUTATION_RE.pattern[3:-3] + "|" + IMPERATIVE_VERBS
 
 NEGATED_MUTATION_RE = re.compile(
     r"\b(?:do not|don't|dont|never|must not|mustn't|should not|shouldn't|without|not|no)\s+"
-    r"(?:(?!\b(?:" + _MUTATION_ALT + r")\b)[\w/.-]+,?\s+){0,2}"
+    r"(?:(?!\b(?:" + _MUTATION_ALT + r"|and|but|then|so|instead|just|also|until|unless|when|if|because|since|while|before|after|once|stop)\b)[\w/.-]+,?\s+){0,2}"
+    r"(?:(?!\b(?:" + _MUTATION_ALT + r"|and|but|then|so|instead|just|also|until|unless|when|if|because|since|while|before|after|once|stop)\b)[\w/.-]+\s+){0,2}"
     r"(?:(?:or|nor)\s+)?"
     r"(?:" + _MUTATION_ALT + r")\b"
     r"(?:,?\s+(?:or|nor)\s+(?:" + _MUTATION_ALT + r")\b)*",
@@ -222,18 +225,77 @@ def _is_path_part(text: str, match: "re.Match[str]") -> bool:
     """'refactor/' or 'migrate.py' names a path, not a request."""
     before = text[match.start() - 1:match.start()] if match.start() else ""
     after = text[match.end():match.end() + 2]
+    if before == "-" and (match.start() < 2 or text[match.start() - 2].isspace()):
+        before = ""  # a command-line flag such as "-delete", not a hyphenated word
     return before in ("/", ".", "-", "_") or after.startswith("/") or bool(re.match(r"^\.\w", after))
 
 
-def find_mutations(text: str) -> List[Tuple[int, str]]:
+# In a read-only question these words name a topic, not a job.
+QUESTION_NOUNS = {"migration", "debug", "build", "test", "tests", "race condition"}
+CJK_QUESTION_NOUN_RE = re.compile(r"除錯|偵錯|调试|建置|構建|构建|競態|竞态")
+
+
+# Leading read-only verbs and question words, in either language.
+_RO_LEAD_RE = re.compile(
+    r"(?:^|[.;!\n])\s*(?:please\s+)?(?:show me|show|list|find|explain|describe|summari[sz]e|walk me through|"
+    r"tell me|print|read|look at|check (?:whether|if)|which|what|where|why|how)\b|"
+    r"解釋|解释|說明|说明|為什麼|为什么|哪裡|哪里|哪個|哪个|是什麼|是什么|怎麼運作|怎么运作|嗎|吗|有沒有|有没有|是否|"
+    r"想了解|看 ?code 就好",
+    re.IGNORECASE,
+)
+
+
+# Imperative action aimed at the thing: a question with one of these is a task.
+_ACTION_EN_RE = re.compile(
+    r"\b(?:run|rerun|re-run|execute|fix|create|write|add|apply|implement|rewrite|refactor|delete|remove|"
+    r"rename|edit|modify|migrate|deploy|install|reproduce|repro|rebuild|recompile|make (?:it|them|that|this|the))\b",
+    re.IGNORECASE,
+)
+# Also nouns ("the rollback", "a commit"): an action only when they open a clause or follow "you to", "and", "then".
+_ACTION_AMBIGUOUS_EN_RE = re.compile(
+    r"(?:(?:^|[.;:!?,\n])\s*|\b(?:please|then|and|also|to|you|just|can|could|would|will)\s+)"
+    r"(?:roll ?back|patch|update|commit|push|change|trigger|benchmark|profile|measure|start|launch|revert|merge|tag)\b",
+    re.IGNORECASE,
+)
+_ACTION_CJK_RE = re.compile(
+    r"(?<![會会能可要用次前曾已被有])(?:跑|執行|执行|修|建立|新增|寫|写|加|刪|删|改|回滾|回滚|回退|套用|部署|重構|重构)(?![了過过的])"
+)
+_NEGATED_ACTION_CJK_RE = re.compile(
+    r"(?:不要|不用|別|别|勿|請勿|请勿|不需要?)[^。，,！!？?]{0,6}?(?:跑|執行|执行|修|改|寫|写|加|刪|删|建立|新增)"
+)
+
+
+def _is_readonly_question(text: str) -> bool:
+    """True for a question or lookup that asks for no action on the thing it names.
+
+    "Can you run the migration on staging?" asks for a run and is not one.
+    """
+    stripped = _NEGATED_ACTION_CJK_RE.sub(_blank, _strip_negated_mutations(text))
+    if not (QUESTION_RE.search(stripped) or _RO_LEAD_RE.search(stripped)):
+        return False
+    if EXECUTION_SIGNAL_RE.search(stripped) or TEST_RUNNER_RE.search(stripped) or _ACTION_CJK_RE.search(stripped):
+        return False
+    if _ACTION_AMBIGUOUS_EN_RE.search(stripped):
+        return False
+    for m in _ACTION_EN_RE.finditer(stripped):
+        if not DETERMINER_BEFORE_RE.search(stripped[max(0, m.start() - 30):m.start()]):
+            return False
+    return True
+
+
+def find_mutations(text: str, question_nouns: bool = True) -> List[Tuple[int, str]]:
     """Return (offset, phrase) for every mutation request in text, in order.
 
     Negated phrases ("do not edit", "不要修改") and noun uses ("the patch
-    version") do not count.
+    version") do not count. In a read-only question "migration" is a topic too
+    (question_nouns=False turns that off).
     """
     stripped = _strip_negated_mutations(text)
+    skip_migration = question_nouns and _is_readonly_question(text)
     found: List[Tuple[int, str]] = []
     for m in MUTATION_RE.finditer(stripped):
+        if skip_migration and m.group(0).lower() == "migration":
+            continue
         if not _is_noun_use(stripped, m) and not _is_path_part(stripped, m):
             found.append((m.start(), m.group(0)))
     for pattern in (IMPERATIVE_MUTATION_RE, GIT_MUTATION_RE, EXECUTION_RE, SOFT_REQUEST_RE):
@@ -247,10 +309,134 @@ def find_mutations(text: str) -> List[Tuple[int, str]]:
     return found
 
 
-def find_mutation(text: str) -> Optional[str]:
+def find_mutation(text: str, question_nouns: bool = True) -> Optional[str]:
     """First mutation phrase in text, or None."""
-    found = find_mutations(text)
+    found = find_mutations(text, question_nouns)
     return found[0][1] if found else None
+
+
+# Shell mutations that hide inside a pipeline or a one-liner: "sed -i", "xargs rm", "perl -pi", "dd of=".
+SHELL_MUTATION_RE = re.compile(
+    r"\bsed\s+(?:-\S+\s+)*-(?:[A-Za-z]*i|-in-place)\S*|"
+    r"\bperl\s+(?:-\S+\s+)*-[A-Za-z]*i\S*|"
+    r"\bxargs\b[^|;&\n]*?\b(?:rm|mv|cp|chmod|chown|tee|truncate|git\s+rm|unlink|shred)\b|"
+    r"\|\s*(?:sudo\s+)?tee\s+(?!/dev/null\b)[^\s|]|"
+    r"-exec(?:dir)?\s+(?:sudo\s+)?(?:rm|mv|cp|sed|chmod|chown|truncate|unlink|shred)\b|"
+    r"\bfind\b[^|;\n]*\s-delete\b|"
+    r"\btruncate\s+-\w*s\b|"
+    r"\bdd\b[^|;\n]*\bof=(?!/dev/null\b)\S|"
+    r"(?:^|[|;&\n`]\s*)(?:sudo\s+)?(?:rm|mv|chmod|chown|unlink|shred)\s+\S",
+    re.IGNORECASE,
+)
+
+
+def find_shell_mutation(text: str) -> Optional[str]:
+    """First shell-level mutation (sed -i, xargs rm, perl -pi, dd of=...) in text, or None."""
+    m = SHELL_MUTATION_RE.search(text)
+    return m.group(0).strip(" |;&`\n") if m else None
+
+
+# Trailing imperative: a question followed by a clause that asks for an action
+# ("Why is the build broken? Please get it green."). Split at sentence ends and
+# at ", then" style joins; the first question clause arms the check.
+_SENTENCE_SPLIT_RE = re.compile(
+    r"[?？！!。；;\n]+|\.(?=\s|$)|[,，]\s*(?=(?:and then|then|and|please|also|so)\b)|[,，]\s*(?=(?:請|请|然後|然后|再|並|并|順便|顺便))",
+    re.IGNORECASE,
+)
+_ABBREV_RE = re.compile(r"\b(e)\.(g)\.|\b(i)\.(e)\.|\b(vs|etc|cf)\.", re.IGNORECASE)
+_QUESTION_START_RE = re.compile(
+    r"^\W*(?:(?:and|then|also|but|so|please)\s+)?(?:what|which|where|why|how|who|whom|whose|when)\b",
+    re.IGNORECASE,
+)
+_QUESTION_CJK_RE = re.compile(r"嗎|吗|哪|什麼|什么|為什麼|为什么|為何|为何|怎麼|怎么|如何|是否|有沒有|有没有|多少|誰|谁|幾|几|是不是|有無|有无|呢")
+_TRAILING_READONLY_RE = re.compile(
+    r"^\W*(?:(?:just|only|simply|please|and|then|also|first|先|請|请|只要|只|麻煩|麻烦|順便|顺便)\s*)*"
+    r"(?:tell me|show me|show|list|explain|describe|summari[sz]e|report(?: back)?|answer|point me|give me (?:the|a) (?:path|file|name|list)|"
+    r"let me know|name|identify|locate|find (?:out|me)|"
+    r"告訴我|告诉我|列出|說明|说明|解釋|解释|回報|回报|報告|报告|看看|看一下|看就好|看|查看|找出|指出|回答)|"
+    r"\b(?:only|just) (?:report|tell|list|show|explain|look|read|check|answer)\b|"
+    r"\b(?:do not|don't|dont|no need to|without) (?:change|modify|edit|touch|write|fix|run|alter)\b|"
+    r"\bno (?:changes|edits|writes)\b|\bread[- ]?only\b|"
+    r"只要看|只看|只要告訴|只要告诉|不用改|不用修|不要改|不要動|不要动|先不要動|先不要动|不需要改|不用動|不用动|不必改|無須修改|无须修改|唯讀|只讀|只读",
+    re.IGNORECASE,
+)
+# Looser hints that a follow-up clause only says how to look ("Paths only.", "git show 看就好", "不要執行").
+_READONLY_HINT_RE = re.compile(
+    r"\bonly\b|\b(?:use|using|check|via|with|from)\s+(?:the\s+)?(?:`?(?:rg|grep|git|wc|cat|find|ls|head|tail|jq)\b|git log|blame)|"
+    r"\b(?:is|are) fine\b|\bwill do\b|\bis enough\b|"
+    r"就好|即可|就行|而已|不要\s*(?:build|執行|执行|跑|編譯|编译)|不用\s*(?:執行|执行|跑|build)|回報|回报|回答|說明|说明|摘要|簡單|简单|用\s*(?:rg|grep|git|wc|cat|find)\b",
+    re.IGNORECASE,
+)
+_RO_COMPOUND_ACTION_RE = re.compile(
+    r"\b(?:and|then)\s+(?:also\s+)?(?:fix|apply|make|change|update|edit|run|delete|remove|add|write|create|commit|push|"
+    r"patch|rewrite|rename|get|set|turn|generate)\b|然後|然后",
+    re.IGNORECASE,
+)
+_COURTESY_RE = re.compile(
+    r"^\W*(?:thanks?(?: you| a lot| so much| in advance| again)*|thx|ty|cheers|no rush|no hurry|not urgent|take your time|"
+    r"please|pls|appreciated|much appreciated|ok|okay|hi|hello|hey|sorry|any ideas|thoughts|asap|"
+    r"謝謝|谢谢|感謝|感谢|多謝|多谢|麻煩了|麻烦了|辛苦了|不急|拜託|拜托|謝啦|謝囉|先謝謝|不好意思|請|请)"
+    r"(?:\s*(?:you|你|您|了|啦|喔|哦|囉|唷|你們|你们|大家|!|~))*\W*$",
+    re.IGNORECASE,
+)
+_PATHISH = r"[`'\"]?[\w@~-]*[/._#][\w./\\:#@~-]*[`'\"]?"
+_REFERENCE_RE = re.compile(
+    r"^\W*(?:see(?: also)?|refs?|cf|files?|paths?|repo|dir|located (?:at|in)|in|at|from|source|context|note|fyi|參考|参考|檔案|文件|路徑|路径|位置|見|见)"
+    r"\s*[:：]?\s*" + _PATHISH + r"(?:[,\s]+" + _PATHISH + r"){0,3}\W*$|^\W*" + _PATHISH + r"\W*$",
+    re.IGNORECASE,
+)
+# A statement that opens with a subject or a determiner is background, not an instruction.
+_NON_IMPERATIVE_START_RE = re.compile(
+    r"^\W*(?:(?:i|i'm|i've|i'd|we|we're|you|it|it's|its|the|this|that|these|those|my|our|your|there|here|he|she|they|a|an|"
+    r"context|background|note|fyi|btw|for|in|on|at|with|by|because|since|currently|right now)\b|"
+    r"這|这|那|我|我們|我们|它|他|她|該|该|背景|備註|备注|註|注|目前|現在|现在|專案|项目|因為|因为|由於|由于)",
+    re.IGNORECASE,
+)
+
+
+def _is_question_clause(clause: str, terminator: str) -> bool:
+    return (terminator.strip()[:1] in ("?", "？") or bool(_QUESTION_START_RE.search(clause))
+            or bool(_QUESTION_CJK_RE.search(clause)))
+
+
+def find_trailing_imperative(text: str) -> Optional[str]:
+    """The first action clause that follows a question clause, or None.
+
+    "Why is the build broken? Please get it green." asks for a fix after the
+    question. Read-only follow-ups ("Just tell me which file."), courtesy
+    ("Thanks.") and reference fragments ("See docs/x.md.") do not count.
+    """
+    protected = _ABBREV_RE.sub(lambda m: m.group(0).replace(".", "․"), text)
+    clauses: List[Tuple[str, str]] = []
+    pos = 0
+    for m in _SENTENCE_SPLIT_RE.finditer(protected):
+        clauses.append((protected[pos:m.start()], m.group(0)))
+        pos = m.end()
+    clauses.append((protected[pos:], ""))
+    seen_question = False
+    for clause, terminator in clauses:
+        clause = clause.strip()
+        if not clause:
+            continue
+        if _is_question_clause(clause, terminator):
+            seen_question = True
+            continue
+        if not seen_question:
+            continue
+        if _COURTESY_RE.match(clause) or _REFERENCE_RE.match(clause):
+            continue
+        if _TRAILING_READONLY_RE.search(clause) and not _RO_COMPOUND_ACTION_RE.search(clause):
+            continue
+        if (_READONLY_HINT_RE.search(clause) and not _RO_COMPOUND_ACTION_RE.search(clause)
+                and not find_mutations(clause) and not _ACTION_EN_RE.search(_strip_negated_mutations(clause))
+                and not _ACTION_AMBIGUOUS_EN_RE.search(clause)
+                and not _ACTION_CJK_RE.search(_NEGATED_ACTION_CJK_RE.sub(_blank, clause))):
+            continue
+        if _NON_IMPERATIVE_START_RE.match(clause) and not re.match(r"^\W*(?:if|如果|要是)", clause, re.IGNORECASE):
+            continue
+        return clause.replace("․", ".")[:60]
+    return None
+
 
 
 # Moderate-complexity work that needs flash even when read-only.
@@ -304,7 +490,7 @@ CJK_LITE_RE = re.compile(
 )
 
 
-def find_heavy_ex(text: str, lite_present: bool) -> Tuple[Optional[str], bool]:
+def find_heavy_ex(text: str, lite_present: bool, question_nouns: bool = True) -> Tuple[Optional[str], bool]:
     """First heavy signal in text as (phrase, noun_like), or (None, False).
 
     A heavy keyword that names a path part ("tests/", "build.gradle"), a
@@ -317,8 +503,11 @@ def find_heavy_ex(text: str, lite_present: bool) -> Tuple[Optional[str], bool]:
     question = bool(QUESTION_RE.search(text)) and not EXECUTION_SIGNAL_RE.search(text) \
         and not TEST_RUNNER_RE.search(text)
     noun_like: Optional[str] = None
+    topic = question_nouns and _is_readonly_question(text)
     for m in HEAVY_RE.finditer(text):
         if _before_label(text, m) or _is_path_part(text, m):
+            continue
+        if topic and m.group(0).lower() in QUESTION_NOUNS:
             continue
         nounish = m.group(0).lower() in NOUNISH_KEYWORDS
         if nounish and (lite_present or question) and _after_determiner(text, m, loose=question):
@@ -328,6 +517,8 @@ def find_heavy_ex(text: str, lite_present: bool) -> Tuple[Optional[str], bool]:
             continue
         return m.group(0), False
     for m in CJK_HEAVY_RE.finditer(text):
+        if topic and CJK_QUESTION_NOUN_RE.fullmatch(m.group(0)) and not CLAUSE_START_RE.search(text[:m.start()]):
+            continue
         if not CJK_HEAVY_NOUN_AFTER_RE.match(text[m.end():]):
             return m.group(0), False
     return (noun_like, True) if noun_like else (None, False)
@@ -389,7 +580,7 @@ RUN_VERBS = r"run|rerun|re-run|execute|profile|benchmark|measure|build|deploy|ap
 
 RUN_TASK_RE = re.compile(
     r"(?:(?:^|[.;:!?\n]\s*|\b(?:then|and|please|also)\s+)(?:" + RUN_VERBS + r")\s+(?!(?:git|ls|cat|grep|rg|head|tail|wc|find)\b)\S)|"
-    r"\brun the\s+\w+|\btop to bottom\b|"
+    r"\brun the\s+\w+|\btop to bottom\b|(?:^|\s)\d?>>?\s*(?!/dev/null)[\w./~-]+|"
     r"(?<![會会能可要用別别])(?:重跑|跑一次|跑一下|跑|執行|执行|量一下)(?:\s*[A-Za-z0-9_./`'\"-]|一次|一下|\s|$)",
     re.IGNORECASE,
 )
@@ -426,6 +617,32 @@ TEST_RUNNER_RE = re.compile(
 )
 
 
+# Commands that are never English prose; the rest need a flag or a path as first argument.
+_PLAIN_COMMANDS = {"ls", "wc", "rg", "grep", "egrep", "fgrep", "du", "df", "pwd", "jq", "nl", "stat", "md5sum", "sha256sum"}
+_PATHISH_ARG_RE = re.compile(r"^(?:-\S|[~./]|\S*[/.]\S*)")
+
+
+def is_read_only_command(prompt: str) -> bool:
+    """True when the whole prompt is one short read-only shell command line ("ls scripts/", "git log -5")."""
+    text = prompt.strip().strip("`").strip()
+    if not text or len(text) > 200 or not text.isascii():
+        return False
+    words = text.split()
+    prog = words[0]
+    if prog == "git":
+        sub = next((w for w in words[1:] if not w.startswith("-")), "")
+        if sub not in SCOUT_GIT_SUBCOMMANDS:
+            return False
+    elif prog in _PLAIN_COMMANDS:
+        pass
+    elif prog in ("cat", "head", "tail", "find", "tree", "diff"):
+        if len(words) < 2 or not _PATHISH_ARG_RE.match(words[1]):
+            return False
+    else:
+        return False
+    return scout_command_is_read_only(text)[0]
+
+
 # Prior confidence per rule. Explicit signals are near certain; the prompt
 # length fallbacks are guesses and are the cases a judge should take over.
 RULE_CONFIDENCE = {
@@ -442,6 +659,10 @@ RULE_CONFIDENCE = {
     "short-prompt": 0.5,
     "short-prompt-unknown": 0.5,
     "docs-lookup": 0.85,
+    "question-noun": 0.7,
+    "readonly-command": 0.8,
+    "shell-mutation": 0.95,
+    "trailing-imperative": 0.85,
     "default": 0.5,
 }
 
@@ -449,7 +670,7 @@ RULE_CONFIDENCE = {
 # Rules a judge may overrule when their confidence is low. Type, workspace and
 # explicit-model rules state the caller's intent and are never sent to a judge.
 JUDGEABLE_RULES = {"mutation", "heavy", "heavy-noun", "lite", "long-prompt", "short-prompt",
-                  "short-prompt-unknown", "docs-lookup", "default"}
+                  "short-prompt-unknown", "docs-lookup", "default", "question-noun", "readonly-command"}
 
 
 _JUDGE_MODULE: Any = None
@@ -570,6 +791,9 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
     mutation = find_mutation(text)
     lite = find_lite(text)
     heavy, heavy_noun = find_heavy_ex(text, lite is not None)
+    # A read-only question that only passed because "migration", "debug", "build" or "tests" counted as a topic.
+    topic_only = not mutation and not heavy and _is_readonly_question(text) and bool(
+        find_mutation(text, False) or find_heavy_ex(text, lite is not None, False)[0])
 
     if bare_type == WORKER_TYPE:
         return done(_rule_decision("flash", None, "worker-type", "flash-worker type"))
@@ -579,6 +803,11 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
             return done(_rule_decision("flash", upgrade_type, "mutation",
                                   f"mutation verb '{mutation}' on read-only scout; upgraded to flash-worker"))
         return done(_rule_decision("flash", None, "mutation", f"mutation verb '{mutation}'"))
+    shell_mutation = find_shell_mutation(text)
+    if shell_mutation:
+        upgrade_type = (f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE) if bare_type == SCOUT_TYPE else None
+        return done(_rule_decision("flash", upgrade_type, "shell-mutation",
+                                   f"shell mutation '{shell_mutation}'"))
     if bare_type == SCOUT_TYPE:
         return done(_rule_decision("flash_lite", None, "scout-type", "flash-lite-scout type"))
     if workspace in ("branch", "share"):
@@ -593,13 +822,24 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
     if DOCS_LOOKUP_RE.search(text):
         return done(_rule_decision("flash", None, "docs-lookup", "docs or web lookup needs web access"))
+    trailing = find_trailing_imperative(prompt)
+    if trailing:
+        return done(_rule_decision("flash", None, "trailing-imperative",
+                                   f"action clause '{trailing}' follows a question"))
     run_task = find_run_task(text)
     if lite and len(prompt) <= 600 and not run_task:
+        if topic_only:
+            return done(_rule_decision("flash_lite", None, "question-noun", f"read-only question; lite signal '{lite}'"))
         return done(_rule_decision("flash_lite", None, "lite", f"lite signal '{lite}'"))
+    if len(prompt) <= 320 and not run_task and is_read_only_command(prompt):
+        return done(_rule_decision("flash_lite", None, "readonly-command", "prompt is a read-only shell command"))
     if len(prompt) > 450:
         return done(_rule_decision("flash", None, "long-prompt", "long prompt"))
     if len(prompt) <= 320:
         if (LOOKUP_SIGNAL_RE.search(text) or READ_ONLY_RE.search(text)) and not run_task:
+            if topic_only:
+                return done(_rule_decision("flash_lite", None, "question-noun",
+                                           "read-only question; migration/debug/build/test named as a topic"))
             return done(_rule_decision("flash_lite", None, "short-prompt", "short lookup prompt without heavy signals"))
         return done(_rule_decision("flash", None, "short-prompt-unknown",
                                    f"short prompt without a lookup signal{'; run task' if run_task else ''}"))

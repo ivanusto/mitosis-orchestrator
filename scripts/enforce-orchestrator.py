@@ -206,6 +206,8 @@ from mitosis_hook.routing import (  # noqa: F401,E402
     IMPERATIVE_MUTATION_RE,
     IMPERATIVE_VERBS,
     JUDGEABLE_RULES,
+    QUESTION_NOUNS,
+    is_read_only_command,
     LABEL_NOUN_AFTER_RE,
     LITE_RE,
     LOOKUP_SIGNAL_RE,
@@ -245,6 +247,8 @@ from mitosis_hook.routing import (  # noqa: F401,E402
     find_heavy_ex,
     find_lite,
     find_mutation,
+    find_shell_mutation,
+    find_trailing_imperative,
     find_mutations,
     find_run_task,
 )
