@@ -121,15 +121,15 @@ class StubJudge:
 class TestJudgeLayer(EnvCase):
     def use(self, verdict):
         stub = StubJudge(verdict)
-        eo._JUDGE_MODULE = stub
-        self.addCleanup(setattr, eo, "_JUDGE_MODULE", None)
+        eo.routing._JUDGE_MODULE = stub
+        self.addCleanup(setattr, eo.routing, "_JUDGE_MODULE", None)
         os.environ["MITOSIS_JUDGE_URL"] = "http://judge.test/v1"
         return stub
 
     def test_judge_off_by_default(self):
         stub = StubJudge(("flash", 0.99))
-        eo._JUDGE_MODULE = stub
-        self.addCleanup(setattr, eo, "_JUDGE_MODULE", None)
+        eo.routing._JUDGE_MODULE = stub
+        self.addCleanup(setattr, eo.routing, "_JUDGE_MODULE", None)
         d = eo.decide_subagent({"prompt": "Which file defines UserRepository?"})
         self.assertEqual((d.tier, d.source), ("flash_lite", "rule"))
         self.assertEqual(stub.calls, [])

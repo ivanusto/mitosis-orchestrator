@@ -48,7 +48,7 @@ jobs:
           vermin --no-tips --violations -t=3.8-
           scripts/enforce-orchestrator.py scripts/mitosis-mcp-server.py scripts/mitosis_judge.py
           scripts/mitosis-cost-report.py scripts/smoke-claude.py scripts/mitosis_generated.py
-          scripts/mitosis_otel.py scripts/mitosis-statusline.py
+          scripts/mitosis_otel.py scripts/mitosis-statusline.py scripts/mitosis_hook
 
   hooks-py38:
     # Hooks run under whatever python3 the user has; 3.8 is the documented floor.

@@ -178,11 +178,11 @@ class StateLockTest(unittest.TestCase):
         }
         calls = []
         real = eo.save_state
-        eo.save_state = lambda pl, st: (calls.append(1), real(pl, st))[1]
+        eo.claude.save_state = lambda pl, st: (calls.append(1), real(pl, st))[1]
         try:
             out = eo.handle_subagent_stop(payload)
         finally:
-            eo.save_state = real
+            eo.claude.save_state = real
         self.assertEqual(out.get("decision"), "block")
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.read_state()["report_nagged"], ["a1"])
