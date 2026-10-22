@@ -2361,3 +2361,194 @@ class TestOpeningVerbsPermissionAndWhereFrame(_ScoutDecideMixin, unittest.TestCa
     def test_feel_free_to_run_is_permission(self):
         self.assertEqual(self._decide("Feel free to run `ls -R docs/`. Which pages mention the CLI?").tier, "flash_lite")
         self.assertEqual(self._decide("Feel free to bump the version in setup.py.").tier, "flash")
+
+
+class TestRouting23Gaps(_ScoutDecideMixin, unittest.TestCase):
+    def _untyped(self, prompt):
+        saved = os.environ.pop("MITOSIS_JUDGE_URL", None)
+        try:
+            return eo.decide_subagent({"prompt": prompt})
+        finally:
+            if saved is not None:
+                os.environ["MITOSIS_JUDGE_URL"] = saved
+
+    def test_scout_edit_verb_with_plain_object_is_an_action(self):
+        for prompt in ("Swap pyyaml for tomllib in config/loader.py.", "Pin django to 4.2.11 in requirements.txt.",
+                       "Throttle the poller to 5 req/s.", "Sort imports in app/main.py.", "Cap retries at 5 in clients/http.py.",
+                       "Reroute traffic to the replica in db/pool.py.", "Cache the schema lookup in loader.py.",
+                       "No need to look further, just pin numpy to 1.26 in requirements.txt."):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_scout_noun_phrase_openers_stay_lookups(self):
+        for prompt in ("Callers of parse_row in loader.py", "Usage of retry_call in clients/", "Owners for api/",
+                       "Docs for settings.py", "Imports in models/__init__.py", "Tests covering parse_row",
+                       "Cache layers in the repo?", "Thread safety of loader.py?", "Retry logic in clients/",
+                       "Where is the cache cleared in loader.py", "Pin versions for numpy?",
+                       "No need to grep, just tell me the default port in settings.py."):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_chinese_code_edit_verbs_outside_the_ba_construction(self):
+        for prompt in ("統一 error 格式，全部回 JSON。", "收斂 services/ 的重試邏輯。", "攤平 config 的巢狀區塊，一層就好。",
+                       "封裝 Redis 連線到 cache/client.py。", "汰換 scripts/deploy.sh 裡的 curl 呼叫。",
+                       "替 tests/helpers.py 補上 docstring。", "給 worker.py 包一層 retry。", "幫 compose.yml 瘦身。",
+                       "為 api/ 的 endpoint 加上 rate limit"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+
+    def test_chinese_read_questions_with_edit_verbs_are_topics(self):
+        for prompt in ("services/ 裡有沒有已經封裝好的 cache？", "config 是誰統一的？看 git blame 就好。",
+                       "compose.yml 目前有幾個 service？", "替 api/ 補過型別的檔案有哪些？",
+                       "幫 Dockerfile 看一下 base image 是哪個。", "給我列出 scripts/ 的檔案。",
+                       "為什麼 Dockerfile 這麼大？", "統一處理錯誤的函式在哪？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_test_runner_named_in_a_configuration_question_is_a_topic(self):
+        for prompt in ("Does tox.ini set a pytest timeout?", "Which dirs hold a conftest.py for pytest?",
+                       "pytest 的 markers 定義在哪個檔案？", "Is pytest-cov listed in requirements-dev.txt?"):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_test_runner_that_must_run_stays_a_worker_task(self):
+        for prompt in ("Does pytest pass on the release branch?", "pytest 現在會失敗嗎？",
+                       "Which pytest markers exist? Add a flaky marker if there is none.",
+                       "Is the pytest suite green after the lockfile change?"):
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_negated_read_verb_is_a_restriction_not_a_run(self):
+        for prompt in ("不用看 CHANGELOG，pyproject.toml 的 python 版本下限是多少？",
+                       "暫時不用查測試，api/auth.py 的 retry 次數設多少？",
+                       "別翻 git log，只要說 loader.py 在哪個資料夾。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        for prompt in ("先不用查，跑一次 make lint 看哪裡紅。", "先不用查原因，直接把 RETRIES 改成 5。"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_phrasal_out_verbs_open_an_action(self):
+        for prompt in ("Rip out the legacy auth shim in app/auth.py.", "Factor out the retry loop from clients/http.py.",
+                       "Strip out debug prints in worker.py."):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        self.assertEqual(self._decide("Which modules pull out the config? Paths only.").tier, "flash_lite")
+
+    def test_current_result_of_a_runner_needs_a_run(self):
+        for prompt in ("What does mypy report for api/ at the moment?", "How many tests fail currently in tests/unit?",
+                       "What does ruff say about scripts/ right now?", "目前 pytest 對 tests/test_io.py 的結果是什麼？"):
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("Which pytest version is currently pinned in requirements.txt?", "Where is the build output dir configured?"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_adjective_and_quantifier_noun_phrases_are_lookups(self):
+        for prompt in ("Latest releases tagged in this repo, last 5 only.", "Unused imports in api/auth.py",
+                       "Stale branches touching deploy/, newest 10", "Pending migrations listed in db/versions/"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_chinese_verb_as_modifier_in_a_question_is_a_topic(self):
+        for prompt in ("簡化版的 parser 放在哪個資料夾？", "重寫 auth 的進度做到哪了？", "封裝過的 client 有哪些？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("請統一格式，logger 全部走 JSON。").tier, "flash")
+
+    def test_negated_run_of_tests_is_a_restriction(self):
+        for prompt in ("不要執行測試，tests/test_io.py 用了哪些 mock？", "暫時不用跑 build，Makefile 的 default target 是什麼？"):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("先不要跑測試，等我說再跑，現在只要把 TIMEOUT 改成 30。").tier, "flash")
+
+    def test_pass_fail_question_without_a_time_word_needs_a_run(self):
+        for prompt in ("Does ruff pass on the release branch?", "Is eslint clean for web/src?", "Will tsc complain about api/types.ts?",
+                       "ruff 有沒有過？", "tests/unit 會不會報錯？"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("What did the last ruff run in CI report? Read ci-logs/ruff.txt.", "Did mypy pass in yesterday's CI log?"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_chinese_verb_before_a_code_token_is_an_action(self):
+        for prompt in ("加密 config/keys.yaml 裡的 token。", "拆 utils/io.py，路徑函式移到 utils/paths.py。",
+                       "把 timeout 之外的設定留著，limit 改成 30。", "包 `run_job()` 一層 try/except。"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("加密用的 key 是從哪裡讀進來的？", "換行符號在 io_utils.py 是怎麼處理的？", "給我 run_job 的呼叫端清單。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_noun_verb_phrases_and_quantified_openers_are_lookups(self):
+        for prompt in ("Queue depth used by worker/pool.py: where is it set?", "Lock file written by scripts/sync.sh, which tool?",
+                       "Log format used in api/middleware.py", "Last 3 releases and their dates.", "Top 10 largest files in assets/",
+                       "latest 5 tags"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("Log the request id in api/middleware.py.").tier, "flash")
+
+    def test_action_after_a_topic_separator(self):
+        for prompt in ("The queue worker in jobs/run.py: cap the batch at 50.", "For db/models.py: sort the field list.",
+                       "net/dns.py 的 resolve，順手補上快取。", "In api/app.py, hoist the router setup."):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("The queue worker in jobs/run.py: what is the batch size?", "net/dns.py 的 resolve，有快取嗎？",
+                       "Output format: list the paths, one per line."):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_action_after_a_question_on_untyped_calls(self):
+        for prompt in ("Where is MAX_ROWS read? Hoist it into settings.py.", "Who imports slugify? Inline it into views.py."):
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+        for prompt in ("Where is MAX_ROWS read? Tell me the line.", "Where is slugify imported? Show me the file paths."):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+
+    def test_tool_state_adjectives_and_whether_frames(self):
+        for prompt in ("Is mypy happy with api/ right now?", "Check whether the wheel builds.", "看一下 tox 會不會過。"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("Was the build green in CI run #77? See ci-logs/77.txt.", "上次 build 有沒有壞？看 ci-logs/a.txt。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_compound_nouns_with_a_noun_ambiguous_head_are_lookups(self):
+        for prompt in ("Lock file entries for httpx", "Build matrix in ci.yml", "Test fixtures in conftest.py",
+                       "Index definitions in models.py"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_scout_unproven_upgrades_statements_without_read_evidence(self):
+        for prompt in ("The pool size in db/config.py should be 20, not 10.", "We need a --verbose flag on scripts/sync.py.",
+                       "Let's drop Node 16 from the matrix in ci.yml.", "load_rows needs to skip blank lines.",
+                       "I want the banner in main.py to print the version.", "pool 大小應該是 20 才對，db/config.py 弄一下。",
+                       "sync.py 要有 --verbose。", "Can you get the slow test in tests/test_db.py to run faster?"):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash", "scout-unproven"), prompt)
+            self.assertEqual(d.type_override, "mitosis-orchestrator:flash-worker", prompt)
+            self.assertEqual(d.confidence, 0.6)
+
+    def test_scout_keeps_prompts_with_read_evidence(self):
+        for prompt in ("Is the pool size in db/config.py really 20?", "Which Node versions does ci.yml test?",
+                       "Read db/config.py.", "Retry helpers defined in net/", "Last 3 tags and their dates.",
+                       "We need to know whether sync.py has a verbose flag.", "Let's start by listing the CI matrix.",
+                       "Can you tell me where load_rows is defined?", "sync.py 有沒有 --verbose？", "先看一下 db/config.py 的結構。",
+                       "No need to grep everything, just open main.py and tell me the version."):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.rule), ("flash_lite", "scout-type"), prompt)
+
+    def test_scout_unproven_is_judgeable(self):
+        self.assertIn("scout-unproven", eo.JUDGEABLE_RULES)
+
+    def test_elliptical_assignments_are_actions(self):
+        for prompt in ("Pool size in db/config.py goes to 20.", "MAX_ROWS to 500 in settings.py.", "retries => 5 in client.py",
+                       "db/config.py 連線數改 20。", "Log level in app.yaml becomes DEBUG."):
+            d = self._decide(prompt)
+            self.assertEqual((d.tier, d.type_override), ("flash", "mitosis-orchestrator:flash-worker"), prompt)
+
+    def test_all_caps_identifier_is_not_a_verb(self):
+        for prompt in ("MAX_ROWS in settings.py", "MOVE_LIMIT in jobs/config.py", "BUILD_DIR in Makefile"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+
+    def test_terse_lookups_with_a_code_token_are_evidence(self):
+        for prompt in ("load_rows signature please.", "The flags main.py parses.", "db/config.py 裡的 POOL_SIZE",
+                       "load_rows 的簽名。", "jobs/ 底下的排程清單，含 cron 表達式。", "Need the line where MAX_ROWS is read.",
+                       "需要 MAX_ROWS 定義的那一行。"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        for prompt in ("We need a --json flag on main.py.", "main.py 要有 --json。", "Reformat db/config.py"):
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+
+    def test_action_sentence_anywhere_beats_a_trailing_report_request(self):
+        for prompt in ("The nightly job is red. Reproduce it with act locally and tell me why.",
+                       "The cache misses a lot. Warm it before the benchmark, then report the hit rate."):
+            self.assertEqual(self._untyped(prompt).tier, "flash", prompt)
+            self.assertEqual(self._decide(prompt).tier, "flash", prompt)
+        for prompt in ("The nightly job is red. Tell me why.", "Where is the cache configured? Point me to the config."):
+            self.assertEqual(self._untyped(prompt).tier, "flash_lite", prompt)
+
+    def test_cleft_and_whether_frames_make_chinese_verbs_topics(self):
+        for prompt in ("POOL_SIZE 是什麼時候從 10 改成 20 的？誰改的？查 git log。",
+                       "幫我看 db/versions/ 裡有沒有加 users.email 索引的 migration。", "release.yml 有哪些 job？"):
+            self.assertEqual(self._decide(prompt).tier, "flash_lite", prompt)
+        self.assertEqual(self._decide("把 POOL_SIZE 從 10 改成 20。").tier, "flash")
