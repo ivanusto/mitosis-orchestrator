@@ -73,6 +73,11 @@ Environment variables:
                                         final message is not the four-header report
     CODEX_MITOSIS_ENFORCE_REPORT=0      (Codex) do not send a mitosis subagent back once when its
                                         final message is not the four-header report
+    AGY_MITOSIS_ESCALATE=0              turn off failure escalation (default on: after a scout reports
+                                        STATUS: FAILED/BLOCKED the next scout dispatch runs on the worker;
+                                        expires at the next user prompt, after 3 spawns or 30 minutes)
+    AGY_MITOSIS_ESCALATE_PRIMARY=1      also escalate a failed worker: the next worker spawn runs on the
+                                        primary's model (Claude Code only; Codex gets a note); default off
     AGY_MITOSIS_WORKER_DOWNGRADE=0      keep every flash-worker typed call on the worker (default: a short
                                         plain read-only lookup typed flash-worker goes to the scout)
     AGY_MITOSIS_APPEND_REPORT_FORMAT=0  do not append the REPORT FORMAT block to subagent prompts

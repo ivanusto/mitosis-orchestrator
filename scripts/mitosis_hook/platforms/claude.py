@@ -32,6 +32,10 @@ from ..report import (
 )
 from ..routing import NUMBERED_RULE_RE, decide_subagent, find_mutation
 from ..state import (
+    apply_escalation,
+    escalation_for_record,
+    report_failure_status,
+    start_escalation,
     _peek_state,
     _record_routing,
     _record_tier,
@@ -130,7 +134,13 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
 
     decision = decide_subagent(item)
     target_tier, type_override, reason = decision.tier, decision.type_override, decision.reason
-    claude_model = claude_tier_model(target_tier)
+    # Failure escalation: runs under the state lock, after any judge/network call in decide_subagent.
+    state = load_state(payload)
+    decision, esc_info = apply_escalation(state, decision, "claude", payload)
+    target_tier, type_override, reason = decision.tier, decision.type_override, decision.reason
+    if esc_info and esc_info["mode"] == "flash" and bare_type.strip().lower() == SCOUT_TYPE:
+        type_override = WORKER_TYPE  # untyped calls stay untyped (model + effort only)
+    claude_model = esc_info["model"] if esc_info and esc_info["mode"] == "primary" else claude_tier_model(target_tier)
 
     updated_input = copy.deepcopy(args)
     updated_input["model"] = claude_model
@@ -172,7 +182,8 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }]
-    state = load_state(payload)
+    if esc_info:
+        spawns[0]["escalated"] = True
     state.setdefault("pending_spawns", []).extend(spawns)
     save_state(payload, state)
 
@@ -278,7 +289,11 @@ def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint
 
 def _claude_agent_ids_from_response(payload: Dict[str, Any]) -> List[str]:
     ids: List[str] = []
-    for text in _iter_strings(payload.get("tool_response")):
+    resp = payload.get("tool_response")
+    # Async launches answer {"isAsync": true, "status": "async_launched", "agentId": "..."}.
+    if isinstance(resp, dict) and isinstance(resp.get("agentId"), str) and re.fullmatch(r"[0-9a-fA-F]{8,}", resp["agentId"]):
+        ids.append(resp["agentId"].lower())
+    for text in _iter_strings(resp):
         for m in CLAUDE_AGENT_ID_RE.finditer(text):
             aid = m.group(1).lower()
             if aid not in ids:
@@ -323,5 +338,23 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if key not in nagged:
                     nagged.append(key)
                     result = {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
+            elif record is not None:
+                _claude_escalate_on_stop(state, record, str(payload.get("last_assistant_message") or ""), agent_id)
     save_state(payload, state)
     return result
+
+
+def _claude_escalate_on_stop(state: Dict[str, Any], record: Dict[str, Any], message: str, agent_id: str) -> None:
+    """Async Agent calls deliver their report only here: start an escalation for a valid FAILED/BLOCKED one."""
+    if record.get("escalation_sent") or not str(message).lstrip().upper().startswith("STATUS:"):
+        return
+    if report_failure_status(message) is None:
+        return
+    rtype = str(record.get("type") or "")
+    if rtype and not _is_plugin_agent_type(rtype):
+        return
+    route = escalation_for_record(record)
+    if route is None:
+        return
+    record["escalation_sent"] = True
+    start_escalation(state, route, agent_id or str(record.get("role") or "subagent"))

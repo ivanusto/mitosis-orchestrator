@@ -31,6 +31,10 @@ from ..report import (
 from ..routing import _tier_effort, decide_subagent, find_mutation
 from ..state import (
     _RECENT_DECISIONS,
+    apply_escalation,
+    escalation_for_record,
+    report_failure_status,
+    start_escalation,
     _record_routing,
     _releases_state_locks,
     load_state,
@@ -158,6 +162,9 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
             "Workspace": workspace,
             "TypeName": role,
         })
+    # Failure escalation (a scout reported FAILED/BLOCKED): runs after any judge call, under the lock.
+    state = load_state(payload)
+    decision, esc_info = apply_escalation(state, decision, "codex", payload)
     tier, type_override, reason = decision.tier, decision.type_override, decision.reason
     target_model = codex_tier_model(tier)
     target_type = type_override or (SCOUT_TYPE if tier == "flash_lite" else WORKER_TYPE)
@@ -188,7 +195,8 @@ def _handle_spawn_agent(payload: Dict[str, Any], tool_name: str, args: Dict[str,
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }
-    state = load_state(payload)
+    if esc_info and esc_info["mode"] == "flash":
+        record["escalated"] = True
     if task_name:
         # The task name is the address followup_task / send_message use; register it now,
         # since PostToolUse is not guaranteed for collaboration tools.
@@ -443,6 +451,27 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
     if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
         rec["report_ok"] = validate_subagent_report(str(payload.get("last_assistant_message") or "")) is None
     return key
+
+
+def codex_escalate(state: Dict[str, Any], key: Optional[str], payload: Dict[str, Any]) -> None:
+    """Start a failure escalation when a bound child's well-formed report says FAILED/BLOCKED.
+
+    Malformed reports are left to codex_report_block (the block wins; the re-answer arrives as a
+    later SubagentStop). Each record escalates at most once and an escalated spawn never does.
+    """
+    if key is None:
+        return
+    rec = state["subagents"][key]
+    if rec.get("type") not in (WORKER_TYPE, SCOUT_TYPE) or rec.get("escalation_sent") or not rec.get("report_ok"):
+        return
+    msg = str(payload.get("last_assistant_message") or "").lstrip()
+    if not re.match(r"STATUS:\s*(?:FAILED|BLOCKED)\b", msg, re.IGNORECASE) or report_failure_status(msg) is None:
+        return
+    route = escalation_for_record(rec)
+    if route is None:
+        return
+    rec["escalation_sent"] = True
+    start_escalation(state, route, str(rec.get("task_name") or rec.get("role") or key))
 
 
 def codex_report_block(state: Dict[str, Any], key: Optional[str], payload: Dict[str, Any]) -> Dict[str, Any]:

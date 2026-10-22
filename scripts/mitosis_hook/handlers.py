@@ -25,6 +25,7 @@ from .common import (
     is_primary_agent,
 )
 from .guards import (
+    _iter_strings,
     PATH_ARG_KEYS,
     PATH_LIST_ARG_KEYS,
     WRITE_TOOL_RE,
@@ -56,6 +57,7 @@ from .platforms.agy import (
 from .platforms.claude import (
     _claude_agent_ids_from_response,
     _claude_register_agent,
+    _is_plugin_agent_type,
     _handle_agent_message,
     _handle_claude_subagent_stop,
     _handle_claude_task_or_agent,
@@ -67,12 +69,18 @@ from .platforms.codex import (
     _handle_codex_exec_command,
     _handle_mitosis_tools,
     _handle_spawn_agent,
+    codex_escalate,
     codex_report_block,
     codex_subagent_stop,
 )
 from .routing import TEST_RUNNER_RE
 from .state import (
     _RECENT_DECISIONS,
+    escalation_enabled,
+    escalation_for_record,
+    primary_model_alias,
+    report_failure_status,
+    start_escalation,
     _peek_state,
     _read_state_file,
     _releases_state_locks,
@@ -118,6 +126,12 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
         note = f"Primary model is '{model}' (non-frontier warnings silenced)."
     else:
         note = f"{target_file} not found; the live model is checked on every turn instead."
+
+    if is_claude_code_payload(p) and str(p.get("model") or "").strip():
+        # Remembered for ESCALATE_PRIMARY (the next worker spawn runs on the primary's model).
+        state = load_state(p)
+        state["primary_model"] = str(p["model"]).strip()
+        save_state(p, state)
 
     if is_codex_hook_payload(p):
         return {
@@ -514,6 +528,10 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 _claude_register_agent(state, aid, hint)
         sync_subagents(payload, state)
 
+    escalation_note = ""
+    if tool_name in ("Task", "Agent") and is_claude_code_payload(payload) and not (payload.get("error") or failed):
+        escalation_note = _claude_escalate(state, payload)
+
     # Track consecutive failures for the circuit breaker
     if tool_name in (
         "run_command", "invoke_subagent", "Bash", "Task", "Agent",
@@ -526,7 +544,55 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
             state["consecutive_failures"] = 0
 
     save_state(payload, state)
+    if escalation_note:
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": escalation_note}}
     return {}
+
+
+def _claude_escalate(state: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    """Start a failure escalation when the finished Agent call was a mitosis spawn whose report says
+    STATUS: FAILED/BLOCKED. Returns the additionalContext for the primary ("" when nothing starts)."""
+    if not escalation_enabled():
+        return ""
+    status = ""
+    for text in _iter_strings(payload.get("tool_response")):
+        status = report_failure_status(text) or ""
+        if status:
+            break
+    if not status:
+        return ""
+    tool_input = payload.get("tool_input") or {}
+    hint = str(tool_input.get("subagent_type") or tool_input.get("subagentType") or "")
+    record: Optional[Dict[str, Any]] = None
+    for aid in _claude_agent_ids_from_response(payload):
+        rec = state.get("subagents", {}).get(aid)
+        if rec is not None and (not str(rec.get("type") or "").strip() or _is_plugin_agent_type(str(rec["type"]))):
+            record = rec
+            break
+    if record is None and hint and _is_plugin_agent_type(hint):
+        # No paired agent record: judge by the spawn's subagent_type.
+        bare = hint.split(":")[-1].strip().lower()
+        record = {"tier": "flash_lite" if bare == SCOUT_TYPE else "flash", "type": hint}
+    route = escalation_for_record(record)
+    if route is None:
+        return ""
+    source = str((record or {}).get("agent_id") or hint or "subagent")
+    if record is not None:
+        if record.get("escalation_sent"):
+            return ""
+        record["escalation_sent"] = True
+    start_escalation(state, route, source)
+    if route["to"] == "flash":
+        return (
+            f"[Mitosis Orchestrator] The flash-lite scout ({source}) reported STATUS: {status}. The next dispatch of "
+            f"that task will run on {_delegation_hint(payload, 'flash')}. Re-dispatch the task with the Agent tool "
+            "instead of doing it yourself."
+        )
+    alias = primary_model_alias(state, payload)
+    return (
+        f"[Mitosis Orchestrator] The flash-worker ({source}) reported STATUS: {status}. The next worker dispatch of "
+        f"that task will run on the primary model ({alias}). Re-dispatch it with the Agent tool instead of doing it yourself."
+    )
 
 
 @_releases_state_locks
@@ -601,6 +667,8 @@ def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         _RECENT_BINDINGS.append({"agentId": payload.get("agent_id"), "boundTo": bound})
         del _RECENT_BINDINGS[:-16]
         result = codex_report_block(state, bound, payload)
+        if not result:
+            codex_escalate(state, bound, payload)
         save_state(payload, state)
         return result
     subagents = state.setdefault("subagents", {})

@@ -7,18 +7,19 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .common import (
     DEFAULT_CODEX_SCOUT_MODEL,
     Decision,
     SCOUT_TYPE,
     STATE_FILENAME,
+    WORKER_TYPE,
     _env_flag,
     _get_env,
     _load_sibling,
 )
-from .models import codex_tier_model
+from .models import _read_settings, codex_tier_model, settings_path
 
 
 CONVERSATION_ID_RE = re.compile(
@@ -388,3 +389,134 @@ def _record_tier(info: Dict[str, Any]) -> str:
     if model in ("flash_lite", "haiku", DEFAULT_CODEX_SCOUT_MODEL.lower(), codex_tier_model("flash_lite").lower()):
         return "flash_lite"
     return "flash"
+
+
+# --- Failure escalation -------------------------------------------------------------------
+# A scout (flash_lite) that reports STATUS: FAILED/BLOCKED makes the next scout dispatch run on
+# the worker (flash); with *_MITOSIS_ESCALATE_PRIMARY=1 a failed worker makes the next worker
+# dispatch run on the primary's model (Claude only). State key: "escalation".
+
+ESCALATION_TTL_SECONDS = 30 * 60
+ESCALATION_SPAWNS = 3
+ESCALATION_STATUS_RE = re.compile(r"^[ \t>*_`-]*STATUS:[ \t*_`]*(FAILED|BLOCKED)\b", re.IGNORECASE | re.MULTILINE)
+_PRIMARY_ALIASES = ("opus", "fable", "sonnet")
+
+
+def escalation_enabled() -> bool:
+    """AGY_MITOSIS_ESCALATE=0 (or CLAUDE_/CODEX_) turns all failure escalation off."""
+    return _get_env("AGY_MITOSIS_ESCALATE", default="1") != "0"
+
+
+def escalate_primary_enabled() -> bool:
+    return escalation_enabled() and _env_flag("AGY_MITOSIS_ESCALATE_PRIMARY")
+
+
+def report_failure_status(text: str) -> Optional[str]:
+    """'FAILED' or 'BLOCKED' when a report line says so, else None."""
+    m = ESCALATION_STATUS_RE.search(text or "")
+    return m.group(1).upper() if m else None
+
+
+def live_escalation(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The pending escalation, dropping it from `state` when disabled or expired."""
+    esc = state.get("escalation")
+    if not isinstance(esc, dict):
+        state.pop("escalation", None)
+        return None
+    try:
+        expired = int(esc.get("spawns_left") or 0) <= 0 or time.time() - float(esc.get("ts") or 0) > ESCALATION_TTL_SECONDS
+    except (TypeError, ValueError):
+        expired = True
+    if expired or not escalation_enabled():
+        state.pop("escalation", None)
+        return None
+    return esc
+
+
+def escalation_for_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """{'from', 'to'} a finished spawn would escalate along, or None (already escalated, off, no route)."""
+    if not record or record.get("escalated") or not escalation_enabled():
+        return None
+    if _record_tier(record) == "flash_lite":
+        return {"from": "flash_lite", "to": "flash"}
+    if escalate_primary_enabled():
+        return {"from": "flash", "to": "primary"}
+    return None
+
+
+def start_escalation(state: Dict[str, Any], route: Dict[str, str], source: str) -> Dict[str, Any]:
+    esc = {"from": route["from"], "to": route["to"], "ts": time.time(),
+           "spawns_left": ESCALATION_SPAWNS, "source": source}
+    state["escalation"] = esc
+    return esc
+
+
+def primary_model_alias(state: Dict[str, Any], payload: Optional[Dict[str, Any]] = None) -> str:
+    """Claude alias (opus/fable/sonnet) of the primary: recorded SessionStart model, else settings.json, else opus."""
+    candidates = [str(state.get("primary_model") or "")]
+    if not candidates[0]:
+        try:
+            data, _ = _read_settings(settings_path(payload))
+            candidates.append(str((data or {}).get("model") or ""))
+        except Exception:
+            pass
+    for name in candidates:
+        low = name.lower()
+        for alias in _PRIMARY_ALIASES:
+            if alias in low:
+                return alias
+    return "opus"
+
+
+def apply_escalation(state: Dict[str, Any], decision: Decision, platform: str,
+                     payload: Optional[Dict[str, Any]] = None) -> Tuple[Decision, Optional[Dict[str, Any]]]:
+    """Run one spawn through the pending escalation. Mutates `state`; the caller saves it.
+
+    Returns (decision, info). `info` is None for an untouched spawn, else
+    {"mode": "flash" | "primary" | "note", "model": <claude alias or None>, "source": ...} and
+    the spawn record must be marked escalated. A spawn that is already on the target tier just
+    clears the escalation (the task was re-dispatched to a worker anyway).
+    """
+    esc = live_escalation(state)
+    if esc is None:
+        return decision, None
+    src = str(esc.get("source") or "a subagent")
+    if esc.get("to") == "flash":
+        state.pop("escalation", None)
+        if decision.tier != "flash_lite":
+            return decision, None
+        new = decision._replace(
+            tier="flash", type_override=WORKER_TYPE if decision.type_override else None, effort="medium", confidence=1.0, source="rule",
+            rule="escalation", reason=f"scout {src} reported FAILED/BLOCKED; re-dispatched on the worker")
+        _swap_recent_decision(decision, new)
+        return new, {"mode": "flash", "model": None, "source": src}
+    if esc.get("to") == "primary":
+        if not escalate_primary_enabled():
+            state.pop("escalation", None)
+            return decision, None
+        if decision.tier != "flash":
+            esc["spawns_left"] = int(esc.get("spawns_left") or 0) - 1
+            if esc["spawns_left"] <= 0:
+                state.pop("escalation", None)
+            return decision, None
+        state.pop("escalation", None)
+        if platform != "claude":
+            note = f"worker {src} reported FAILED/BLOCKED; {platform} has no per-spawn model, so no escalation to the primary model"
+            new = decision._replace(reason=f"{decision.reason}; {note}")
+            _swap_recent_decision(decision, new)
+            return new, {"mode": "note", "model": None, "source": src}
+        alias = primary_model_alias(state, payload)
+        new = decision._replace(
+            rule="escalation-primary", source="rule", confidence=1.0,
+            reason=f"worker {src} reported FAILED/BLOCKED; re-dispatched on the primary model ({alias})")
+        _swap_recent_decision(decision, new)
+        return new, {"mode": "primary", "model": alias, "source": src}
+    state.pop("escalation", None)
+    return decision, None
+
+
+def _swap_recent_decision(old: Decision, new: Decision) -> None:
+    for i, d in enumerate(_RECENT_DECISIONS):
+        if d is old:
+            _RECENT_DECISIONS[i] = new
+            return
