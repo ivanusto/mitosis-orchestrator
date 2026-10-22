@@ -186,7 +186,7 @@ export CLAUDE_MITOSIS_PIN_EFFORT=0           # 不再加 effort；模型仍會�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 1.8.0)
+agy plugin list            # mitosis-orchestrator (enabled, 1.8.1)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：

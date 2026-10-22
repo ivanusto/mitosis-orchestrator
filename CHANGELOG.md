@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1 - 2026-10-22
+
+### Fixed
+- Codex `PostToolUse` never ran for `spawn_agent`. Codex reads a matcher made only of letters, digits, `_` and `|` as a list of exact tool names, so `spawn_agent|Bash` did not match `collaborationspawn_agent` (the `PreToolUse` matcher contains `.*` and is a regex, which is why it did). The matcher is now `spawn_agent|collaborationspawn_agent|Bash`, so failed spawns are removed again and `agent_path` is stored. The follow-up guard itself already worked in 1.8.0, since spawns are registered at `PreToolUse`.
+- The matcher test applies Codex's exact-list versus regex rule.
+
+### Upgrade notes
+- Codex: approve the hooks again in `/hooks` (the `PostToolUse` matcher changed). If 1.8.0 was never approved, one approval covers both.
+
 ## 1.8.0 - 2026-10-22
 
 ### Fixed

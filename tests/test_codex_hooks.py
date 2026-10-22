@@ -5,6 +5,7 @@ Run: python -m unittest discover tests"""
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -262,12 +263,21 @@ class CodexCollaborationTest(unittest.TestCase):
         worker = dict(CHILD, agent_type="worker")
         self.assertFalse(self.denied(self.pre("apply_patch", patch, **worker)))
 
+    @staticmethod
+    def matches(matcher, name):
+        # Codex, like Claude Code: only [A-Za-z0-9_|] means an exact-name list, anything else a regex.
+        if re.fullmatch(r"[A-Za-z0-9_|]+", matcher):
+            return name in matcher.split("|")
+        return re.search(matcher, name) is not None
+
     def test_codex_hooks_json_matcher_covers_collaboration_tools(self):
         data = json.loads((ROOT / "hooks" / "codex-hooks.json").read_text(encoding="utf-8"))
-        matcher = data["hooks"]["PreToolUse"][0]["matcher"]
+        pre = data["hooks"]["PreToolUse"][0]["matcher"]
         for name in ("collaborationspawn_agent", "collaborationfollowup_task", "collaborationsend_message", "apply_patch", "Bash"):
-            self.assertRegex(name, matcher)
-        self.assertRegex("collaborationspawn_agent", data["hooks"]["PostToolUse"][0]["matcher"])
+            self.assertTrue(self.matches(pre, name), name)
+        post = data["hooks"]["PostToolUse"][0]["matcher"]
+        for name in ("collaborationspawn_agent", "spawn_agent", "Bash"):
+            self.assertTrue(self.matches(post, name), name)
 
     def test_debug_log_records_codex_tool_fields(self):
         os.environ["CODEX_MITOSIS_DEBUG"] = "1"

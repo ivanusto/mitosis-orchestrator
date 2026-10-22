@@ -34,7 +34,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "spawn_agent|Bash",
+        "matcher": "spawn_agent|collaborationspawn_agent|Bash",
         "hooks": [
           {
             "type": "command",
