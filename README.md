@@ -118,7 +118,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.3.1)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -196,7 +196,7 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 | :--- | :--- |
 | `SessionStart` | Checks settings, **warns** if the configured primary model is not a supported frontier model, and injects the Mitosis routing policy. Rewrites settings only when `*_MITOSIS_PIN_SETTINGS=1` is enabled. |
 | `PreInvocation` (agy) · `UserPromptSubmit` (Claude Code / Codex) | Verifies the live session model on every turn; warns once per invocation if switched to a non-frontier model. Resets per-turn tracking (`turn_edited_files`, `consecutive_failures`). |
-| `PreToolUse` · `invoke_subagent` (agy) | Classifies every spawned subagent into `flash` or `flash_lite` based on `TypeName`, `Workspace`, `Role`, and `Prompt`. Strong signals (testing, debugging, call-graph tracing, mutation verbs) always override lookup keywords. Automatically upgrades `flash-lite-scout` to `flash-worker` if given a mutation task, and appends the `REPORT FORMAT` block to prompts that lack one. |
+| `PreToolUse` · `invoke_subagent` (agy) | Classifies every spawned subagent into `flash` or `flash_lite` based on `TypeName`, `Workspace`, and `Prompt` (on agy the short `Role` label is not read, since a label such as "Add Scout" would look like a mutation). agy 1.4.6 sends one flat call per subagent (`Prompt`, `Role`, `TypeName`, `Model`, `Workspace`) instead of a `Subagents` list; both forms are handled, and the hook overwrites only the changed top-level keys. Strong signals (testing, debugging, call-graph tracing, mutation verbs) always override lookup keywords. Automatically upgrades `flash-lite-scout` to `flash-worker` if given a mutation task, and appends the `REPORT FORMAT` block to prompts that lack one. |
 | `PreToolUse` · `Agent` (Claude Code) | Pins **only** this plugin's own agent types (`flash-worker`, `flash-lite-scout`, with or without the `mitosis-orchestrator:` prefix) and untyped `Agent` calls that use `model: inherit`. Pins `effort` too (scout `low`, worker `medium`; caller values honoured; `CLAUDE_MITOSIS_PIN_EFFORT=0` disables) and appends the four-header `REPORT FORMAT` block to prompts that lack one (`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` disables). Other plugins' agents, built-in types (`Explore`, `Plan`, `general-purpose`, …), and untyped calls with an explicit model are passed through untouched. `CLAUDE_MITOSIS_PIN_SUBAGENTS=0` disables pinning entirely. |
 | `PreToolUse` · `spawn_agent` / `codex exec` (Codex) | Pins subagents to `gpt-5.6-luna` (scout) or `gpt-5.6-terra` (worker) by prompt classification. When Codex hides the message from hooks (0.163 sends an encrypted token), the requested `agent_type` decides, the message is left untouched, and a call without a role is pinned to `worker`. |
 | `PreToolUse` · `send_message` (agy / Codex) · `SendMessage` (Claude Code) · `followup_task` (Codex) | Blocks code-editing or multi-step (>3 numbered rules) follow-up instructions sent to a scout; a Codex `followup_task` is also routed like a new task. Claude Code recipients are recognised by the agent id that `PostToolUse` / `SubagentStop` pair with the spawn, Codex recipients by the `task_name` registered at `spawn_agent`. Codex follow-up text that hooks cannot read is refused for scouts: spawn a new explorer or a worker instead. |
@@ -212,7 +212,8 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 
 #### Failure escalation (2.3)
 
-- **Trigger.** A mitosis scout reports `STATUS: FAILED` or `BLOCKED`. Claude Code detects it on `SubagentStop` (background `Agent` calls deliver the report only there) or in a synchronous `PostToolUse` result; Codex on `SubagentStop` of a bound explorer. agy is not covered.
+- **Trigger.** A mitosis scout reports `STATUS: FAILED` or `BLOCKED`. Claude Code detects it on `SubagentStop` (background `Agent` calls deliver the report only there) or in a synchronous `PostToolUse` result; Codex on `SubagentStop` of a bound explorer; agy (2.3.1) on the primary's next pre-invocation or `invoke_subagent` call, by reading the reports in `<artifactDirectoryPath>/.system_generated/messages/`. The first scan of a conversation only marks old reports as seen. The same pre-invocation also tells the primary once per subagent when a report breaks the four-header contract.
+- **agy note.** The bundled agents use `inheritCustomizations: false`, so plugin hooks do not run inside them; only the primary-side scan works (verified on agy 1.4.6).
 - **Effect.** The next scout-routed dispatch runs on the worker (rule `escalation`), once, within 3 dispatches or 30 minutes. An escalated spawn never escalates again. Untyped calls keep no `subagent_type` and only get the model.
 - **Opt-in.** `*_MITOSIS_ESCALATE_PRIMARY=1` (Claude Code only) also sends the next dispatch after a failed worker to the primary model. `*_MITOSIS_ESCALATE=0` turns escalation off.
 - **Headless check.** A scout told to read a missing file reported `BLOCKED`, and the same scout-typed re-dispatch ran as `mitosis-orchestrator:flash-worker` on sonnet (0.25 USD session).

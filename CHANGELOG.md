@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.3.1 - 2026-10-26
+
+Verified live on agy 1.4.6.
+
+### Fixed
+- agy `invoke_subagent`: agy 1.4.6 sends one flat call per subagent (`Prompt`, `Role`, `TypeName`, `Model`, `Workspace`) and no `Subagents` list, so routing, model pinning, type upgrade, REPORT FORMAT append and `pending_spawns` never ran on agy. Both forms now share one per-item helper; the flat form returns an `overwrite` with only the changed top-level keys (caller spelling kept for `Prompt` and `TypeName`, `Model` always `Model`).
+- Routing: on agy the short `Role` label ("Add Scout") is no longer part of the keyword text, so its verb is not misread as a mutation. `decide_subagent(..., use_role=False)` is used by agy only; Claude Code passes `description` as `Role` and Codex a role name, so they keep it. Routing eval results are unchanged.
+
+### Added
+- agy failure escalation and the invalid-report notice are now implemented (2.3.0 did not cover agy). The primary reads new reports from `<artifactDirectoryPath>/.system_generated/messages/` on pre-invocation and on `invoke_subagent`, records `report_ok` and `status`, arms the scout escalation on `FAILED` or `BLOCKED` (rule `escalation`, same once, 3 dispatches, 30 minutes semantics, `*_MITOSIS_ESCALATE=0` turns it off), seeds on the first scan so older reports do not arm it, and injects one `ephemeralMessage` per subagent with an invalid report. Bundled agents use `inheritCustomizations: false`, so only the primary-side scan works.
+- Docs: README and rules say to issue the agy `invoke_subagent` calls in the same turn, then end the turn.
+- Tests: agy flat-form and message-scan tests.
+
 ## 2.3.0 - 2026-10-22
 
 ### Changed

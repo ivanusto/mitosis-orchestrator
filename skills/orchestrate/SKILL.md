@@ -8,7 +8,7 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.3.0)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.3.1)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -28,7 +28,7 @@ Execute complex engineering tasks using a 4-phase hierarchical orchestration loo
 
 When context must be gathered across the workspace before planning:
 1. Identify independent lookups (file discovery, symbol search, config inspection, git/log status).
-2. Fan out concurrent read-only subagents in a single invocation:
+2. Fan out concurrent read-only subagents in one turn (on agy, one `invoke_subagent` call per subagent, all issued in the same turn, then end the turn):
    - **Antigravity (`agy`)**: `invoke_subagent` with `TypeName: "flash-lite-scout"` and `"Model": "flash_lite"`.
    - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (the hook pins `model: haiku`, `effort: low`). Untyped `Agent` calls with `model: inherit` are classified by prompt; built-in `Explore` is left as-is.
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="explorer")` (`flash-lite-scout` is accepted as an alias when scripts/setup-codex.py installed it) or `codex exec --profile mitosis-scout "<lookup>"` (`gpt-5.6-luna`, low effort, `read-only` sandbox).

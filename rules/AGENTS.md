@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.3.0)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.3.1)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -50,7 +50,7 @@ Moderate-complexity analysis or scoped execution:
 
 1. **Set the model tier explicitly** on every subagent: `"flash_lite"` or `"flash"` in `agy`; the plugin's own `subagent_type` in Claude Code; a role or profile in Codex CLI.
 2. **Prefer the bundled types**: `flash-lite-scout` / `explorer` for lookups, `flash-worker` / `worker` for everything that researches across files, runs tests or edits code.
-3. **Fan out in one call**: launch independent subagents together in a single invocation. On agy end your turn right after dispatching; on Claude Code subagents run in the background, so keep working on independent planning and let their completion notifications wake you. Do not poll.
+3. **Fan out in one turn**: launch independent subagents together. On agy, `invoke_subagent` takes one subagent per call, so issue the calls in the same turn, then end the turn right after dispatching; on Claude Code subagents run in the background, so keep working on independent planning and let their completion notifications wake you. Do not poll.
 4. **`send_message` / `SendMessage` follow-ups**: reuse a long-lived worker's context for follow-ups instead of re-spawning (it keeps its cache), but never send code-editing or multi-step (more than 3 numbered steps) instructions to a scout. Invoke a worker instead.
 5. **Branch cleanup**: after a branch worker reports, merge or discard its changes and terminate the worker.
 6. **No nested spawning**: recursive nested subagent spawning is disallowed (`enable_subagent_tools: false`).

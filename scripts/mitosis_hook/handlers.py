@@ -51,6 +51,8 @@ from .models import (
 from .platforms.agy import (
     _handle_define_subagent,
     _handle_invoke_subagent,
+    invalid_report_steps,
+    scan_new_messages,
     _handle_manage_subagents,
     _handle_run_workflow,
 )
@@ -172,6 +174,12 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     state = load_state(payload)
     state["turn_edited_files"] = []
     state["consecutive_failures"] = 0
+    agy_steps: List[Dict[str, Any]] = []
+    if (payload.get("artifactDirectoryPath") and not is_codex_payload(payload)
+            and not is_claude_code_payload(payload)):
+        # agy primary: read newly delivered subagent reports (arms escalation, flags invalid ones).
+        scan_new_messages(payload, state)
+        agy_steps = invalid_report_steps(state)
     save_state(payload, state)
 
     model_name = str(payload.get("modelName") or payload.get("model_name") or payload.get("model") or "")
@@ -192,13 +200,13 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "AGY_ALLOW_NON_ARGON_PRIMARY",
         "AGY_ARGON_ALLOW_NON_PRIMARY",
     ):
-        return {}
+        return {"injectSteps": agy_steps} if agy_steps else {}
     cid = str(payload.get("conversationId") or payload.get("session_id") or payload.get("thread_id") or payload.get("thread-id") or "")
     inv_num = payload.get("invocationNum", 0)
     key = f"{cid}:{inv_num}"
     warned: List[str] = state.setdefault("warned_invocations", [])
     if key in warned:
-        return {}
+        return {"injectSteps": agy_steps} if agy_steps else {}
     warned.append(key)
     save_state(payload, state)
 
@@ -225,13 +233,7 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "additionalContext": warn_text,
             }
         }
-    return {
-        "injectSteps": [
-            {
-                "ephemeralMessage": warn_text
-            }
-        ]
-    }
+    return {"injectSteps": agy_steps + [{"ephemeralMessage": warn_text}]}
 
 
 def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:

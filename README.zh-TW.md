@@ -118,7 +118,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.3.1)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -196,7 +196,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | :--- | :--- |
 | `SessionStart` | 讀取設定檔，若主模型不是支援的尖端模型則發出**警告**並注入 Mitosis 編排政策；僅在啟用 `*_MITOSIS_PIN_SETTINGS=1` 時改寫設定檔。 |
 | `PreInvocation`（agy）· `UserPromptSubmit`（Claude Code / Codex） | 每回合檢查即時模型；若切換到非尖端模型，每回合提醒一次。同時重設單回合編輯計數（`turn_edited_files`）與連續失敗計數（`consecutive_failures`）。 |
-| `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理；提示詞缺少 `REPORT FORMAT` 區塊時自動補上。 |
+| `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級（agy 僅依 `Prompt`、`TypeName`、`Workspace` 判斷，不讀簡短的 `Role` 標籤，以免「Add Scout」之類的標籤被誤判為修改動詞）。agy 1.4.6 每個子代理送出一次扁平呼叫（`Prompt`、`Role`、`TypeName`、`Model`、`Workspace`），而非 `Subagents` 清單；兩種形式皆已支援，且只覆寫有變動的頂層欄位。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理；提示詞缺少 `REPORT FORMAT` 區塊時自動補上。 |
 | `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉），並為缺少 `REPORT FORMAT` 區塊的提示詞自動補上（`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
 | `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。Codex 不讓 hook 讀訊息時（0.163 傳的是加密字串），改依呼叫指定的 `agent_type` 決定，訊息原樣保留；沒指定角色的呼叫一律綁到 `worker`。 |
 | `PreToolUse` · `send_message`（agy / Codex）· `SendMessage`（Claude Code）· `followup_task`（Codex） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令；Codex 的 `followup_task` 另外比照新任務分類。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識，Codex 端以 `spawn_agent` 時登記的 `task_name` 辨識。hook 讀不到內容的 Codex 追加指令，送給偵察子代理一律拒絕，請改開新的 explorer 或交給 worker。 |
@@ -212,7 +212,8 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 
 #### 失敗升級（2.3）
 
-- **觸發條件。** mitosis 偵察者回報 `STATUS: FAILED` 或 `BLOCKED`。Claude Code 在 `SubagentStop`（背景 `Agent` 呼叫只會在此時交付回報）或同步的 `PostToolUse` 結果偵測；Codex 在已綁定 explorer 的 `SubagentStop` 偵測；agy 不涵蓋。
+- **觸發條件。** mitosis 偵察者回報 `STATUS: FAILED` 或 `BLOCKED`。Claude Code 在 `SubagentStop`（背景 `Agent` 呼叫只會在此時交付回報）或同步的 `PostToolUse` 結果偵測；Codex 在已綁定 explorer 的 `SubagentStop` 偵測；agy（2.3.1 起）在主核下一次 pre-invocation 或 `invoke_subagent` 呼叫時，讀取 `<artifactDirectoryPath>/.system_generated/messages/` 內的回報。對話第一次掃描只會把既有回報標為已讀。同一次 pre-invocation 也會在子代理回報違反四標題格式時，對每個子代理提醒尖端模型一次。
+- **agy 注意事項。** 內建代理使用 `inheritCustomizations: false`，外掛掛鉤不會在子代理內部執行，因此只有主核端的掃描有效（於 agy 1.4.6 實測）。
 - **效果。** 下一次路由到偵察者的派發改由執行者處理（規則 `escalation`），只升級一次，限 3 次派發或 30 分鐘內。已升級的派發不會再次升級。未指定類型的呼叫不會被加上 `subagent_type`，只會被指定模型。
 - **選用。** `*_MITOSIS_ESCALATE_PRIMARY=1`（僅 Claude Code）會讓失敗的執行者之後的下一次派發改用主核模型。`*_MITOSIS_ESCALATE=0` 關閉升級。
 - **無頭驗證。** 被要求讀取不存在檔案的偵察者回報 `BLOCKED`，同一個標為偵察者的重新派發改以 sonnet 的 `mitosis-orchestrator:flash-worker` 執行（該工作階段花費 0.25 美元）。

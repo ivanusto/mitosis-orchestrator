@@ -3,7 +3,7 @@
 # scripts/setup-codex.py need 3.11+ (tomllib).
 [project]
 name = "mitosis-orchestrator"
-version = "2.3.0"
+version = "2.3.1"
 description = "Frontier-primary multi-agent orchestration hooks for Antigravity, Claude Code and Codex CLI"
 requires-python = ">=3.8"
 license = "MIT"

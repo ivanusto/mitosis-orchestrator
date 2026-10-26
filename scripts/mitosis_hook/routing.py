@@ -2023,9 +2023,13 @@ def _worker_lookup(text: str, prompt: str, workspace: str, requested: str, lite:
                 or _opens_with_read_verb(prompt))
 
 
-def decide_subagent(subagent: Dict[str, Any]) -> Decision:
-    """Return the routing Decision for a subagent spec: rules first, then the optional judge."""
-    decision, prompt, scout_typed, worker_name = _decide_by_rules(subagent)
+def decide_subagent(subagent: Dict[str, Any], use_role: bool = True) -> Decision:
+    """Return the routing Decision for a subagent spec: rules first, then the optional judge.
+
+    use_role=False keeps the Role/role label out of the keyword text (agy: Role is a short
+    label such as "Add Scout", whose verb would be misread as a mutation).
+    """
+    decision, prompt, scout_typed, worker_name = _decide_by_rules(subagent, use_role)
     if decision.rule in ("mutation", "heavy", "heavy-noun") and _read_only_has_last_word(prompt, decision.rule):
         decision = decision._replace(confidence=min(decision.confidence, READ_ONLY_CONFIDENCE),
                                      reason=f"{decision.reason}; prompt declares read-only")
@@ -2035,7 +2039,7 @@ def decide_subagent(subagent: Dict[str, Any]) -> Decision:
     return decision
 
 
-def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str]:
+def _decide_by_rules(subagent: Dict[str, Any], use_role: bool = True) -> Tuple[Decision, str, bool, str]:
     """Keyword rules. Returns (decision, role+prompt text, scout_typed, worker type name).
 
     Precedence (first match wins):
@@ -2078,11 +2082,11 @@ def _decide_by_rules(subagent: Dict[str, Any]) -> Tuple[Decision, str, bool, str
         prefix = f"{prefix_part}:"
         bare_type = bare_type.strip().lower()
 
-    role = str(_get(subagent, "Role", "role", default="")).strip()
+    role = str(_get(subagent, "Role", "role", default="")).strip() if use_role else ""
     prompt = strip_report_format(str(_get(subagent, "Prompt", "prompt", default="")).strip())
     workspace = str(_get(subagent, "Workspace", "workspace", default="inherit")).strip().lower()
     requested = str(_get(subagent, "Model", "model", default="")).strip().lower()
-    text = f"{role}\n{prompt}"
+    text = f"{role}\n{prompt}" if use_role else prompt
     scout_typed = bare_type == SCOUT_TYPE
     worker_name = f"{prefix}{WORKER_TYPE}" if prefix else WORKER_TYPE
 
