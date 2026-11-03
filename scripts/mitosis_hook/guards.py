@@ -494,6 +494,11 @@ _SCOUT_GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _SCOUT_GIT_REMOTE_FLAGS = {"-v", "--verbose", "--all", "--push"}
 _SCOUT_FIND_FORBIDDEN = ("-delete", "-exec", "-ok", "-fprint", "-fls")
 
+_SCOUT_UGREP_FORBIDDEN = {
+    "-Q", "-@", "--query", "--filter", "--filter-magic-label", "--pager", "--view", "--save-config", "--config",
+    "--format-open",
+}
+
 # Options that run a program, write a file or change state. See _scout_option_hit for how they match.
 SCOUT_FORBIDDEN_ARGS = {
     "sort": {"-o", "-T", "--output", "--compress-program", "--temporary-directory"},
@@ -503,6 +508,11 @@ SCOUT_FORBIDDEN_ARGS = {
     "date": {"-s", "--set"},
     "rg": {"-z", "--search-zip", "--pre", "--pre-glob", "--hostname-bin"},
     "diff": {"-l", "--paginate", "--output"},
+    # Claude Code's shell runs ugrep as grep, and bfs as find. It sends these options to GNU grep, which
+    # has none of them, but other hosts may not: ugrep runs filters and pagers and can write a config file.
+    "grep": _SCOUT_UGREP_FORBIDDEN,
+    "egrep": _SCOUT_UGREP_FORBIDDEN,
+    "fgrep": _SCOUT_UGREP_FORBIDDEN,
     "journalctl": {
         "-f", "--follow", "--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate", "--flush", "--sync",
         "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog", "--cursor-file",
