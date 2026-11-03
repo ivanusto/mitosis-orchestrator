@@ -780,9 +780,9 @@ def _scout_git_denied(args: List[str]) -> str:
 
 
 def _scout_systemctl_denied(args: List[str]) -> str:
-    sub = next((w for w in args if not w.startswith("-")), "")
-    if sub and sub not in SCOUT_SYSTEMCTL_SUBCOMMANDS:
-        return f"systemctl {sub} is not read-only"
+    sub = next((w for w in args if not w.startswith("-")), None)
+    if sub is not None and sub not in SCOUT_SYSTEMCTL_SUBCOMMANDS:
+        return f"systemctl {sub!r} is not read-only"
     bad = next((w for w in args if w.startswith("-") and not _SCOUT_SYSTEMCTL_FLAG_RE.match(w)), "")
     return f"systemctl option {bad} is not allowed, attach values with =" if bad else ""
 
