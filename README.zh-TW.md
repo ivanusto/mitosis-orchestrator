@@ -66,7 +66,8 @@ codex plugin marketplace add ~/mitosis-orchestrator
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 # 接著在 ~/.codex/config.toml 的 [features] 設 hooks = true，開啟 Codex 並在 /hooks 核准外掛 hook
 
-# 更新（重新 add 會刷新外掛快照；Codex 若要求，請到 /hooks 重新核准）
+# 更新（重新 add 會刷新外掛快照）。接著開一次 Codex，若要求 review hook 請接受：
+# 接受前 `codex exec` 只會顯示 `hook: ... Failed`，工作照常繼續但沒有守衛，即使 hooks 檔沒有變動也一樣
 git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
@@ -185,7 +186,7 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未受信任的 hook 會被靜默略過（新版改了 matcher 時要重新核准）。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
+請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未核准的 hook 不會執行，工作階段仍會繼續，也就沒有守衛。外掛更新後，即使 hooks 檔沒有變動，Codex 也可能要求重新 review，所以更新後請確認 `hook:` 行顯示 `Completed`。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
 
 Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。2.0 起，子代理自己的 hook（帶的是 `agent_id`，不是 `task_name`）會透過子代理 rollout 的第一行（`session_meta.agent_path`）綁定到對應紀錄，否則綁定到同角色中唯一尚未綁定的紀錄；`SubagentStop` 會更新該筆紀錄（stops、`last_turn_id`、`report_ok`）。2.1 起，若已綁定的偵察或執行子代理最後訊息不是四標頭回報（常見原因是尖端模型在讀不到的 `spawn_agent` 訊息裡自訂了標頭），會退回一次（`{"decision":"block"}`，Codex 讓子代理重答，第二次 `SubagentStop` 帶 `stop_hook_active: true`）。已於 Codex 0.163 驗證：`SubagentStop` 退回後，子代理會重新回答，主代理收到的是修正後的回報。代理定義檔註明四標頭優先於任務訊息，SessionStart 提示也會告訴主代理不要自訂回報標頭。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
 

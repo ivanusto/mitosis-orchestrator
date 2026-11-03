@@ -66,7 +66,8 @@ codex plugin marketplace add ~/mitosis-orchestrator
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 # Then set hooks = true under [features] in ~/.codex/config.toml, open Codex and approve the plugin hooks in /hooks
 
-# Update (re-adding refreshes the plugin snapshot; approve again in /hooks if Codex asks)
+# Update (re-adding refreshes the plugin snapshot). Then open Codex once and accept the hook review if it asks:
+# until you do, `codex exec` shows `hook: ... Failed` and runs with no guard, even if the hooks file did not change
 git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
@@ -185,7 +186,7 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; untrusted hooks are skipped silently (a matcher change in a new version needs approval again). `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
+Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; a hook that is not approved does not run and the session carries on with no guard. Codex may ask for review again after any plugin update, even when the hooks file did not change, so after updating check that `hook:` lines show `Completed`. `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
 
 Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Since 2.0 a child's own hooks (which carry an `agent_id`, not the `task_name`) are bound to its record through the first line of the child rollout (`session_meta.agent_path`), else through the only unbound record of the same role; `SubagentStop` updates that record (stops, `last_turn_id`, `report_ok`). Since 2.1 it also sends a bound scout/worker back once (`{"decision":"block"}`; Codex re-runs the child, and the second `SubagentStop` carries `stop_hook_active: true`) when its final message is not the four-header report, which happens when the primary dictates its own headings in the hidden `spawn_agent` message. Verified on Codex 0.163: a `SubagentStop` block makes the child answer again, and the parent receives the corrected report. The agent definitions say the four headers win over the task message, and the SessionStart notice tells the primary not to dictate headings. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
 
