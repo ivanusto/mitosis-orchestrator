@@ -761,7 +761,8 @@ def _scout_git_denied(args: List[str]) -> str:
     hit = next((w for w in rest if _scout_option_hit(w, forbidden)), "")
     if hit:
         return f"git {sub} {hit} changes the repository or runs a program"
-    if sub == "branch" and positional:
+    # Only --list: -l meant --create-reflog before git 2.20, so `git branch -l x` created a branch there.
+    if sub == "branch" and positional and "--list" not in rest:
         return "git branch with a name creates a branch"
     if sub == "tag" and positional and "-l" not in rest and "--list" not in rest:
         return "git tag with a name creates a tag"
