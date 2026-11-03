@@ -20,7 +20,7 @@ def main(argv):
         return 2
     os.makedirs(work, exist_ok=True)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
-    for name in ("billing", "tests"):
+    for name in ("shop", "tests"):
         shutil.copytree(os.path.join(TEMPLATE, name), os.path.join(work, name), ignore=ignore)
     git = ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid"]
     for cmd in (git + ["init", "-q"], git + ["add", "-A"], git + ["commit", "-q", "-m", "initial state"]):

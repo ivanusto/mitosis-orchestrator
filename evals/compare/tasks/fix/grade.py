@@ -2,7 +2,7 @@
 """Grade the fix task: python3 grade.py WORKDIR. Exit 0 only if visible and hidden tests pass.
 
 The tests that run are the pristine copies kept next to this file, not the ones in WORKDIR,
-so editing the tests in the working directory cannot help. The package under test is WORKDIR/billing.
+so editing the tests in the working directory cannot help. The package under test is WORKDIR/shop.
 """
 
 import os
@@ -30,8 +30,8 @@ def main(argv):
         print("usage: grade.py WORKDIR", file=sys.stderr)
         return 2
     work = os.path.abspath(argv[1])
-    if not os.path.isfile(os.path.join(work, "billing", "__init__.py")):
-        print("billing package missing")
+    if not os.path.isfile(os.path.join(work, "shop", "__init__.py")):
+        print("shop package missing")
         return 1
     visible = run_suite("visible", os.path.join(HERE, "template", "tests"), work)
     hidden = run_suite("hidden", os.path.join(HERE, "hidden"), work)

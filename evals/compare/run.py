@@ -15,6 +15,7 @@ arguments), 4 stopped because the next run could push the budget over the limit.
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -23,6 +24,8 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 from fractions import Fraction
 from pathlib import Path
@@ -170,23 +173,72 @@ def plugin_head(plugin_dir):
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
-def check_plugin_tree(plugin_dir, sealed_head=None):
-    """The frozen tree must be a git checkout with a clean state (and the sealed commit, if one was sealed)."""
+def tree_hash(root):
+    """sha256 over sorted relative paths and file contents (symlinks by target); independent of mtimes and ownership."""
+    h = hashlib.sha256()
+    root = str(root)
+    for base, dirs, files in os.walk(root):
+        dirs[:] = sorted(dirs)
+        for name in sorted(files + [d for d in dirs if os.path.islink(os.path.join(base, d))]):
+            full = os.path.join(base, name)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            if os.path.islink(full):
+                h.update(("%s\0link:%s\n" % (rel, os.readlink(full))).encode("utf-8"))
+            else:
+                h.update(("%s\0%s\n" % (rel, sha256_path(full))).encode("utf-8"))
+    return h.hexdigest()
+
+
+def export_frozen(plugin_dir, dest):
+    """Export HEAD of the plugin repository with `git archive` into dest, leaving out evals/ entirely.
+
+    Returns (commit, tree_sha256). The on arm sees only this export, so answer keys and hidden tests,
+    which live under evals/compare, are not in any path the primary can read from --plugin-dir.
+    """
     plugin_dir = Path(plugin_dir)
     if not plugin_dir.is_dir():
         raise Refused("plugin tree not found: %s" % plugin_dir)
-    top = git(["rev-parse", "--show-toplevel"], plugin_dir)
-    if top.returncode != 0:
-        raise Refused("plugin tree is not a git checkout, so its state cannot be shown clean: %s" % plugin_dir)
-    status = git(["status", "--porcelain", "--untracked-files=normal"], plugin_dir)
-    if status.returncode != 0:
-        raise Refused("git status failed in %s" % plugin_dir)
-    if status.stdout.strip():
-        raise Refused("plugin tree has uncommitted changes (git status is dirty): %s" % plugin_dir)
-    head = plugin_head(plugin_dir)
-    if sealed_head and head != sealed_head:
-        raise Refused("plugin tree is at %s but the seal records %s" % (head, sealed_head))
-    return head
+    commit = plugin_head(plugin_dir)
+    if commit is None:
+        raise Refused("plugin tree is not a git checkout, so it cannot be exported by commit: %s" % plugin_dir)
+    proc = subprocess.run(["git", "archive", "--format=tar", commit], cwd=str(plugin_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise Refused("git archive failed: %s" % proc.stderr.decode("utf-8", "replace")[:300])
+    dest = Path(dest)
+    if dest.exists():
+        remove_inside(dest, dest.parent)
+    dest.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
+        for member in tar.getmembers():
+            name = member.name.lstrip("./")
+            if not name or name == "evals" or name.startswith("evals/") or name == "pax_global_header":
+                continue
+            if name.startswith("/") or ".." in name.split("/"):
+                raise Refused("unsafe path in archive: " + member.name)
+            target = dest / name
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(str(target), "wb") as out:
+                    out.write(tar.extractfile(member).read())
+                os.chmod(str(target), member.mode & 0o777 or 0o644)
+            elif member.issym():
+                if member.linkname.startswith("/") or ".." in member.linkname.split("/"):
+                    raise Refused("unsafe symlink in archive: " + member.name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(member.linkname, str(target))
+    return commit, tree_hash(dest)
+
+
+def sealed_plugin_values(plugin_dir):
+    """Commit and export hash of the plugin tree as it would be frozen now."""
+    tmp = Path(tempfile.mkdtemp(prefix="compare-seal-"))
+    try:
+        return export_frozen(plugin_dir, tmp / "frozen")
+    finally:
+        make_tree_writable(tmp)
+        shutil.rmtree(str(tmp), ignore_errors=True)
 
 
 def cmd_seal(args):
@@ -200,14 +252,15 @@ def cmd_seal(args):
         "warmup_order": warmup_order(seed),
         "schedule": [list(c) for c in make_schedule(seed)],
         "plugin_head": None,
+        "plugin_tree_sha256": None,
         "files": sealed_files(),
     }
     if args.plugin_dir:
-        data["plugin_head"] = check_plugin_tree(args.plugin_dir)
+        data["plugin_head"], data["plugin_tree_sha256"] = sealed_plugin_values(args.plugin_dir)
     with open(str(SEAL_PATH), "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1, sort_keys=True)
         fh.write("\n")
-    print("sealed %d files, seed %d, plugin head %s" % (len(data["files"]), seed, data["plugin_head"]))
+    print("sealed %d files, seed %d, plugin head %s, export %s" % (len(data["files"]), seed, data["plugin_head"], data["plugin_tree_sha256"]))
     return 0
 
 
@@ -345,6 +398,7 @@ def analyse_stream(events):
     results = [e for e in events if e.get("type") == "result"]
     final = results[-1] if results else None
     tool_ids, agent_ids = set(), set()
+    tool_blocks = []
     peak = 0
     for e in events:
         if e.get("type") != "assistant" or not isinstance(e.get("message"), dict):
@@ -353,6 +407,8 @@ def analyse_stream(events):
         for block in message.get("content") or []:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 key = block.get("id") or id(block)
+                if key not in tool_ids:
+                    tool_blocks.append(block)
                 tool_ids.add(key)
                 if block.get("name") in AGENT_TOOL_NAMES:
                     agent_ids.add(key)
@@ -361,6 +417,7 @@ def analyse_stream(events):
             ctx = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
             peak = max(peak, ctx)
     denials = list((final or {}).get("permission_denials") or [])
+    bash_calls = len([b for b in tool_blocks if b.get("name") == "Bash"])
     costs = [float(r["total_cost_usd"]) for r in results if isinstance(r.get("total_cost_usd"), (int, float))]
     return {
         "init": init,
@@ -374,7 +431,53 @@ def analyse_stream(events):
         "agent_calls": len(agent_ids),
         "peak_context_tokens": peak,
         "denials": denials,
+        "bash_calls": bash_calls,
+        "tool_blocks": tool_blocks,
+        "transcript_hint": (init or {}).get("transcript_path"),
     }
+
+
+LEAK_PATTERNS = (
+    re.compile(r"evals/compare"),
+    re.compile(r"key\.json"),
+    re.compile(r"hidden/|/hidden\b|test_hidden"),
+    re.compile(r"(?<![A-Za-z0-9_])reference/"),
+)
+
+
+def _block_texts(blocks, workdir):
+    for block in blocks:
+        text = json.dumps(block.get("input", {}), sort_keys=True)
+        yield block.get("name"), re.sub(re.escape(str(workdir)) + r"[^\s\"']*", "<workdir>", text)
+
+
+def leak_scan(tool_blocks, workdir, subagent_dir=None):
+    """Tool inputs that mention answer keys, hidden tests or reference solutions (paths inside the working dir are masked)."""
+    blocks = list(tool_blocks)
+    if subagent_dir and Path(subagent_dir).is_dir():
+        for f in sorted(Path(subagent_dir).glob("agent-*.jsonl")):
+            for rec in read_events(f):
+                content = (rec.get("message") or {}).get("content") if isinstance(rec.get("message"), dict) else None
+                for b in content or []:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        blocks.append(b)
+    hits = []
+    for name, text in _block_texts(blocks, os.path.realpath(str(workdir))):
+        for pat in LEAK_PATTERNS:
+            m = pat.search(text)
+            if m:
+                hits.append("%s: %s" % (name, text[max(0, m.start() - 30):m.end() + 30]))
+    return hits
+
+
+def denial_reason(d):
+    if not isinstance(d, dict):
+        return str(d)[:200]
+    parts = [str(d[k]) for k in ("decision_reason_type", "decision_reason", "reason", "message") if d.get(k)]
+    return " | ".join(parts)[:300]
+
+
+CONFIG_REASON = re.compile(r"\b(mode|rules?|allowedtools|allowlist|allow list|deny list|settings)\b", re.I)
 
 
 def projects_root():
@@ -382,16 +485,30 @@ def projects_root():
     return Path(base) / "projects"
 
 
-def project_dir_for(workdir):
-    return projects_root() / re.sub(r"[^A-Za-z0-9_-]", "-", os.path.realpath(str(workdir)))
+def encode_cwd(path):
+    """Claude Code names a project directory after the cwd with every non-alphanumeric character as `-`."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
 
 
-def transcript_cost(session_id, workdir):
+def project_dir_for(workdir, session_id=None, hint=None):
+    """The transcript directory of a run: the path the stream names, else the encoded cwd, else a search by session id."""
+    if hint and os.path.isfile(str(hint)):
+        return Path(hint).parent
+    root = projects_root()
+    encoded = root / encode_cwd(os.path.realpath(str(workdir)))
+    if session_id and not (encoded / (session_id + ".jsonl")).is_file() and root.is_dir():
+        for d in sorted(root.iterdir()):
+            if (d / (session_id + ".jsonl")).is_file():
+                return d
+    return encoded
+
+
+def transcript_cost(session_id, workdir, hint=None):
     """Cost from transcripts via scripts/mitosis-cost-report.py. Returns (dict, error)."""
     if not session_id:
         return None, "no session id"
     script = REPO / "scripts" / "mitosis-cost-report.py"
-    proc = subprocess.run([sys.executable, str(script), "--project", str(project_dir_for(workdir)), "--session", session_id, "--json"],
+    proc = subprocess.run([sys.executable, str(script), "--project", str(project_dir_for(workdir, session_id, hint)), "--session", session_id, "--json"],
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=180)
     if proc.returncode != 0:
         return None, "cost report exit %d: %s" % (proc.returncode, proc.stderr.strip()[:300])
@@ -414,6 +531,7 @@ class Context:
     def __init__(self, args, seal=None):
         self.claude = args.claude
         self.plugin_dir = os.path.abspath(args.plugin_dir)
+        self.frozen = None
         self.work_root = Path(os.path.abspath(args.work_root))
         self.out = Path(os.path.abspath(args.out))
         self.keep = args.keep
@@ -456,6 +574,8 @@ def execute(ctx, kind, task, arm, cell_id, cell_dir, cap):
     if workdir.exists():
         remove_inside(workdir, ctx.work_root)
     scaffold(task, workdir)
+    if arm == "on" and ctx.frozen and tree_hash(ctx.plugin_dir) != ctx.frozen["tree_sha256"]:
+        raise Refused("the frozen plugin tree changed during the experiment")
     cell_dir = Path(cell_dir)
     cell_dir.mkdir(parents=True)
     prompt = read_prompt(task)
@@ -467,7 +587,9 @@ def execute(ctx, kind, task, arm, cell_id, cell_dir, cap):
     info = analyse_stream(read_events(cell_dir / "stream.jsonl"))
     with open(str(cell_dir / "result_events.json"), "w", encoding="utf-8") as fh:
         json.dump(info["results"], fh, indent=1)
-    tcost, terr = transcript_cost(info["session_id"], workdir)
+    tcost, terr = transcript_cost(info["session_id"], workdir, info["transcript_hint"])
+    proj = project_dir_for(workdir, info["session_id"], info["transcript_hint"])
+    leaks = leak_scan(info["tool_blocks"], workdir, proj / str(info["session_id"]) / "subagents" if info["session_id"] else None)
     grade = subprocess.run([sys.executable, str(HERE / "tasks" / task / "grade.py"), str(workdir)], cwd=str(cell_dir),
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=300)
     with open(str(cell_dir / "grade.txt"), "w", encoding="utf-8") as fh:
@@ -477,9 +599,8 @@ def execute(ctx, kind, task, arm, cell_id, cell_dir, cap):
     capped = any("budget" in str(s) for s in info["subtypes"]) or charged >= cap
     if capped or timed_out:
         charged = max(charged, float(cap))
-    success = grade.returncode == 0 and not capped and not timed_out
+    success = grade.returncode == 0 and not capped and not timed_out and not leaks
     sid = info["session_id"]
-    proj = project_dir_for(workdir)
     result = {
         "id": cell_id, "kind": kind, "task": task, "arm": arm, "cap": cap,
         "session_id": sid, "transcript_main": str(proj / (str(sid) + ".jsonl")) if sid else None,
@@ -492,6 +613,8 @@ def execute(ctx, kind, task, arm, cell_id, cell_dir, cap):
         "peak_context_tokens": info["peak_context_tokens"], "tool_calls": info["tool_calls"], "agent_calls": info["agent_calls"],
         "subagent_models": (tcost or {}).get("subagent_models"), "subagent_files": (tcost or {}).get("subagent_files"),
         "permission_denials": len(info["denials"]), "permission_denial_tools": [str(d.get("tool_name")) for d in info["denials"] if isinstance(d, dict)],
+        "permission_denial_reasons": [denial_reason(d) for d in info["denials"]], "bash_calls": info["bash_calls"],
+        "leak_suspect": bool(leaks), "leak_hits": leaks[:5],
         "n_result_events": len(info["results"]), "result_subtypes": info["subtypes"],
     }
     with open(str(cell_dir / "result.json"), "w", encoding="utf-8") as fh:
@@ -519,7 +642,6 @@ def common_setup(args, need_seal):
             raise Refused("fixtures differ from SEAL.json:\n  " + "\n  ".join(problems[:20]))
         if args.seed is not None and args.seed != seal["seed"]:
             raise Refused("--seed %d differs from the sealed seed %d" % (args.seed, seal["seed"]))
-    check_plugin_tree(args.plugin_dir, seal.get("plugin_head") if seal else None)
     work_root = Path(os.path.abspath(args.work_root))
     out = Path(os.path.abspath(args.out))
     if "/worktrees/" in (os.path.realpath(str(work_root)) + "/"):
@@ -528,7 +650,22 @@ def common_setup(args, need_seal):
         raise Refused("claude executable not found: %s" % args.claude)
     work_root.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
-    return Context(args, seal)
+    ctx = Context(args, seal)
+    dirty = git(["status", "--porcelain", "--untracked-files=no"], args.plugin_dir)
+    if dirty.returncode == 0 and dirty.stdout.strip():
+        print("note: the plugin checkout has uncommitted changes; the frozen export is built from the commit, not from them")
+    commit, digest = export_frozen(args.plugin_dir, work_root / "_frozen" / "plugin")
+    if seal:
+        if not seal.get("plugin_tree_sha256"):
+            raise Refused("the seal did not record a plugin tree: run `run.py seal --plugin-dir DIR`")
+        if commit != seal.get("plugin_head") or digest != seal["plugin_tree_sha256"]:
+            raise Refused("plugin export (commit %s, sha256 %s) differs from the seal (commit %s, sha256 %s)"
+                          % (commit, digest, seal.get("plugin_head"), seal["plugin_tree_sha256"]))
+    ctx.plugin_dir = str(work_root / "_frozen" / "plugin")
+    ctx.frozen = {"commit": commit, "tree_sha256": digest}
+    with open(str(out / "frozen.json"), "w", encoding="utf-8") as fh:
+        json.dump(ctx.frozen, fh, indent=1)
+    return ctx
 
 
 def preflight_scaffolds(ctx):
@@ -665,25 +802,33 @@ def pilot_checks(off, on, plugin_dir):
             out.append(("UNKNOWN", name, "no transcript to inspect and no marker %r in the stream" % marker))
         else:
             out.append(("FAIL", name, "marker %r not found in the transcript; the slash command may not have expanded" % marker))
-    # 4. Bash rules work, 5. no denials
+    # 4. Bash rules work, 5. denials. Claude Code's own limits on model-written compound commands are not
+    # a misconfiguration: FAIL only when Bash could not run at all or a denial names the mode or the rules.
     for label, run in (("off", off), ("on", on)):
         if run is None:
             continue
-        bash = [e for e in run["info"].get("events", []) if e.get("type") == "assistant"
-                for b in (e.get("message", {}).get("content") or []) if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash"]
+        res = run["result"]
+        reasons = res.get("permission_denial_reasons") or []
+        config = [r for r in reasons if CONFIG_REASON.search(r)]
+        bash_total = res.get("bash_calls", 0)
+        denied_bash = len([t for t in res["permission_denial_tools"] if t == "Bash"])
+        note = "%d denial(s)%s" % (len(reasons), (": " + "; ".join(r[:80] for r in reasons[:3])) if reasons else "")
         name = "%s arm: Bash allow rules work" % label
-        denied = [t for t in run["result"]["permission_denial_tools"] if t == "Bash"]
-        if denied:
-            out.append(("FAIL", name, "%d Bash calls denied" % len(denied)))
-        elif not bash:
+        if bash_total and denied_bash >= bash_total:
+            out.append(("FAIL", name, "every Bash call was denied (%d of %d)" % (denied_bash, bash_total)))
+        elif config:
+            out.append(("FAIL", name, "a denial names the mode or the rules: %s" % config[0][:120]))
+        elif not bash_total:
             out.append(("UNKNOWN", name, "the run made no Bash call"))
         else:
-            out.append(("PASS", name, "%d Bash calls, none denied" % len(bash)))
-        name = "%s arm: no permission denials" % label
-        if run["result"]["n_result_events"] == 0:
+            out.append(("PASS", name, "%d Bash calls, %d denied (%s)" % (bash_total, denied_bash, note)))
+        name = "%s arm: permission denials" % label
+        if res["n_result_events"] == 0:
             out.append(("UNKNOWN", name, "no result event"))
-        elif run["result"]["permission_denials"]:
-            out.append(("FAIL", name, "tools denied: %s" % ", ".join(run["result"]["permission_denial_tools"])))
+        elif config:
+            out.append(("FAIL", name, "a denial names the mode or the rules: %s" % config[0][:120]))
+        elif reasons:
+            out.append(("PASS", name, "%s; recorded, not a misconfiguration" % note))
         else:
             out.append(("PASS", name, "none"))
     # 6. subagents ran with the pinned models; 7. does the CLI total include subagents
@@ -814,6 +959,9 @@ def build_report(out):
                 "median_peak_context": med([r["peak_context_tokens"] for r in rs]),
                 "median_wall_s": med([r["wall_s"] for r in rs]),
                 "agent_calls": [r["agent_calls"] for r in rs], "ids": [r["id"] for r in rs],
+                "denials": [r.get("permission_denials", 0) for r in rs],
+                "denial_reasons": [r.get("permission_denial_reasons", []) for r in rs],
+                "leak_suspects": [r["id"] for r in rs if r.get("leak_suspect")],
             }
         row["verdict"], row["reason"] = verdict([(r["success"], r["cost"]) for r in by_arm.get("on", [])],
                                                 [(r["success"], r["cost"]) for r in by_arm.get("off", [])])
@@ -832,6 +980,11 @@ def render_report(report, ledger_total=None):
             lines.append("  %-3s successes %d/%d  median cost %s  costs [%s]  median peak context %s  agent calls %s" % (
                 arm, a["successes"], a["n"], "n/a" if a["median_cost"] is None else "%.4f" % a["median_cost"], costs,
                 "n/a" if a["median_peak_context"] is None else "%d" % a["median_peak_context"], a["agent_calls"]))
+            lines.append("      permission denials per run %s (recorded only, they do not enter the verdict); leak suspects: %s" % (
+                a["denials"], ", ".join(a["leak_suspects"]) or "none"))
+            for rid, reasons in zip(a["ids"], a["denial_reasons"]):
+                for reason in reasons:
+                    lines.append("      denial in %s: %s" % (rid, reason[:120]))
         lines.append("  verdict: %s (%s)" % (row["verdict"], row["reason"]))
     lines.append("")
     lines.extend(report["actions"])

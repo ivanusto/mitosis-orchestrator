@@ -127,6 +127,32 @@ class VerdictTable(unittest.TestCase):
         self.assertIn("HARM on fix", " ".join(acts({"lookup": "INCONCLUSIVE", "fix": "HARM", "ops": "INCONCLUSIVE"})))
 
 
+class EncodingTests(unittest.TestCase):
+    def test_every_non_alphanumeric_character_becomes_a_dash_and_matches_the_cost_report(self):
+        cost_report = load_module("compare_cost_report", REPO / "scripts" / "mitosis-cost-report.py")
+        for path in ("/tmp/exp_work/pilot__off", "/home/me/.gemini/x y", "/tmp/claude-1000/-home-me/a.b_c", "/plain/path"):
+            self.assertEqual(cmp_run.encode_cwd(path), cost_report.encode_project_dir(path), path)
+        self.assertEqual(cmp_run.encode_cwd("/tmp/exp_work/pilot__off"), "-tmp-exp-work-pilot--off")
+
+    def test_project_dir_falls_back_to_a_search_by_session_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ["CLAUDE_CONFIG_DIR"] = d
+            try:
+                root = Path(d) / "projects"
+                (root / "-some-other-name").mkdir(parents=True)
+                (root / "-some-other-name" / "abc.jsonl").write_text("{}\n")
+                self.assertEqual(cmp_run.project_dir_for("/no/such/dir", "abc"), root / "-some-other-name")
+                self.assertEqual(cmp_run.project_dir_for("/no/such/dir", "zzz"), root / "-no-such-dir")
+                hint = root / "-some-other-name" / "abc.jsonl"
+                self.assertEqual(cmp_run.project_dir_for("/x", "abc", str(hint)), root / "-some-other-name")
+            finally:
+                if old is None:
+                    del os.environ["CLAUDE_CONFIG_DIR"]
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old
+
+
 class ScheduleTests(unittest.TestCase):
     def test_schedule_is_fixed_by_seed_and_complete(self):
         a = cmp_run.make_schedule(7)
@@ -167,7 +193,7 @@ argv = sys.argv[1:]
 stdin_data = sys.stdin.read()
 arm = "on" if "--plugin-dir" in argv else "off"
 cwd = os.path.realpath(os.getcwd())
-task = "lookup" if os.path.isdir("stdlib") else ("fix" if os.path.isdir("billing") else "ops")
+task = "lookup" if os.path.isdir("stdlib") else ("fix" if os.path.isdir("shop") else "ops")
 with open(cfg["log"], "a") as fh:
     fh.write(json.dumps({"argv": argv, "cwd": cwd, "arm": arm, "task": task, "stdin": stdin_data}) + "\n")
 if cfg.get("sleep"):
@@ -185,12 +211,13 @@ if cfg.get("solve", True):
     if task == "lookup":
         shutil.copy(os.path.join(tasks_dir, "lookup", "reference", "answers.json"), "answers.json")
     elif task == "fix":
-        shutil.copy(os.path.join(tasks_dir, "fix", "reference", "money.py"), os.path.join("billing", "money.py"))
+        for part, name in (("A", "money.py"), ("B", "shipping.py"), ("C", "fulfilment.py")):
+            shutil.copy(os.path.join(tasks_dir, "fix", "reference", part, name), os.path.join("shop", name))
     else:
         subprocess.check_call([sys.executable, os.path.join(tasks_dir, "ops", "reference", "solve.py"), cwd])
 
 sid = "sess-%s-%d" % (task, int(time.time() * 1000) % 100000000)
-enc = "".join(c if (c.isalnum() or c in "_-") else "-" for c in cwd)
+enc = "".join(c if c.isalnum() else "-" for c in cwd)
 proj = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", enc)
 os.makedirs(os.path.join(proj, sid, "subagents"), exist_ok=True)
 prompt = argv[argv.index("-p") + 1]
@@ -225,7 +252,10 @@ def assistant(mid, ctx, blocks, parent=None):
 
 
 out.append(assistant("m1", 1000, [{"type": "text", "text": "start"}]))
-out.append(assistant("m2", 4000, [{"type": "tool_use", "id": "tb1", "name": "Bash", "input": {"command": "ls"}}]))
+bash_blocks = [{"type": "tool_use", "id": "tb%d" % i, "name": "Bash", "input": {"command": "ls"}} for i in range(cfg.get("bash_calls", 1))]
+if cfg.get("leak"):
+    bash_blocks.append({"type": "tool_use", "id": "tbl", "name": "Read", "input": {"file_path": cfg["leak"]}})
+out.append(assistant("m2", 4000, bash_blocks))
 agent_blocks = [{"type": "tool_use", "id": "ta%d" % i, "name": "Agent", "input": {"subagent_type": "mitosis-orchestrator:flash-worker"}} for i in range(n_agents)]
 out.append(assistant("m3", 2500, agent_blocks or [{"type": "text", "text": "done"}]))
 if n_agents:
@@ -266,6 +296,10 @@ class Sandbox:
         (self.plugin / "claude-agents" / "flash-worker.md").write_text("---\nname: flash-worker\nmodel: sonnet\n---\n")
         (self.plugin / "claude-agents" / "flash-lite-scout.md").write_text("---\nname: flash-lite-scout\nmodel: haiku\n---\n")
         (self.plugin / "skills" / "orchestrate" / "SKILL.md").write_text("---\nname: orchestrate\n---\n\n# Mitosis Orchestrator Workflow (`/orchestrate`, v9)\n")
+        (self.plugin / "evals" / "compare" / "tasks" / "fix" / "hidden").mkdir(parents=True)
+        (self.plugin / "evals" / "compare" / "tasks" / "fix" / "hidden" / "test_hidden.py").write_text("SECRET = 1\n")
+        (self.plugin / "evals" / "README.md").write_text("evals\n")
+        (self.plugin / "agents-link").symlink_to("claude-agents")
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
         for cmd in (git + ["init", "-q"], git + ["add", "-A"], git + ["commit", "-q", "-m", "x"]):
             subprocess.run(cmd, cwd=str(self.plugin), check=True, stdout=subprocess.DEVNULL)
@@ -300,6 +334,9 @@ class Sandbox:
         return ["--plugin-dir", str(self.plugin), "--work-root", str(self.work), "--out", str(self.out)] + list(extra)
 
     def seal(self, *extra):
+        if "--plugin-dir" not in extra and "--no-plugin" not in extra:
+            extra = extra + ("--plugin-dir", str(self.plugin))
+        extra = tuple(e for e in extra if e != "--no-plugin")
         proc = self.cli("seal", *extra)
         assert proc.returncode == 0, proc.stderr
         return json.loads((self.root / "evals" / "compare" / "SEAL.json").read_text())
@@ -323,17 +360,18 @@ class Sandbox:
 class SealTests(unittest.TestCase):
     def test_seal_records_every_fixture_the_protocol_and_the_seed(self):
         sb = Sandbox(self)
-        seal = sb.seal("--seed", "42", "--plugin-dir", str(sb.plugin))
+        seal = sb.seal("--seed", "42")
         files = seal["files"]
         for name in ("PROTOCOL.md", "run.py", "tasks/lookup/prompt.md", "tasks/fix/prompt.md", "tasks/ops/prompt.md",
                      "tasks/lookup/grade.py", "tasks/fix/grade.py", "tasks/ops/grade.py", "tasks/lookup/scaffold.py",
                      "tasks/lookup/stdlib.manifest.json", "tasks/lookup/key.json", "tasks/fix/hidden/test_hidden.py",
-                     "tasks/ops/allowed_tools.txt", "tasks/fix/template/billing/money.py", "repo:scripts/mitosis-cost-report.py"):
+                     "tasks/ops/allowed_tools.txt", "tasks/fix/template/shop/money.py", "repo:scripts/mitosis-cost-report.py"):
             self.assertIn(name, files)
             self.assertEqual(len(files[name]), 64)
         self.assertEqual(seal["seed"], 42)
         self.assertEqual(len(seal["schedule"]), 18)
         self.assertEqual(len(seal["plugin_head"]), 40)
+        self.assertEqual(len(seal["plugin_tree_sha256"]), 64)
         self.assertFalse([f for f in files if "__pycache__" in f or f.endswith(".pyc")])
 
     def test_run_refuses_without_seal(self):
@@ -362,26 +400,41 @@ class SealTests(unittest.TestCase):
                 self.assertEqual(sb.calls(), [])
                 self.assertFalse((sb.out / "runs").exists())
 
-    def test_run_refuses_a_different_seed_and_a_dirty_or_moved_plugin_tree(self):
+    def test_run_refuses_a_different_seed_a_moved_commit_or_an_unrecorded_tree(self):
         sb = Sandbox(self)
-        sb.seal("--plugin-dir", str(sb.plugin))
+        sb.seal()
         proc = sb.cli("run", *sb.common("--seed", "5"))
         self.assertEqual(proc.returncode, 2)
         self.assertIn("sealed seed", proc.stderr)
-        (sb.plugin / "stray.txt").write_text("dirty")
-        proc = sb.cli("run", *sb.common())
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("uncommitted", proc.stderr)
-        (sb.plugin / "stray.txt").unlink()
+        # uncommitted edits do not matter: the export is built from the sealed commit (and they are reported)
         (sb.plugin / "claude-agents" / "flash-worker.md").write_text("---\nmodel: haiku\n---\n")
-        proc = sb.cli("run", *sb.common())
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("uncommitted", proc.stderr)
+        proc = sb.cli("run", *sb.common("--spent-before", "59"))
+        self.assertEqual(proc.returncode, 4, proc.stdout + proc.stderr)
+        self.assertIn("uncommitted changes", proc.stdout)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@e.invalid", "commit", "-qam", "move"], cwd=str(sb.plugin), check=True)
         proc = sb.cli("run", *sb.common())
         self.assertEqual(proc.returncode, 2)
-        self.assertIn("seal records", proc.stderr)
+        self.assertIn("differs from the seal", proc.stderr)
         self.assertEqual(sb.calls(), [])
+        other = Sandbox(self)
+        other.seal("--no-plugin")
+        proc = other.cli("run", *other.common())
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("did not record a plugin tree", proc.stderr)
+
+    def test_frozen_export_leaves_out_evals_and_is_hashed(self):
+        sb = Sandbox(self)
+        dest = sb.tmp / "export"
+        commit, digest = cmp_run.export_frozen(sb.plugin, dest)
+        self.assertEqual(len(commit), 40)
+        self.assertFalse((dest / "evals").exists())
+        self.assertTrue((dest / "skills" / "orchestrate" / "SKILL.md").is_file())
+        self.assertTrue((dest / "agents-link").is_symlink())
+        self.assertEqual(cmp_run.tree_hash(dest), digest)
+        self.assertEqual(cmp_run.export_frozen(sb.plugin, sb.tmp / "export2")[1], digest)
+        (dest / "claude-agents" / "flash-worker.md").write_text("changed")
+        self.assertNotEqual(cmp_run.tree_hash(dest), digest)
+        self.assertEqual(sh(["grep", "-r", "SECRET", str(sb.tmp / "export2")]).returncode, 1)
 
     def test_run_refuses_a_plugin_tree_that_is_not_a_checkout(self):
         sb = Sandbox(self)
@@ -459,7 +512,8 @@ class RunTests(unittest.TestCase):
             body = (TASKS / c["task"] / "prompt.md").read_text().strip() + "\n"
             if c["arm"] == "on":
                 self.assertIn("--plugin-dir", argv)
-                self.assertEqual(argv[argv.index("--plugin-dir") + 1], str(sb.plugin))
+                frozen = argv[argv.index("--plugin-dir") + 1]
+                self.assertEqual(frozen, str(sb.work / "_frozen" / "plugin"))
                 self.assertEqual(prompt, "/mitosis-orchestrator:orchestrate " + body)
             else:
                 self.assertNotIn("--plugin-dir", argv)
@@ -482,7 +536,10 @@ class RunTests(unittest.TestCase):
         self.assertAlmostEqual(on["transcript_subagent_cost"], 0.5, places=2)
         self.assertAlmostEqual(on["cost"], 2.0, places=2)
         # cleanup and bookkeeping
-        self.assertEqual(list(sb.work.iterdir()), [])
+        self.assertEqual([p.name for p in sb.work.iterdir()], ["_frozen"])
+        self.assertFalse((sb.work / "_frozen" / "plugin" / "evals").exists())
+        frozen_info = json.loads((sb.out / "frozen.json").read_text())
+        self.assertEqual(frozen_info["tree_sha256"], seal["plugin_tree_sha256"])
         self.assertEqual(len((sb.out / "sessions.txt").read_text().splitlines()), 20)
         ledger = [json.loads(line) for line in (sb.out / "ledger.jsonl").read_text().splitlines()]
         self.assertEqual(len(ledger), 40)
@@ -517,7 +574,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(len(sb.calls()), 4)
         self.assertEqual(len(list(sb.out.glob("runs/*/result.json"))), 2)
-        self.assertEqual(len([p for p in sb.work.iterdir()]), 4)
+        self.assertEqual(len([p for p in sb.work.iterdir()]), 5)  # four kept work dirs and _frozen
         blocked = sb.cli("run", *sb.common("--max-runs", "2"))
         self.assertEqual(blocked.returncode, 2)
         self.assertEqual(len(sb.calls()), 4)
@@ -618,6 +675,45 @@ class RunTests(unittest.TestCase):
         self.assertNotEqual(res["grade_exit"], 0)
         self.assertAlmostEqual(res["cost"], 0.7, places=2)
 
+    def test_leak_check_marks_a_run_as_a_failure_and_the_report_says_so(self):
+        for leak in ("/x/evals/compare/tasks/fix/hidden/test_hidden.py", "/x/anything/key.json", "/x/tasks/ops/reference/solve.py"):
+            with self.subTest(leak):
+                sb = Sandbox(self, leak=leak)
+                sb.seal()
+                proc = sb.cli("run", *sb.common("--max-runs", "1"))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                res = sb.results()[0]
+                self.assertTrue(res["leak_suspect"])
+                self.assertEqual(res["grade_exit"], 0)
+                self.assertFalse(res["success"])
+                self.assertTrue(res["leak_hits"])
+                report = sb.cli("report", "--out", str(sb.out)).stdout
+                self.assertIn(res["id"], report.split("leak suspects:")[1].split("\n")[0] + report)
+
+    def test_clean_runs_are_not_leak_suspects(self):
+        sb = Sandbox(self)
+        sb.seal()
+        sb.cli("run", *sb.common("--max-runs", "2"))
+        for res in sb.results():
+            self.assertFalse(res["leak_suspect"])
+            self.assertEqual(res["leak_hits"], [])
+        # paths inside the working directory never count, however they are named
+        blocks = [{"name": "Read", "input": {"file_path": "/w/run1/hidden/reference/key.json"}}]
+        self.assertEqual(cmp_run.leak_scan(blocks, "/w/run1"), [])
+        self.assertTrue(cmp_run.leak_scan([{"name": "Bash", "input": {"command": "cat /repo/evals/compare/x"}}], "/w/run1"))
+        self.assertFalse(cmp_run.leak_scan([{"name": "Bash", "input": {"command": "ls shop; cat shop/money.py; echo hidden state"}}], "/w/run1"))
+
+    def test_transcript_lookup_survives_underscores_and_other_characters(self):
+        sb = Sandbox(self)
+        # the work root name has underscores and dots, as the real pilot's did
+        weird = sb.tmp / "exp_work.v2"
+        sb.seal()
+        proc = sb.cli("run", "--plugin-dir", str(sb.plugin), "--work-root", str(weird), "--out", str(sb.out), "--max-runs", "1")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        res = sb.results()[0]
+        self.assertIsNone(res["cost_report_error"])
+        self.assertGreater(res["transcript_cost"], 0)
+
     def test_missing_claude_is_refused(self):
         sb = Sandbox(self)
         sb.seal()
@@ -658,8 +754,8 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.status(out, "on arm skill expanded under -p"), "PASS")
         self.assertEqual(self.status(out, "off arm: Bash allow rules work"), "PASS")
         self.assertEqual(self.status(out, "on arm: Bash allow rules work"), "PASS")
-        self.assertEqual(self.status(out, "off arm: no permission denials"), "PASS")
-        self.assertEqual(self.status(out, "on arm: no permission denials"), "PASS")
+        self.assertEqual(self.status(out, "off arm: permission denials"), "PASS")
+        self.assertEqual(self.status(out, "on arm: permission denials"), "PASS")
         self.assertEqual(self.status(out, "on arm: subagents ran with pinned models"), "PASS")
         self.assertEqual(self.status(out, "CLI total includes subagent cost"), "PASS")
         self.assertIn("yes:", [ln for ln in out.splitlines() if "CLI total includes" in ln][0])
@@ -683,8 +779,32 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(len(sb.calls()), 1)
         self.assertEqual(self.status(proc.stdout, "off arm: Bash allow rules work"), "FAIL")
-        self.assertEqual(self.status(proc.stdout, "off arm: no permission denials"), "FAIL")
+        self.assertIn("every Bash call was denied", proc.stdout)
         self.assertIn("pilot stopped", proc.stdout)
+
+    def test_a_denied_compound_command_is_recorded_but_is_not_a_misconfiguration(self):
+        denial = {"tool_name": "Bash", "tool_use_id": "x", "decision_reason_type": "other",
+                  "message": "A variable in this command can't be checked before it runs"}
+        sb = Sandbox(self, bash_calls=4, denials={"off": [denial]})
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        line = [ln for ln in proc.stdout.splitlines() if ln.startswith("PASS") and "off arm: permission denials" in ln][0]
+        self.assertIn("1 denial(s)", line)
+        self.assertIn("can't be checked", line)
+        self.assertEqual(self.status(proc.stdout, "off arm: Bash allow rules work"), "PASS")
+        result = json.loads((sb.out / "pilot" / "off" / "result.json").read_text())
+        self.assertEqual(result["permission_denials"], 1)
+        self.assertIn("can't be checked", result["permission_denial_reasons"][0])
+        self.assertEqual(result["bash_calls"], 4)
+
+    def test_a_denial_that_names_the_mode_or_rules_fails_the_pilot(self):
+        denial = {"tool_name": "Bash", "decision_reason_type": "rule", "message": "Bash(ls:*) is not in the allow rules for mode acceptEdits"}
+        sb = Sandbox(self, bash_calls=4, denials={"off": [denial]})
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(self.status(proc.stdout, "off arm: Bash allow rules work"), "FAIL")
+        self.assertEqual(self.status(proc.stdout, "off arm: permission denials"), "FAIL")
+        self.assertEqual(len(sb.calls()), 1)
 
     def test_pilot_fails_on_mitosis_hooks_in_the_off_arm(self):
         sb = Sandbox(self, hook_events={"off": ["python3 enforce-orchestrator.py pre-tool-use"]})
@@ -846,63 +966,109 @@ class LookupFixture(unittest.TestCase):
         self.assertIn("no longer matches", proc.stdout)
 
 
+FIX_PARTS = {"A": "money.py", "B": "shipping.py", "C": "fulfilment.py"}
+
+
 class FixFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cmp-fix-"))
         self.addCleanup(rmtree, self.tmp)
+        self.n = 0
+
+    def fresh(self, fixes=""):
+        self.n += 1
+        work = scaffold("fix", self.tmp / ("w%d" % self.n))
+        for part in fixes:
+            shutil.copy(str(TASKS / "fix" / "reference" / part / FIX_PARTS[part]), str(work / "shop" / FIX_PARTS[part]))
+        return work
 
     def suite(self, work, tests_dir):
         env = dict(os.environ, PYTHONPATH=str(work), PYTHONDONTWRITEBYTECODE="1")
         return sh([sys.executable, "-B", "-m", "unittest", "discover", "-s", str(tests_dir)], cwd=str(work), env=env)
 
-    def test_package_shape(self):
-        mods = sorted(p.name for p in (TASKS / "fix" / "template" / "billing").glob("*.py"))
-        self.assertGreaterEqual(len(mods), 10)
-        self.assertLessEqual(len(mods), 12)
+    def both(self, work):
+        return self.suite(work, work / "tests").returncode, self.suite(work, TASKS / "fix" / "hidden").returncode
 
-    def test_visible_and_hidden_fail_before_and_pass_after(self):
-        work = scaffold("fix", self.tmp / "w")
-        before_vis = self.suite(work, work / "tests")
-        before_hid = self.suite(work, TASKS / "fix" / "hidden")
-        self.assertNotEqual(before_vis.returncode, 0)
-        self.assertNotEqual(before_hid.returncode, 0)
-        failing_modules = set(re.findall(r"^(?:FAIL|ERROR): \w+ \((\w+)\.", before_vis.stderr, re.M))
-        self.assertGreaterEqual(len(failing_modules), 3, failing_modules)
+    def test_package_size_and_layers(self):
+        pkg = TASKS / "fix" / "template" / "shop"
+        mods = sorted(p.name for p in pkg.glob("*.py"))
+        self.assertGreaterEqual(len(mods), 25)
+        lines = sum(len(p.read_text().splitlines()) for p in pkg.glob("*.py"))
+        tests = sum(len(p.read_text().splitlines()) for p in (TASKS / "fix" / "template" / "tests").glob("*.py"))
+        self.assertGreaterEqual(lines + tests, 2400)
+        # layering: lower layers never import higher ones
+        layers = {0: ["errors", "clock", "ids", "units", "money", "validate", "textutil", "calendar"],
+                  1: ["store", "catalog", "customers", "addresses", "inventory"],
+                  2: ["pricing", "tax", "promotions", "discounts", "shipping", "loyalty"],
+                  3: ["orders", "fulfilment", "invoicing", "returns"]}
+        rank = {m: n for n, names in layers.items() for m in names}
+        for mod, n in rank.items():
+            text = (pkg / (mod + ".py")).read_text()
+            for other in re.findall(r"^(?:from shop import|from shop\.(\w+) import) ?(.*)$", text, re.M):
+                named = [other[0]] if other[0] else [x.strip() for x in other[1].split(",")]
+                for name in named:
+                    if name in rank:
+                        self.assertLessEqual(rank[name], n, "%s (layer %d) imports %s (layer %d)" % (mod, n, name, rank[name]))
+
+    def test_untouched_scaffold_fails_and_the_reference_passes(self):
+        work = self.fresh()
+        self.assertEqual(self.both(work), (1, 1))
         self.assertNotEqual(grade("fix", work).returncode, 0)
-        shutil.copy(str(TASKS / "fix" / "reference" / "money.py"), str(work / "billing" / "money.py"))
-        self.assertEqual(self.suite(work, work / "tests").returncode, 0)
-        self.assertEqual(self.suite(work, TASKS / "fix" / "hidden").returncode, 0)
-        proc = grade("fix", work)
+        full = self.fresh("ABC")
+        self.assertEqual(self.both(full), (0, 0))
+        proc = grade("fix", full)
         self.assertEqual(proc.returncode, 0, proc.stdout)
 
-    def test_reference_changes_only_the_root_cause_file(self):
-        template = TASKS / "fix" / "template" / "billing"
-        ref = (TASKS / "fix" / "reference" / "money.py").read_text()
-        orig = (template / "money.py").read_text()
-        diff = [(a, b) for a, b in zip(orig.splitlines(), ref.splitlines()) if a != b]
-        self.assertEqual(len(diff), 1)
-        self.assertEqual(len(orig.splitlines()), len(ref.splitlines()))
+    def test_no_proper_subset_of_the_three_fixes_is_enough(self):
+        for fixes in ("A", "B", "C", "AB", "AC", "BC"):
+            with self.subTest(fixes=fixes):
+                work = self.fresh(fixes)
+                self.assertEqual(self.both(work), (1, 1), fixes)
+                self.assertNotEqual(grade("fix", work).returncode, 0)
 
-    def test_a_symptom_patch_in_one_module_is_not_enough(self):
-        work = scaffold("fix", self.tmp / "w")
-        tax = work / "billing" / "tax.py"
-        tax.write_text(tax.read_text().replace("return util.scale(subtotal_cents, rates.rate_for(region))",
-                                              "return (subtotal_cents * rates.rate_for(region) + 5000) // 10000"))
-        vis = self.suite(work, work / "tests")
+    def test_the_causes_are_in_different_modules_and_layers_and_one_is_masked(self):
+        template = TASKS / "fix" / "template" / "shop"
+        for part, name in FIX_PARTS.items():
+            ref = TASKS / "fix" / "reference" / part
+            self.assertEqual([f for f in os.listdir(str(ref)) if f != "__pycache__"], [name])          # one module per cause, no shared fix
+            self.assertNotEqual((ref / name).read_text(), (template / name).read_text())
+        self.assertEqual(len(set(FIX_PARTS.values())), 3)
+        # masked: with the shipping cause unfixed, the first run shows no stock failure for the cancel path
+        work = self.fresh()
+        first = self.suite(work, work / "tests").stderr
+        self.assertNotIn("FAIL: test_cancelling_after_a_partial_shipment", first)
+        self.assertIn("ERROR: test_cancelling_after_a_partial_shipment", first)
+        self.assertIn("IndexError", first)
+        # fix the shipping cause and the cancel failure appears
+        work_b = self.fresh("B")
+        after_b = self.suite(work_b, work_b / "tests").stderr
+        self.assertIn("FAIL: test_cancelling_after_a_partial_shipment", after_b)
+
+    def test_failures_show_up_in_several_test_modules(self):
+        work = self.fresh()
+        text = self.suite(work, work / "tests").stderr
+        modules = set(re.findall(r"^(?:FAIL|ERROR): \w+ \((\w+)\.", text, re.M))
+        self.assertGreaterEqual(len(modules), 4, modules)
+
+    def test_a_patch_that_works_around_the_symptoms_passes_visible_and_fails_hidden(self):
+        work = self.fresh()
+        for f in sorted((TASKS / "fix" / "symptom").glob("*.py")):
+            shutil.copy(str(f), str(work / "shop" / f.name))
+        self.assertEqual(self.suite(work, work / "tests").returncode, 0)
+        self.assertNotEqual(self.suite(work, TASKS / "fix" / "hidden").returncode, 0)
         proc = grade("fix", work)
         self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("visible: exit 0", proc.stdout)
         self.assertIn("hidden: exit 1", proc.stdout)
-        self.assertNotEqual(vis.returncode, 0)  # discounts, invoice proration and report allocation still fail
 
     def test_editing_the_visible_tests_does_not_help(self):
-        work = scaffold("fix", self.tmp / "w")
+        work = self.fresh()
         for p in (work / "tests").glob("test_*.py"):
             p.write_text("import unittest\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
-        proc = grade("fix", work)
-        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotEqual(grade("fix", work).returncode, 0)
 
     def test_scaffold_is_a_git_repo_with_a_clean_initial_commit(self):
-        work = scaffold("fix", self.tmp / "w")
+        work = self.fresh()
         self.assertEqual(sh(["git", "status", "--porcelain"], cwd=str(work)).stdout.strip(), "")
         self.assertEqual(sh(["git", "rev-list", "--count", "HEAD"], cwd=str(work)).stdout.strip(), "1")
 
