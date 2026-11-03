@@ -71,6 +71,9 @@ def runs(costs, successes=3):
     return [(i < successes, c) for i, c in enumerate(costs)]
 
 
+POSIX_ONLY = unittest.skipIf(os.name == "nt", "the harness and its fake claude are POSIX-only")
+
+
 class VerdictTable(unittest.TestCase):
     def check(self, on, off, want, note=""):
         label, reason = cmp_run.verdict(on, off)
@@ -134,6 +137,7 @@ class EncodingTests(unittest.TestCase):
             self.assertEqual(cmp_run.encode_cwd(path), cost_report.encode_project_dir(path), path)
         self.assertEqual(cmp_run.encode_cwd("/tmp/exp_work/pilot__off"), "-tmp-exp-work-pilot--off")
 
+    @POSIX_ONLY
     def test_project_dir_falls_back_to_a_search_by_session_id(self):
         with tempfile.TemporaryDirectory() as d:
             old = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -308,6 +312,8 @@ class Sandbox:
         case.addCleanup(rmtree, self.tmp)
         self.root = self.tmp / "repo"
         shutil.copytree(str(COMPARE), str(self.root / "evals" / "compare"), ignore=shutil.ignore_patterns("__pycache__", "SEAL.json", "*.pyc"))
+        # these tests exercise the harness with a fake claude, not the pinned stdlib fixture: re-pin the sandbox copy to this interpreter
+        subprocess.run([sys.executable, str(self.root / "evals" / "compare" / "tasks" / "lookup" / "scaffold.py"), "--make-manifest"], check=True)
         (self.root / "scripts").mkdir()
         for name in cmp_run.SEALED_REPO_FILES:
             shutil.copy(str(REPO / name), str(self.root / name))
@@ -384,6 +390,7 @@ class Sandbox:
 # seal and refusals
 # ---------------------------------------------------------------------------------------------
 
+@POSIX_ONLY
 class SealTests(unittest.TestCase):
     def test_seal_records_every_fixture_the_protocol_and_the_seed(self):
         sb = Sandbox(self)
@@ -543,6 +550,7 @@ class SealTests(unittest.TestCase):
 # run behaviour with the fake claude
 # ---------------------------------------------------------------------------------------------
 
+@POSIX_ONLY
 class RunTests(unittest.TestCase):
     def test_bytecode_written_into_the_export_during_warmup_is_not_a_change(self):
         sb = Sandbox(self, write_bytecode=True)
@@ -808,6 +816,7 @@ class RunTests(unittest.TestCase):
 # pilot
 # ---------------------------------------------------------------------------------------------
 
+@POSIX_ONLY
 class PilotTests(unittest.TestCase):
     def status(self, text, fragment):
         lines = [ln for ln in text.splitlines() if fragment in ln]
@@ -983,6 +992,7 @@ class PilotTests(unittest.TestCase):
                 self.assertEqual(len(sb.calls()), 2)
 
 
+@POSIX_ONLY
 class CalibrateTests(unittest.TestCase):
     def args(self, sb, task, arm, *extra):
         return ["calibrate", "--task", task, "--arm", arm, "--plugin-dir", str(sb.plugin), "--work-root", str(sb.work), "--out", str(sb.out)] + list(extra)
