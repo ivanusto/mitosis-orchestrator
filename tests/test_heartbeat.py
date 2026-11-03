@@ -96,6 +96,19 @@ class TestEntrypoint(Base):
         self.assertEqual(r.returncode, 0)
         self.assertGreaterEqual(self.read("claude")["stdin_replacement_chars"], 1)
 
+    def test_replacement_char_already_in_the_payload_is_not_counted(self):
+        # Tool output with mojibake carries U+FFFD as valid UTF-8; nothing was lost reading stdin.
+        text = '{"hook_event_name":"PreToolUse","session_id":"hb","tool_name":"Bash","tool_input":{"command":"echo ��"}}'
+        r = self.run_main(text.encode("utf-8"))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.read("claude")["stdin_replacement_chars"], 0)
+
+    def test_valid_replacement_char_does_not_hide_a_real_one(self):
+        raw = '{"hook_event_name":"PreToolUse","session_id":"hb","tool_name":"Bash","tool_input":{"command":"echo � '.encode("utf-8")
+        r = self.run_main(raw + b'\xff"}}')
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.read("claude")["stdin_replacement_chars"], 1)
+
     def test_parse_failure_recorded_as_stdin_parse_error(self):
         r = self.run_main(b"{not json " + MARKER.encode())
         self.assertEqual(r.returncode, 0)

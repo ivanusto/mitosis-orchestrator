@@ -414,7 +414,14 @@ def _read_stdin() -> str:
     buffer = getattr(sys.stdin, "buffer", None)
     if buffer is None:
         return sys.stdin.read()
-    return buffer.read().decode("utf-8-sig", "replace")
+    data = buffer.read()
+    text = data.decode("utf-8-sig", "replace")
+    # A U+FFFD already in the payload (tool output with mojibake) is valid UTF-8: count only what decoding replaced.
+    _STDIN_REPLACED[0] = text.count("�") - data.count(b"\xef\xbf\xbd")
+    return text
+
+
+_STDIN_REPLACED = [0]
 
 
 def _heartbeat(payload, mode, error_class, replacement_chars) -> None:
@@ -438,7 +445,7 @@ def main() -> None:
     replacement_chars = 0
     try:
         raw = _read_stdin()
-        replacement_chars = raw.count("\ufffd")
+        replacement_chars = _STDIN_REPLACED[0]
         if not raw.strip() and len(sys.argv) > 1 and sys.argv[-1].startswith("{"):
             raw = sys.argv[-1]
         payload = json.loads(raw) if raw.strip() else {}
