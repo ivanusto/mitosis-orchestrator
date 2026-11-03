@@ -198,6 +198,13 @@ with open(cfg["log"], "a") as fh:
     fh.write(json.dumps({"argv": argv, "cwd": cwd, "arm": arm, "task": task, "stdin": stdin_data}) + "\n")
 if cfg.get("sleep"):
     time.sleep(cfg["sleep"])
+if cfg.get("write_bytecode") and arm == "on":
+    pdir = argv[argv.index("--plugin-dir") + 1]
+    os.makedirs(os.path.join(pdir, "scripts", "__pycache__"), exist_ok=True)
+    with open(os.path.join(pdir, "scripts", "__pycache__", "hook.cpython-312.pyc"), "wb") as bc:
+        bc.write(b"\0bytecode")
+    with open(os.path.join(pdir, "stray.pyc"), "wb") as bc:
+        bc.write(b"\0bytecode")
 
 cost = cfg.get("costs", {}).get(task + ":" + arm, cfg.get("cost", 1.0))
 n_agents = cfg.get("agents", 2) if arm == "on" else 0
@@ -473,6 +480,27 @@ class SealTests(unittest.TestCase):
         self.assertNotEqual(cmp_run.tree_hash(dest), digest)
         self.assertEqual(sh(["grep", "-r", "SECRET", str(sb.tmp / "export2")]).returncode, 1)
 
+    def test_tree_hash_ignores_bytecode_but_not_other_files(self):
+        sb = Sandbox(self)
+        dest = sb.tmp / "export"
+        _, digest = cmp_run.export_frozen(sb.plugin, dest)
+        (dest / "scripts" / "__pycache__").mkdir(parents=True)
+        (dest / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"\0abc")
+        (dest / "a.pyc").write_bytes(b"\0abc")
+        self.assertEqual(cmp_run.tree_hash(dest), digest)
+        (dest / "scripts" / "hook.py").write_text("x = 1\n")
+        with_py = cmp_run.tree_hash(dest)
+        self.assertNotEqual(with_py, digest)
+        (dest / "scripts" / "hook.py").write_text("x = 2\n")
+        self.assertNotEqual(cmp_run.tree_hash(dest), with_py)
+        (dest / "scripts" / "hook.py").unlink()
+        self.assertEqual(cmp_run.tree_hash(dest), digest)
+        (dest / "notes.txt").write_text("n")
+        self.assertNotEqual(cmp_run.tree_hash(dest), digest)
+        (dest / "notes.txt").unlink()
+        (dest / "claude-agents" / "flash-worker.md").write_text("changed")
+        self.assertNotEqual(cmp_run.tree_hash(dest), digest)
+
     def test_run_refuses_a_plugin_tree_that_is_not_a_checkout(self):
         sb = Sandbox(self)
         sb.seal()
@@ -516,6 +544,14 @@ class SealTests(unittest.TestCase):
 # ---------------------------------------------------------------------------------------------
 
 class RunTests(unittest.TestCase):
+    def test_bytecode_written_into_the_export_during_warmup_is_not_a_change(self):
+        sb = Sandbox(self, write_bytecode=True)
+        sb.seal()
+        proc = sb.cli("run", *sb.common())
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("frozen plugin tree changed", proc.stdout + proc.stderr)
+        self.assertEqual(len(sb.calls()), 20)
+
     def test_full_schedule_commands_ledger_cleanup_and_report(self):
         costs = {"lookup:off": 1.0, "lookup:on": 0.5, "fix:off": 1.0, "fix:on": 2.0, "ops:off": 1.0, "ops:on": 1.0}
         sb = Sandbox(self, costs=costs)

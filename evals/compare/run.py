@@ -175,12 +175,17 @@ def plugin_head(plugin_dir):
 
 
 def tree_hash(root):
-    """sha256 over sorted relative paths and file contents (symlinks by target); independent of mtimes and ownership."""
+    """sha256 over sorted relative paths and file contents (symlinks by target); independent of mtimes and ownership.
+
+    Bytecode is left out: the on arm's hooks write __pycache__ into the tree as they run, which is not a change.
+    """
     h = hashlib.sha256()
     root = str(root)
     for base, dirs, files in os.walk(root):
-        dirs[:] = sorted(dirs)
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
         for name in sorted(files + [d for d in dirs if os.path.islink(os.path.join(base, d))]):
+            if name.endswith(".pyc"):
+                continue
             full = os.path.join(base, name)
             rel = os.path.relpath(full, root).replace(os.sep, "/")
             if os.path.islink(full):
