@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for scripts/mitosis-cost-report.py."""
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -300,6 +301,157 @@ class TestSavingsCcusageRouting(unittest.TestCase):
         self.assertIsNone(cr.routing_stats([]))
         self.assertIsNone(cr.routing_stats([Path(self.tmp.name) / "missing.log"]))
         self.assertEqual(cr.sanitise_sid("a/b.c" + "x" * 200), ("a_b_c" + "x" * 200)[:128])
+
+
+MARK = "SECRET_MARKER_PROMPT_TEXT"
+
+
+def tool_use(name, tid):
+    return {"type": "tool_use", "id": tid, "name": name, "input": {"command": MARK, "prompt": MARK}}
+
+
+def a_rec(model, msg_id, ts, tools=(), ep="cli", inp=1000, out=100, **extra):
+    rec = assistant(model, msg_id, inp, 0, 0, out, ts=ts, entrypoint=ep, **extra)
+    rec["message"]["content"] = [{"type": "text", "text": MARK}] + list(tools)
+    return rec
+
+
+class TestFleet(unittest.TestCase):
+    P = "claude-fable-5-1"
+    S = "claude-sonnet-5-5"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.proj = self.root / "-proj"
+        self.proj.mkdir()
+        self.prices = cr.resolve_prices(None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fleet(self, **kw):
+        kw.setdefault("entrypoint", "cli")
+        return cr.collect_fleet([self.proj], self.prices, kw.pop("since", None), kw.pop("until", None), **kw)
+
+    def sub(self, sid, n, records, meta="flash"):
+        d = self.proj / sid / "subagents"
+        write_jsonl(d / f"agent-{n}.jsonl", records)
+        if meta is not None:
+            with open(d / f"agent-{n}.meta.json", "w", encoding="utf-8") as fh:
+                fh.write(meta if meta.startswith("{") or meta == "BAD" else json.dumps({"agentType": meta}))
+
+    def test_per_record_since_until_on_straddling_session(self):
+        write_jsonl(self.proj / "s1.jsonl", [
+            a_rec(self.P, "m1", "2026-10-21T23:59:00Z", [tool_use("Bash", "t1")]),
+            a_rec(self.P, "m2", "2026-10-22T00:00:01Z", [tool_use("Bash", "t2"), tool_use("Agent", "t3")]),
+            a_rec(self.P, "m3", "2026-10-23T12:00:00Z", [tool_use("Read", "t4")]),
+            a_rec(self.P, "m4", "2026-10-24T00:00:00Z", [tool_use("Read", "t5")]),
+        ])
+        r = self.fleet(since=cr._parse_day("2026-10-22"), until=cr._parse_day("2026-10-23"))
+        self.assertEqual(r["sessions"], 1)
+        self.assertEqual(r["primary_tool_calls"], 3)
+        self.assertEqual(r["agent_calls"], 1)
+        self.assertEqual(r["sessions_with_dispatch"], 1)
+        self.assertAlmostEqual(r["primary_usd_split"]["input"], 2 * 1000 * cr.price_for(self.P, self.prices)[0] / 1e6)
+        self.assertEqual(self.fleet(since=cr._parse_day("2026-11-01"))["sessions"], 0)
+
+    def test_dedupe_across_resumed_session_and_streaming(self):
+        recs = [a_rec(self.P, "m1", "2026-10-23T10:00:00Z", [tool_use("Bash", "t1")]),
+                a_rec(self.P, "m1", "2026-10-23T10:00:01Z", [tool_use("Bash", "t1")])]
+        write_jsonl(self.proj / "a.jsonl", recs)
+        write_jsonl(self.proj / "b.jsonl", recs + [a_rec(self.P, "m2", "2026-10-23T11:00:00Z", [tool_use("Bash", "t2")])])
+        r = self.fleet()
+        self.assertEqual(r["primary_tool_calls"], 2)
+        self.assertAlmostEqual(r["primary_usd_split"]["input"], 2 * 1000 * cr.price_for(self.P, self.prices)[0] / 1e6)
+
+    def test_entrypoint_filter_and_unknown(self):
+        write_jsonl(self.proj / "c.jsonl", [a_rec(self.P, "c1", "2026-10-23T10:00:00Z", ep="cli")])
+        write_jsonl(self.proj / "h.jsonl", [a_rec(self.P, "h1", "2026-10-23T10:00:00Z", ep="sdk-cli")])
+        u = a_rec(self.P, "u1", "2026-10-23T10:00:00Z")
+        del u["entrypoint"]
+        write_jsonl(self.proj / "u.jsonl", [u])
+        self.assertEqual(self.fleet()["sessions"], 1)
+        self.assertEqual(self.fleet(entrypoint="sdk-cli")["sessions"], 1)
+        r = self.fleet(entrypoint="all")
+        self.assertEqual(r["sessions"], 3)
+        self.assertEqual(r["unknown_entrypoint_sessions"], 1)
+        self.assertEqual(self.fleet()["sessions_by_entrypoint"], {"cli": 1, "sdk-cli": 1, "unknown": 1})
+
+    def test_sidechain_excluded_from_primary(self):
+        write_jsonl(self.proj / "s.jsonl", [
+            a_rec(self.P, "m1", "2026-10-23T10:00:00Z", [tool_use("Bash", "t1")]),
+            a_rec(self.P, "m2", "2026-10-23T10:00:01Z", [tool_use("Agent", "t2")], isSidechain=True),
+        ])
+        r = self.fleet()
+        self.assertEqual(r["primary_tool_calls"], 1)
+        self.assertEqual(r["agent_calls"], 0)
+        pr = cr.price_for(self.P, self.prices)
+        self.assertAlmostEqual(r["primary_usd"], (1000 * pr[0] + 100 * pr[3]) / 1e6)
+
+    def test_subagent_attribution_and_unpinned_share(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z", [tool_use("Agent", "t1")])])
+        self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-worker")
+        self.sub("s", "2", [a_rec(self.P, "x2", "2026-10-23T10:02:00Z")], meta="Explore")
+        self.sub("s", "3", [a_rec(self.P, "x3", "2026-10-23T10:03:00Z")], meta=None)  # untyped, same model as primary
+        self.sub("s", "4", [a_rec(self.S, "x4", "2026-10-23T10:04:00Z")], meta="BAD")  # untyped, different model
+        r = self.fleet()
+        rows = {(x["agent_type"], x["model"]): x for x in r["subagents"]}
+        self.assertEqual(rows[("mitosis-orchestrator:flash-worker", self.S)]["count"], 1)
+        self.assertEqual(rows[("Explore", self.P)]["count"], 1)
+        self.assertEqual(rows[("unknown", self.P)]["count"], 1)
+        self.assertEqual(rows[("unknown", self.S)]["count"], 1)
+        c_s = 1000 * cr.price_for(self.S, self.prices)[0] / 1e6 + 100 * cr.price_for(self.S, self.prices)[3] / 1e6
+        c_p = 1000 * cr.price_for(self.P, self.prices)[0] / 1e6 + 100 * cr.price_for(self.P, self.prices)[3] / 1e6
+        self.assertAlmostEqual(r["pinned_usd"], 2 * c_s)
+        self.assertAlmostEqual(r["unpinned_usd"], 2 * c_p)
+        self.assertAlmostEqual(r["pinned_share"], 2 * c_s / (2 * c_s + 2 * c_p))
+        self.assertEqual(r["mitosis_dispatches"], 1)
+        self.assertTrue(r["zero_haiku"])
+        self.assertEqual(r["agent_calls"], 1)
+
+    def test_haiku_clears_zero_haiku_flag(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z")])
+        self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-worker")
+        self.sub("s", "2", [a_rec("claude-haiku-5-5", "x2", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-lite-scout")
+        self.assertFalse(self.fleet()["zero_haiku"])
+
+    def test_synthetic_excluded(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z"),
+                                            a_rec("<synthetic>", "m2", "2026-10-23T10:00:01Z")])
+        self.sub("s", "1", [a_rec("<synthetic>", "x1", "2026-10-23T10:01:00Z")], meta="Explore")
+        r = self.fleet()
+        self.assertEqual(r["subagents"], [])
+        self.assertNotIn("<synthetic>", json.dumps(r))
+
+    def test_malformed_lines_tolerated(self):
+        path = self.proj / "s.jsonl"
+        write_jsonl(path, [a_rec(self.P, "m1", "2026-10-23T10:00:00Z", [tool_use("Bash", "t1")])])
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("{not json\n[1,2]\n\n" + json.dumps({"type": "assistant", "message": "oops", "timestamp": "bad"}) + "\n")
+        self.assertEqual(self.fleet()["primary_tool_calls"], 1)
+        self.assertEqual(self.fleet(since=cr._parse_day("2026-10-01"))["primary_tool_calls"], 1)
+
+    def test_outputs_contain_no_transcript_text(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z", [tool_use("Agent", "t1")])])
+        self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-worker")
+        for flag in ([], ["--json"]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cr.main(["--fleet", "--project", str(self.proj)] + flag)
+            self.assertEqual(rc, 0)
+            self.assertNotIn(MARK, buf.getvalue())
+            self.assertNotIn(str(self.proj), buf.getvalue())
+        self.assertEqual(json.loads(buf.getvalue())["agent_calls"], 1)
+
+    def test_argument_errors(self):
+        for argv in (["--fleet", "--since", "2026-13-40"], ["--fleet", "--since", "2026-11-02", "--until", "2026-11-01"],
+                     ["--since", "2026-10-01"], ["--fleet", "--entrypoint", "bogus"], ["--fleet", "--session", "x"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                cr.main(argv + ["--project", str(self.proj)])
+            self.assertEqual(cm.exception.code, 2)
+        with redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cr.main(["--fleet", "--project", str(self.root / "nope")]), 2)
 
 
 if __name__ == "__main__":

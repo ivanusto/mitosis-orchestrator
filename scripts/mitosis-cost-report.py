@@ -12,6 +12,7 @@ then estimates USD from a built-in list-price table.
     python3 scripts/mitosis-cost-report.py --prices my-prices.json
     python3 scripts/mitosis-cost-report.py --format ccusage    # same shape as `ccusage session --json`
     python3 scripts/mitosis-cost-report.py --debug-log hook.log  # add routing stats from the hook debug log
+    python3 scripts/mitosis-cost-report.py --fleet --since 2026-10-23 --until 2026-11-03   # fleet view: is orchestration used and pinned?
 
 Transcript layout (Claude Code 2.1.x):
     ~/.claude/projects/<encoded cwd>/<session_id>.jsonl                 primary agent
@@ -41,7 +42,7 @@ import os
 import re
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -507,6 +508,256 @@ def list_sessions(project_dir: Path) -> List[str]:
     return [f.stem for f in files]
 
 
+# ---------------------------------------------------------------- fleet view
+
+PINNED_PREFIX = "mitosis-orchestrator:flash-"
+DISPATCH_TOOLS = ("Agent", "Task")
+SYNTHETIC_MODEL = "<synthetic>"
+ENTRYPOINT_CHOICES = ("cli", "sdk-cli", "all")
+
+
+def _parse_day(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}")
+
+
+def _in_window(ts: Optional[datetime], since: Optional[datetime], until_excl: Optional[datetime]) -> bool:
+    if since is None and until_excl is None:
+        return True
+    if ts is None:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (since is None or ts >= since) and (until_excl is None or ts < until_excl)
+
+
+def _agent_type(meta_path: Path) -> str:
+    """agentType from agent-*.meta.json; 'unknown' when missing or malformed. Value is sanitised."""
+    try:
+        with open(meta_path, encoding="utf-8") as fh:
+            value = json.load(fh).get("agentType")
+    except (OSError, ValueError, AttributeError):
+        return "unknown"
+    if not isinstance(value, str) or not value.strip():
+        return "unknown"
+    return re.sub(r"[^A-Za-z0-9_:.\-]", "?", value.strip())[:80]
+
+
+def _session_entrypoint(path: Path) -> str:
+    for rec in iter_records(path):
+        ep = rec.get("entrypoint")
+        if isinstance(ep, str) and ep:
+            return ep
+    return "unknown"
+
+
+def _scan_transcript(
+    path: Path,
+    sid: str,
+    role: str,
+    agent_type: str,
+    since: Optional[datetime],
+    until_excl: Optional[datetime],
+    usage_seen: Dict[str, Dict[str, Any]],
+    tool_seen: Dict[str, Dict[str, Any]],
+) -> None:
+    """Fold one transcript into the fleet-wide de-dup maps (last streamed record per message id wins)."""
+    for rec in iter_records(path):
+        if rec.get("type") != "assistant":
+            continue
+        if role == "primary" and rec.get("isSidechain"):
+            continue
+        if not _in_window(_parse_ts(rec.get("timestamp")), since, until_excl):
+            continue
+        message = rec.get("message")
+        if not isinstance(message, dict):
+            continue
+        model = str(message.get("model") or "unknown")
+        if model == SYNTHETIC_MODEL:
+            continue
+        usage = _usage_of(rec)
+        if usage is not None:
+            key = str(message.get("id") or rec.get("uuid") or "")
+            if key:
+                usage_seen[key] = {"sid": sid, "role": role, "agent": path.name if role == "subagent" else "",
+                                   "type": agent_type, "model": model, "usage": usage}
+        content = message.get("content")
+        if role == "primary" and isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    bid = str(block.get("id") or "")
+                    if bid:
+                        tool_seen[bid] = {"sid": sid, "name": str(block.get("name") or "")}
+
+
+def _cost_parts(usage: Dict[str, int], price: Optional[Tuple[float, float, float, float]], ttl: str) -> Dict[str, float]:
+    if price is None:
+        return {"input": 0.0, "cache_write": 0.0, "cache_read": 0.0, "output": 0.0}
+    p_in, p_cw, p_cr, p_out = price
+    if ttl == "1h":
+        p_cw = CACHE_1H_WRITE_MULTIPLIER * p_in
+    return {"input": usage["input"] * p_in / 1e6, "cache_write": usage["cache_write"] * p_cw / 1e6,
+            "cache_read": usage["cache_read"] * p_cr / 1e6, "output": usage["output"] * p_out / 1e6}
+
+
+def collect_fleet(
+    project_dirs: List[Path],
+    prices: Dict[str, Tuple[float, float, float, float]],
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    entrypoint: str = "cli",
+    primary_cache_ttl: str = "1h",
+    subagent_cache_ttl: str = "5m",
+) -> Dict[str, Any]:
+    until_excl = (until + timedelta(days=1)) if until else None
+    usage_seen: Dict[str, Dict[str, Any]] = {}
+    tool_seen: Dict[str, Dict[str, Any]] = {}
+    entry_tally: Dict[str, int] = {}
+    session_ep: Dict[str, str] = {}
+    agent_files: Dict[Tuple[str, str], str] = {}  # (sid, agent file) -> agent type
+    n_projects = 0
+    for project_dir in project_dirs:
+        n_projects += 1
+        for main_file in sorted(project_dir.glob("*.jsonl")):
+            sid = main_file.stem
+            ep = _session_entrypoint(main_file)
+            wanted = entrypoint == "all" or ep == entrypoint
+            sub_dir = project_dir / sid / "subagents"
+            if not wanted:
+                # Tally only: does the session have any in-window record at all?
+                if any(_in_window(_parse_ts(r.get("timestamp")), since, until_excl) for r in iter_records(main_file)):
+                    entry_tally[ep] = entry_tally.get(ep, 0) + 1
+                continue
+            sid_key = f"{project_dir.name}/{sid}"
+            session_ep[sid_key] = ep
+            _scan_transcript(main_file, sid_key, "primary", "", since, until_excl, usage_seen, tool_seen)
+            if sub_dir.is_dir():
+                for sub in sorted(sub_dir.glob("agent-*.jsonl")):
+                    atype = _agent_type(sub.with_name(sub.name[: -len(".jsonl")] + ".meta.json"))
+                    agent_files[(sid_key, sub.name)] = atype
+                    _scan_transcript(sub, sid_key, "subagent", atype, since, until_excl, usage_seen, tool_seen)
+
+    # Per-session primary model = most primary turns.
+    turns: Dict[str, Dict[str, int]] = {}
+    for e in usage_seen.values():
+        if e["role"] == "primary":
+            d = turns.setdefault(e["sid"], {})
+            d[e["model"]] = d.get(e["model"], 0) + 1
+    primary_model = {sid: max(d, key=lambda m: (d[m], m)) for sid, d in turns.items()}
+    sessions = set(primary_model)
+    for t in tool_seen.values():
+        sessions.add(t["sid"])
+    for sid in sessions:
+        ep = session_ep.get(sid, "unknown")
+        entry_tally[ep] = entry_tally.get(ep, 0) + 1
+
+    tool_calls = len(tool_seen)
+    bash = sum(1 for t in tool_seen.values() if t["name"] == "Bash")
+    agent_calls = sum(1 for t in tool_seen.values() if t["name"] in DISPATCH_TOOLS)
+    dispatch_sessions = len({t["sid"] for t in tool_seen.values() if t["name"] in DISPATCH_TOOLS})
+
+    split = {"cache_read": 0.0, "cache_write": 0.0, "output": 0.0, "input": 0.0}
+    sub_usd = 0.0
+    unpriced: List[str] = []
+    spend: Dict[Tuple[str, str], Dict[str, float]] = {}  # (type, model) -> usd
+    file_models: Dict[Tuple[str, str], Dict[str, int]] = {}
+    pinned_usd = 0.0
+    unpinned_usd = 0.0
+    for e in usage_seen.values():
+        price = price_for(e["model"], prices)
+        if price is None and e["model"] not in unpriced:
+            unpriced.append(e["model"])
+        if e["role"] == "primary":
+            for k, v in _cost_parts(e["usage"], price, primary_cache_ttl).items():
+                split[k] += v
+            continue
+        usd = sum(_cost_parts(e["usage"], price, subagent_cache_ttl).values())
+        sub_usd += usd
+        cell = spend.setdefault((e["type"], e["model"]), {"usd": 0.0})
+        cell["usd"] += usd
+        fm = file_models.setdefault((e["sid"], e["agent"]), {})
+        fm[e["model"]] = fm.get(e["model"], 0) + 1
+        if e["type"].startswith(PINNED_PREFIX):
+            pinned = True
+        elif e["type"] == "unknown":
+            pinned = e["model"] != primary_model.get(e["sid"])
+        else:
+            pinned = False
+        if pinned:
+            pinned_usd += usd
+        else:
+            unpinned_usd += usd
+    counts: Dict[Tuple[str, str], int] = {}
+    for (sid_key, fname), fm in file_models.items():
+        model = max(fm, key=lambda m: (fm[m], m))
+        atype = agent_files.get((sid_key, fname), "unknown")
+        counts[(atype, model)] = counts.get((atype, model), 0) + 1
+    by_type = []
+    for key in sorted(set(spend) | set(counts), key=lambda k: (-spend.get(k, {"usd": 0.0})["usd"], k)):
+        by_type.append({"agent_type": key[0], "model": key[1], "count": counts.get(key, 0),
+                        "usd": spend.get(key, {"usd": 0.0})["usd"]})
+    primary_usd = sum(split.values())
+    total_usd = primary_usd + sub_usd
+    sub_total = pinned_usd + unpinned_usd
+    mitosis_dispatches = sum(r["count"] for r in by_type if r["agent_type"].startswith("mitosis-orchestrator:"))
+    haiku = any("haiku" in r["model"] for r in by_type)
+    return {
+        "filters": {"since": since.date().isoformat() if since else None, "until": until.date().isoformat() if until else None,
+                    "entrypoint": entrypoint, "timezone": "UTC"},
+        "projects": n_projects,
+        "sessions": len(sessions),
+        "sessions_by_entrypoint": dict(sorted(entry_tally.items())),
+        "unknown_entrypoint_sessions": entry_tally.get("unknown", 0),
+        "sessions_with_dispatch": dispatch_sessions,
+        "primary_tool_calls": tool_calls,
+        "agent_calls": agent_calls,
+        "dispatch_rate": (agent_calls / tool_calls) if tool_calls else None,
+        "bash_calls": bash,
+        "bash_share": (bash / tool_calls) if tool_calls else None,
+        "primary_usd": primary_usd,
+        "primary_usd_split": split,
+        "subagent_usd": sub_usd,
+        "total_usd": total_usd,
+        "subagent_share": (sub_usd / total_usd) if total_usd else None,
+        "subagents": by_type,
+        "subagent_transcripts": sum(r["count"] for r in by_type),
+        "pinned_usd": pinned_usd,
+        "unpinned_usd": unpinned_usd,
+        "pinned_share": (pinned_usd / sub_total) if sub_total else None,
+        "unpinned_share": (unpinned_usd / sub_total) if sub_total else None,
+        "mitosis_dispatches": mitosis_dispatches,
+        "zero_haiku": bool(mitosis_dispatches) and not haiku,
+        "unpriced_models": sorted(unpriced),
+    }
+
+
+def render_fleet_text(r: Dict[str, Any]) -> str:
+    f = r["filters"]
+
+    def pct(v: Optional[float]) -> str:
+        return "n/a" if v is None else f"{v:.1%}"
+
+    lines = [
+        f"Fleet report  since {f['since'] or '-'}  until {f['until'] or '-'} ({f['timezone']}, per record)  entrypoint {f['entrypoint']}  projects {r['projects']}",
+        f"  sessions: {r['sessions']}  with dispatch: {r['sessions_with_dispatch']}  unknown-entrypoint sessions: {r['unknown_entrypoint_sessions']}",
+    ]
+    lines.append("  sessions by entrypoint (in window, before filter): " + (", ".join(f"{k} {v}" for k, v in r["sessions_by_entrypoint"].items()) or "none"))
+    lines.append(f"  primary tool calls: {r['primary_tool_calls']:,}  Agent/Task calls: {r['agent_calls']}  dispatch rate: {pct(r['dispatch_rate'])}  Bash share: {pct(r['bash_share'])}")
+    s = r["primary_usd_split"]
+    lines.append(f"  primary USD {r['primary_usd']:,.2f}: cache read {s['cache_read']:,.2f}, cache write {s['cache_write']:,.2f}, output {s['output']:,.2f}, input {s['input']:,.2f}")
+    lines.append(f"  subagent USD {r['subagent_usd']:,.2f}  total {r['total_usd']:,.2f}  subagent share {pct(r['subagent_share'])}")
+    lines.append(f"  {'agent type':<42}{'model':<24}{'count':>6}{'USD':>10}")
+    for row in r["subagents"]:
+        lines.append(f"  {row['agent_type']:<42}{row['model']:<24}{row['count']:>6}{row['usd']:>10.2f}")
+    lines.append(f"  pinned subagent spend {r['pinned_usd']:,.2f} ({pct(r['pinned_share'])}), unpinned {r['unpinned_usd']:,.2f} ({pct(r['unpinned_share'])})")
+    lines.append(f"  mitosis dispatches {r['mitosis_dispatches']}  zero-haiku flag: {'YES' if r['zero_haiku'] else 'no'}")
+    if r["unpriced_models"]:
+        lines.append(f"  (no price for: {', '.join(r['unpriced_models'])}; counted as 0 USD)")
+    return "\n".join(lines)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Token and cost ledger for Claude Code sessions (primary vs subagents).")
     ap.add_argument("--project", help="Claude Code project directory (default: derived from cwd under ~/.claude/projects)")
@@ -518,7 +769,34 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--format", choices=("text", "json", "ccusage"), default="text", help="output format (default text; ccusage mimics `ccusage session --json`)")
     ap.add_argument("--json", action="store_true", help="alias for --format json")
     ap.add_argument("--debug-log", action="append", default=[], help="hook debug log for the routing section (repeatable; default: auto-detect per session)")
+    ap.add_argument("--fleet", action="store_true", help="fleet view across all projects (or --project): dispatch use, cost split, pinned vs unpinned subagents")
+    ap.add_argument("--since", type=_parse_day, help="fleet: first day (YYYY-MM-DD, UTC), applied per record by timestamp")
+    ap.add_argument("--until", type=_parse_day, help="fleet: last day inclusive (YYYY-MM-DD, UTC), applied per record by timestamp")
+    ap.add_argument("--entrypoint", choices=ENTRYPOINT_CHOICES, default="cli", help="fleet: session entrypoint to include (default cli; excludes headless sdk-cli)")
     args = ap.parse_args(argv)
+    if not args.fleet and (args.since or args.until):
+        ap.error("--since/--until require --fleet")
+    if args.since and args.until and args.until < args.since:
+        ap.error("--until is before --since")
+    if args.fleet and args.session:
+        ap.error("--fleet cannot be combined with --session")
+
+    if args.fleet:
+        if args.project:
+            dirs = [Path(os.path.expanduser(args.project))]
+        else:
+            root = Path(os.path.expanduser("~")) / ".claude" / "projects"
+            dirs = sorted(d for d in root.iterdir() if d.is_dir()) if root.is_dir() else []
+        if not dirs or not all(d.is_dir() for d in dirs):
+            print("project directory not found", file=sys.stderr)
+            return 2
+        report = collect_fleet(dirs, resolve_prices(args.prices), args.since, args.until, args.entrypoint,
+                               args.primary_cache_ttl, args.subagent_cache_ttl)
+        if args.json or args.format == "json":
+            print(json.dumps(report, indent=2))
+        else:
+            print(render_fleet_text(report))
+        return 0
 
     project_dir = Path(os.path.expanduser(args.project)) if args.project else default_project_dir()
     if not project_dir.is_dir():
