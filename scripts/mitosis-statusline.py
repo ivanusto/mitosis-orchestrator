@@ -76,10 +76,19 @@ def render(data: Dict[str, Any], state: Dict[str, Any]) -> str:
     return prefix + ": " + " | ".join(parts)
 
 
+def _read_stdin() -> str:
+    # Hook payloads are UTF-8. Text-mode stdin uses the locale code page on Windows (cp950,
+    # cp1252, ...), which breaks non-ASCII prompts, so decode the bytes here.
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8-sig", "replace")
+
+
 def main() -> int:
     prefix = os.environ.get("MITOSIS_STATUSLINE_PREFIX", "").strip() or "mitosis"
     try:
-        raw = sys.stdin.read()
+        raw = _read_stdin()
         data = json.loads(raw) if raw.strip() else {}
         if not isinstance(data, dict):
             data = {}

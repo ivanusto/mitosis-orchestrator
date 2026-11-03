@@ -406,13 +406,22 @@ EVENT_NAME_TO_MODE = {
 }
 
 
+def _read_stdin() -> str:
+    # Hook payloads are UTF-8. Text-mode stdin uses the locale code page on Windows (cp950,
+    # cp1252, ...), which breaks non-ASCII prompts, so decode the bytes here.
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8-sig", "replace")
+
+
 def main() -> None:
     # hooks/codex-hooks.json passes --platform=codex: Codex SessionStart carries no turn_id.
     platform = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--platform=")), "")
     argv = [a for a in sys.argv if not a.startswith("--platform=")]
     mode = argv[1] if len(argv) > 1 and not argv[1].startswith("{") else None
     try:
-        raw = sys.stdin.read()
+        raw = _read_stdin()
         if not raw.strip() and len(sys.argv) > 1 and sys.argv[-1].startswith("{"):
             raw = sys.argv[-1]
         payload = json.loads(raw) if raw.strip() else {}

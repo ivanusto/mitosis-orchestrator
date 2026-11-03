@@ -73,6 +73,28 @@ class TestManifestPaths(unittest.TestCase):
                 for script in scripts:
                     self.assertTrue((ROOT / script).is_file(), f"{rel}: {script}")
 
+    def test_hook_commands_carry_the_whole_interpreter_chain(self):
+        # `python3` alone exits 9009 on Windows, and a failed hook blocks every agy tool.
+        chain = re.compile(r"^python3 (?P<args>.+) \|\| python (?P=args) \|\| py -3 (?P=args) \|\| exit 0$")
+
+        def commands(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "command":
+                        yield value
+                    else:
+                        yield from commands(value)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from commands(item)
+
+        for rel in ("hooks.json", "hooks/hooks.json", "hooks/codex-hooks.json"):
+            found = list(commands(load_json(rel)))
+            self.assertTrue(found, rel)
+            for command in found:
+                with self.subTest(config=rel, command=command):
+                    self.assertRegex(command, chain)
+
     def test_hook_modes_are_known(self):
         handlers = re.search(r"^HANDLERS = \{(.*?)^\}", read("scripts/enforce-orchestrator.py"), re.M | re.S).group(1)
         known = set(re.findall(r'"([\w-]+)":', handlers))

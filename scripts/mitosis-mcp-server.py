@@ -54,7 +54,7 @@ WORKER_TYPE = _eo.WORKER_TYPE
 SCOUT_TYPE = _eo.SCOUT_TYPE
 
 SERVER_NAME = "mitosis-mcp-server"
-SERVER_VERSION = "2.3.1"
+SERVER_VERSION = "2.3.2"
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_DEFINITIONS = [
@@ -421,6 +421,9 @@ def _rpc_error(req_id: Any, code: int, message: str) -> Dict[str, Any]:
 
 
 def main() -> None:
+    # JSON-RPC is UTF-8; text-mode stdin uses the locale code page on Windows.
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     server = MitosisMCPServer()
     server.run_stdio()
 

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" session-start --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" session-start --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" session-start --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" session-start --platform=codex || exit 0"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-invocation --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-invocation --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-invocation --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-invocation --platform=codex || exit 0"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-tool-use --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-tool-use --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-tool-use --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" pre-tool-use --platform=codex || exit 0"
           }
         ]
       }
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use --platform=codex || exit 0"
           }
         ]
       }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" subagent-stop --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" subagent-stop --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" subagent-stop --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" subagent-stop --platform=codex || exit 0"
           }
         ]
       }
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" stop --platform=codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" stop --platform=codex || python \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" stop --platform=codex || py -3 \"${PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" stop --platform=codex || exit 0"
           }
         ]
       }

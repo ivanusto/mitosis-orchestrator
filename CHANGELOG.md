@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.3.2 - 2026-11-03
+
+Verified live on agy 1.4.12 on Windows 11.
+
+### Fixed
+- Windows: hook commands hard-coded `python3`. agy runs hooks with `cmd /c`, the Microsoft Store alias `python3.exe` exits 9009 with no output, and agy treats a failed `PreToolUse` hook as a tool error, so every tool call failed with `JSON hook "jsonhook__mitosis-orchestrator_PreToolUse_0_0" failed: command failed: exit status 9009`. All 17 commands in `hooks.json`, `hooks/hooks.json` and `hooks/codex-hooks.json` now try `python3`, then `python`, then `py -3`, then `exit 0`.
+- Windows: stdin was decoded with the locale code page (cp950, cp1252, ...). A UTF-8 payload with non-ASCII text failed to parse or turned into mojibake, the hook carried on with an empty or wrong payload, and subagent calls with Chinese prompts were not pinned or were routed wrongly, with no error. `enforce-orchestrator.py`, `mitosis-statusline.py` and `mitosis-mcp-server.py` now read UTF-8 (the hook and the statusline also skip a byte order mark). Linux and macOS with a UTF-8 locale were not affected.
+
+### Behaviour notes
+- **With no working Python the hooks exit 0 with no output.** The CLI keeps working, but routing, model pinning and the guardrails are off, without any warning. The last link is `exit 0` rather than `echo {}` because agy treats `{}` from `PreToolUse` as a denial.
+- **Codex: the hook commands changed, so approve them again in `/hooks`.** Until then Codex silently skips them.
+- Routing rules are unchanged; holdout v9 stays unopened.
+
+### Added
+- `tests/test_hook_launcher.py` runs the real commands from all three configs through `cmd.exe` or `/bin/sh` with a `PATH` holding only the interpreters each case names, and covers stdin encoding. A `hooks-windows` CI job runs it on `windows-latest`.
+- Packaging test: every hook command must carry the whole chain.
+- README: Windows notes in both languages.
+
+### Known gaps
+- Codex on Windows and Claude Code on Windows have not been run end to end with this release (see the release notes for what was covered); the commands are exercised through `cmd.exe` in CI.
+- The full unit test suite is not clean on Windows: 19 tests fail in `tearDown` because the in-process lock file is still open (`WinError 32`). This is a test cleanup issue; a hook process releases its lock on exit.
+- `guards.py` path handling is POSIX-centred (`SYSTEM_PATH_PREFIXES`, `shlex` in POSIX mode). On Windows this is expected to send more to the normal permission prompt, not less; not measured.
+
 ## 2.3.1 - 2026-10-26
 
 Verified live on agy 1.4.6.

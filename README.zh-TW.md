@@ -113,12 +113,14 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 需求：Python 3.11 以上（只用標準函式庫；Codex 安裝腳本用到 `tomllib`）、`git`。
 
+**Windows。** agy 透過 `cmd /c` 執行 hook，並依序嘗試 `python3`、`python`、`py -3`，一般安裝方式都能用。`%LOCALAPPDATA%\Microsoft\WindowsApps` 裡的 Microsoft Store 別名不會執行任何東西，只回傳 9009，後備鏈會跳過它們。如果有壞掉的 `python` 遮住真正的 Python，請修正 `PATH`，或到「設定 > 應用程式 > 進階應用程式設定 > 應用程式執行別名」關閉別名。**完全沒有可用的 Python 時，hook 不輸出任何內容並以 0 結束：** CLI 照常運作（在 agy 上 hook 失敗會擋下所有工具），但路由、模型釘定與守衛都會失效，而且不會有任何警告。可用 `python3 --version`、`python --version` 或 `py -3 --version` 確認。
+
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
 
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.3.2)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -407,6 +409,8 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 {"statusLine": {"type": "command", "command": "python3 <外掛路徑>/scripts/mitosis-statusline.py"}}
 ```
 
+在 Windows 上，如果您的安裝只提供 `python` 或 `py -3`，請把 `python3` 換成對應的指令。
+
 `MITOSIS_STATUSLINE_PREFIX` 可更改開頭標籤；發生任何問題時只會印出 `mitosis: idle`。
 
 ---
@@ -414,7 +418,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 471 個測試（hook、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # 500 個測試（hook、啟動鏈、判斷器、成本報表、路由評測、打包檢查、Codex hook）
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）

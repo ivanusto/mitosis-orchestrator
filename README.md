@@ -113,12 +113,14 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Codex installer), `git`.
 
+**Windows.** Hooks run through `cmd /c` on agy and try `python3`, then `python`, then `py -3`, so any normal install works. The Microsoft Store aliases in `%LOCALAPPDATA%\Microsoft\WindowsApps` exit 9009 without running anything; the chain moves past them. If a broken `python` shadows your real one, fix `PATH` or turn the aliases off in Settings > Apps > Advanced app settings > App execution aliases. **With no working Python the hooks exit 0 with no output:** the CLI keeps working (a failed hook blocks every tool on agy), but routing, model pinning and the guardrails are off, without any warning. Check with `python3 --version`, `python --version` or `py -3 --version`.
+
 ### 1. Google Antigravity (`agy` 1.4+)
 
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.3.2)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -401,6 +403,8 @@ The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pin
 {"statusLine": {"type": "command", "command": "python3 <plugin path>/scripts/mitosis-statusline.py"}}
 ```
 
+On Windows use `python` or `py -3` instead of `python3` if that is what your install provides.
+
 `MITOSIS_STATUSLINE_PREFIX` changes the leading label; any problem prints `mitosis: idle`.
 
 ---
@@ -408,7 +412,7 @@ The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pin
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 471 tests (hooks, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # 500 tests (hooks, launcher, judge, cost report, routing eval, packaging, Codex hooks)
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)

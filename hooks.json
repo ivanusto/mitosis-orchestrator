@@ -4,14 +4,14 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "python3 ./scripts/enforce-orchestrator.py session-start",
+        "command": "python3 ./scripts/enforce-orchestrator.py session-start || python ./scripts/enforce-orchestrator.py session-start || py -3 ./scripts/enforce-orchestrator.py session-start || exit 0",
         "timeout": 10
       }
     ],
     "PreInvocation": [
       {
         "type": "command",
-        "command": "python3 ./scripts/enforce-orchestrator.py pre-invocation",
+        "command": "python3 ./scripts/enforce-orchestrator.py pre-invocation || python ./scripts/enforce-orchestrator.py pre-invocation || py -3 ./scripts/enforce-orchestrator.py pre-invocation || exit 0",
         "timeout": 5
       }
     ],
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ./scripts/enforce-orchestrator.py pre-tool-use",
+            "command": "python3 ./scripts/enforce-orchestrator.py pre-tool-use || python ./scripts/enforce-orchestrator.py pre-tool-use || py -3 ./scripts/enforce-orchestrator.py pre-tool-use || exit 0",
             "timeout": 10
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ./scripts/enforce-orchestrator.py post-tool-use",
+            "command": "python3 ./scripts/enforce-orchestrator.py post-tool-use || python ./scripts/enforce-orchestrator.py post-tool-use || py -3 ./scripts/enforce-orchestrator.py post-tool-use || exit 0",
             "timeout": 10
           }
         ]
@@ -42,7 +42,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "python3 ./scripts/enforce-orchestrator.py stop",
+        "command": "python3 ./scripts/enforce-orchestrator.py stop || python ./scripts/enforce-orchestrator.py stop || py -3 ./scripts/enforce-orchestrator.py stop || exit 0",
         "timeout": 5
       }
     ]
