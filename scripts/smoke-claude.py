@@ -142,7 +142,7 @@ def main(argv=None) -> int:
 
 def _project_dir(cwd: Path) -> Path:
     import re
-    return Path(os.path.expanduser("~")) / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9_-]", "-", str(cwd))
+    return Path(os.path.expanduser("~")) / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
 if __name__ == "__main__":

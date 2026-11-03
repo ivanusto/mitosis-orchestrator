@@ -131,6 +131,16 @@ class TestCollect(CostReportBase):
     def test_encode_project_dir(self):
         self.assertEqual(cr.encode_project_dir("/home/me/repo"), "-home-me-repo")
         self.assertEqual(cr.encode_project_dir("/tmp/claude-1000/-home-me/x.y"), "-tmp-claude-1000--home-me-x-y")
+        # underscores are encoded too (seen on disk: .../pilot__off -> ...-pilot--off)
+        self.assertEqual(cr.encode_project_dir("/tmp/exp_work/pilot__off"), "-tmp-exp-work-pilot--off")
+        self.assertEqual(cr.encode_project_dir("/home/me/.gemini/a b"), "-home-me--gemini-a-b")
+
+    def test_default_project_dir_finds_a_cwd_with_underscores(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "-tmp-exp-work-pilot--off").mkdir()
+            (root / "-other").mkdir()
+            self.assertEqual(cr.default_project_dir("/tmp/exp_work/pilot__off", root), root / "-tmp-exp-work-pilot--off")
 
 
 class TestCli(CostReportBase):

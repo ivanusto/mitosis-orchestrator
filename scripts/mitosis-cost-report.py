@@ -76,8 +76,11 @@ USAGE_FIELDS = ("input", "cache_write", "cache_read", "output", "thinking")
 
 
 def encode_project_dir(cwd: str) -> str:
-    """Mirror Claude Code's project-directory encoding (`/home/me/repo` -> `-home-me-repo`)."""
-    return re.sub(r"[^A-Za-z0-9_-]", "-", cwd)
+    """Mirror Claude Code's project-directory encoding: every character that is not a letter or digit becomes `-`.
+
+    `/home/me/repo` -> `-home-me-repo`, `/tmp/a_b.c` -> `-tmp-a-b-c` (underscores too).
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
 
 
 def default_project_dir(cwd: Optional[str] = None, projects_root: Optional[Path] = None) -> Path:
