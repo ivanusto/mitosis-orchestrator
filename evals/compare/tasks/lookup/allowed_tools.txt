@@ -1,0 +1,16 @@
+Agent
+Read
+Grep
+Glob
+Edit
+Write
+Skill
+SendMessage
+Bash(ls:*)
+Bash(cat:*)
+Bash(grep:*)
+Bash(sed:*)
+Bash(find:*)
+Bash(wc:*)
+Bash(head:*)
+Bash(tail:*)

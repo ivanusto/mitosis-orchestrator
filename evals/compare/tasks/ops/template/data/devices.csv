@@ -1,0 +1,13 @@
+serial,model,site,qty
+N7-0001,Gateway G2,north-7,2
+N7-0002,"Sensor, outdoor",north-7,14
+N7-0003,"Sensor, indoor",north-7,22
+N7-0004,Relay R1,north-7,6
+N7-0005,Gateway G2,north-7,1
+N7-0006,Display D4,north-7,3
+N7-0007,"Sensor, outdoor",north-7,9
+N7-0008,Relay R1,north-7,12
+N7-0009,Battery B9,north-7,40
+N7-0010,Display D4,north-7,5
+N7-0011,Battery B9,north-7,18
+N7-0012,Gateway G3,north-7,4

@@ -1,0 +1,6 @@
+{
+  "site": "north-7",
+  "env": "staging",
+  "retention_days": 30,
+  "db_path": "state/north7.db"
+}
