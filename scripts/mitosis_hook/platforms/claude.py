@@ -256,8 +256,47 @@ def _handle_agent_message(payload: Dict[str, Any], tool_name: str, args: Dict[st
     return allow()
 
 
-def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint: str = "") -> Optional[Dict[str, Any]]:
-    """Pair a Claude Code agent id with the oldest pending spawn (or infer a record from the type)."""
+def _bare_agent_type(type_name: str) -> str:
+    bare = (type_name or "").strip().lower()
+    return bare.split(":", 1)[1].strip() if ":" in bare else bare
+
+
+def _pending_spawn_index(pending: List[Dict[str, Any]], hint: str, from_spawn: bool) -> Optional[int]:
+    """Which pending spawn belongs to this agent id, or None when it has no claim on any of them.
+
+    SubagentStop also fires for agents nobody dispatched through a pinned call (Claude Code's internal
+    forks, built-ins such as Explore), so a stop never takes a pending spawn just because it is the oldest.
+    """
+    bare = _bare_agent_type(hint)
+    if bare:
+        for i, spawn in enumerate(pending):
+            if _bare_agent_type(str(spawn.get("type") or "")) == bare:
+                return i
+    plugin_hint = _is_plugin_agent_type(hint)
+    if from_spawn:
+        # The id comes from an Agent tool response, so this is a real launch. Its type may differ from the
+        # pending one (the hook overrode it). A typed built-in call left unpinned has no pending entry.
+        if bare and not plugin_hint:
+            return None
+        accepted = lambda t: not t or _is_plugin_agent_type(t)  # noqa: E731
+    elif plugin_hint:
+        accepted = _is_plugin_agent_type
+    elif bare == "general-purpose":
+        accepted = lambda t: not t  # noqa: E731  (an untyped pinned call stops as general-purpose)
+    else:
+        return None
+    for i, spawn in enumerate(pending):
+        if accepted(str(spawn.get("type") or "")):
+            return i
+    return None
+
+
+def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint: str = "",
+                           from_spawn: bool = False) -> Optional[Dict[str, Any]]:
+    """Pair a Claude Code agent id with its pending spawn, or infer a record for a mitosis agent type.
+
+    from_spawn: the id was read from an Agent tool response rather than a SubagentStop payload.
+    """
     agent_id = (agent_id or "").strip().lower()
     if not agent_id:
         return None
@@ -266,17 +305,13 @@ def _claude_register_agent(state: Dict[str, Any], agent_id: str, agent_type_hint
         return subagents[agent_id]
     pending: List[Dict[str, Any]] = state.setdefault("pending_spawns", [])
     hint = (agent_type_hint or "").strip()
-    bare_hint = hint.split(":", 1)[1].lower() if ":" in hint else hint.lower()
-    idx = next((i for i, p in enumerate(pending) if bare_hint and str(p.get("type", "")).split(":")[-1].lower() == bare_hint), None)
-    if idx is None and pending:
-        idx = 0
+    idx = _pending_spawn_index(pending, hint, from_spawn)
     if idx is not None:
         record = pending.pop(idx)
-    elif bare_hint:
+    elif _is_plugin_agent_type(hint):
+        tier = "flash_lite" if _bare_agent_type(hint) == SCOUT_TYPE else "flash"
         record = {
-            "role": hint, "type": hint,
-            "model": "flash_lite" if bare_hint == SCOUT_TYPE else "flash",
-            "tier": "flash_lite" if bare_hint == SCOUT_TYPE else "flash",
+            "role": hint, "type": hint, "model": tier, "tier": tier,
             "workspace": "inherit", "active_branch": False,
         }
     else:
@@ -320,7 +355,7 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         record["alive"] = False
         record["active_branch"] = False
         cleared = True
-    if not cleared:
+    if not cleared and not agent_id:  # a stop naming an unknown agent says nothing about the others
         for meta in state.setdefault("pending_spawns", []):
             meta["active_branch"] = False
         for meta in state.setdefault("subagents", {}).values():

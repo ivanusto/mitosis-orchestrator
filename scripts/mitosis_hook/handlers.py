@@ -527,7 +527,7 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         if is_claude_code_payload(payload) and tool_name in ("Task", "Agent"):
             hint = str((payload.get("tool_input") or {}).get("subagent_type") or "")
             for aid in _claude_agent_ids_from_response(payload):
-                _claude_register_agent(state, aid, hint)
+                _claude_register_agent(state, aid, hint, from_spawn=True)
         sync_subagents(payload, state)
 
     escalation_note = ""
@@ -715,6 +715,7 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
         "tool": tool_name,
         "rawTool": raw_tool if raw_tool and raw_tool != tool_name else None,
         "agentId": payload.get("agent_id"),
+        "agentType": payload.get("agent_type"),
         "toolInputKeys": sorted(args.keys()) if args else None,
         "toolResponse": str(payload.get("tool_response"))[:500] if payload.get("tool_response") is not None else None,
         "state": {
