@@ -122,7 +122,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.4.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.4.1)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：

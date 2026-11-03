@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.4.1 - 2026-11-03
+
+### Security
+**The scout's shell check allowed commands it misread.** The check arrived in 1.5.1 and has allowed these since; 1.5.1, 2.3.2 and 2.4.0 were tested. A scout that was told to, or chose to, could run other programs and change files through the allowlist: a lone `&` (`ls & rm -rf build`), a program with a path (`./evil/ls`), environment prefixes (`LD_PRELOAD=`, `GIT_EXTERNAL_DIFF=`), parameter and arithmetic expansion (`${X@P}`, `$[X]`), options held in variables (`$_`), and options that run a program or write a file (`rg --pre`, `sort -o` written as `-oout`, `git grep -O`, `git -C status commit`, `find -fprint0`, and bfs `-rm`, which deletes; Claude Code's shell runs bfs as `find`). The permission mode of your agent still applied unless `*_MITOSIS_AUTO_ALLOW=1` was set, and Codex scouts started through the MCP server also have an OS sandbox. A Claude Code scout has no OS sandbox behind this check. Update.
+
+### Fixed
+- `scout_command_is_read_only` split on `|` and `;` and rejected redirects before it read quotes, so `rg -n 'a|b' .` was denied as an unparseable command. It now reads quotes first.
+
+### Behaviour changes
+The new check reads what it can read for certain and denies the rest, so it denies some harmless commands on purpose. The denial says what to change.
+- **Allowed now:** metacharacters in single quotes, or in double quotes except `$`, backticks and `!`; escaped metacharacters (`rg a\|b`); `git --no-pager`, `-P`, `--no-optional-locks`, `-C <dir>`; `git branch --list <pattern>`.
+- **Denied now:** `$VAR` and `"$f"` outside single quotes, comments, words starting with `=` (`echo ===`), unquoted globs that could expand to an option (`find . -name *.py`, `rg foo *`; `src/*.py` and `./*` pass), most environment prefixes (kept: `LC_ALL`, `LANG`, `TZ`, `NO_COLOR`), assignments, programs with a path, a line holding only a redirect, `tail -f`, `git <sub> --help` (starts `man`), `git remote show`, `git reflog` without `show` or `exists`, `date MMDDhhmm`, `file -p`.
+- **Codex on Windows** gets a stricter character set with no quotes, backslashes, redirects, globs, `;` or `&&`, because PowerShell and cmd quote differently from POSIX. A Claude scout's shell is Git Bash, which keeps the POSIX rules.
+- `hooks/` did not change, so Codex needs no re-approval in `/hooks`. Routing rules did not change either.
+
+### Not covered
+See SECURITY.md. The check reads text and is not a sandbox. Execution driven by configuration, rc files, aliases and a hostile program already on `PATH` are out of its reach, as are run time and output size. Codex `write_stdin` does not reach the hook; fixing that needs a matcher change, which needs re-approval. Fish is not modelled.
+
 ## 2.4.0 - 2026-11-03
 
 2.4 is about whether the plugin takes effect, not routing accuracy. Measured on one machine over 11 days (2026-10-23 to 2026-11-02, interactive Claude Code): 40 sessions, 27 `Agent` calls in 5,799 primary tool calls (0.5%), subagents 2.3% of spend, 23.8% of subagent spend unpinned, no subagent on haiku. One user, one machine, list prices.
