@@ -227,6 +227,7 @@ if arm == "on" and cfg.get("expand", True):
 with open(os.path.join(proj, sid + ".jsonl"), "w") as fh:
     fh.write(json.dumps({"type": "user", "timestamp": "2026-11-03T10:00:00.000Z", "message": {"role": "user", "content": expanded}}) + "\n")
     fh.write(json.dumps({"type": "assistant", "timestamp": "2026-11-03T10:00:05.000Z", "message": {"id": "p1", "model": "claude-opus-5", "role": "assistant",
+             "content": [{"type": "text", "text": "I read: # Mitosis Orchestrator Workflow" if cfg.get("quote_marker") else "ok"}],
              "usage": {"input_tokens": 0, "output_tokens": int(prim_usd * 40000)}}}) + "\n")
 for i in range(n_agents):
     with open(os.path.join(proj, sid, "subagents", "agent-%d.jsonl" % i), "w") as fh:
@@ -234,12 +235,19 @@ for i in range(n_agents):
                  "role": "assistant", "usage": {"input_tokens": 0, "output_tokens": int(sub_usd / n_agents * 100000)}}}) + "\n")
 
 init = {"type": "system", "subtype": "init", "session_id": sid, "cwd": cwd, "model": "opus", "permissionMode": "acceptEdits",
-        "tools": ["Bash", "Read", "Edit"], "plugins": [], "agents": ["general-purpose"], "skills": ["update-config"], "slash_commands": ["compact"]}
+        "tools": ["Bash", "Read", "Edit"], "plugins": [], "agents": ["general-purpose"], "skills": ["update-config"], "slash_commands": ["compact"],
+        "memory_paths": {"auto": "/mem/" + sid}, "messaging_socket_path": "/run/sock-" + sid, "original_cwd": cwd}
+if cfg.get("vary_volatile_only_in_on") and arm == "on":
+    init["memory_paths"] = {"auto": "/mem/other"}
 if arm == "on":
-    init["plugins"] = [{"name": "mitosis-orchestrator", "path": "/frozen"}]
-    init["agents"] += ["mitosis-orchestrator:flash-worker"]
-    init["skills"] += ["mitosis-orchestrator:orchestrate"]
-    init["slash_commands"] += ["mitosis-orchestrator:orchestrate"]
+    pname = cfg.get("plugin_name", "mitosis-orchestrator")
+    init["plugins"] = [{"name": pname, "path": "/frozen"}]
+    if pname == "mitosis-orchestrator":
+        init["agents"] += ["mitosis-orchestrator:flash-worker"]
+        init["skills"] += ["mitosis-orchestrator:orchestrate"]
+        init["slash_commands"] += ["mitosis-orchestrator:orchestrate"]
+    else:
+        init["agents"] += [pname + ":flash-worker:flash-worker"]
     init.update(cfg.get("on_init_extra", {}))
 out = [init]
 for hook in cfg.get("hook_events", {}).get(arm, []):
@@ -261,7 +269,12 @@ out.append(assistant("m3", 2500, agent_blocks or [{"type": "text", "text": "done
 if n_agents:
     out.append(assistant("side1", 99999, [{"type": "tool_use", "id": "ts1", "name": "Read", "input": {}}], parent="ta0"))
 subtype = cfg.get("subtype", "success")
-denials = cfg.get("denials", {}).get(arm, [])
+denial_cfg = cfg.get("denials", {}).get(arm, [])
+denials = [{"tool_name": d.get("tool_name", "Bash"), "tool_use_id": d.get("tool_use_id", "tb0"), "tool_input": {"command": "x"}} for d in denial_cfg]
+for d in denial_cfg:
+    if d.get("message") or d.get("decision_reason_type"):
+        out.append({"type": "system", "subtype": "permission_denied", "tool_name": d.get("tool_name", "Bash"), "tool_use_id": d.get("tool_use_id", "tb0"),
+                    "decision_reason_type": d.get("decision_reason_type", "other"), "message": d.get("message", "")})
 
 
 def result(total):
@@ -300,6 +313,11 @@ class Sandbox:
         (self.plugin / "evals" / "compare" / "tasks" / "fix" / "hidden" / "test_hidden.py").write_text("SECRET = 1\n")
         (self.plugin / "evals" / "README.md").write_text("evals\n")
         (self.plugin / "agents-link").symlink_to("claude-agents")
+        (self.plugin / ".claude-plugin").mkdir()
+        (self.plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "mitosis-orchestrator"}\n')
+        (self.plugin / ".agents").mkdir()
+        (self.plugin / ".agents" / "notes.md").write_text("agents\n")
+        (self.plugin / ".gitignore").write_text("*.pyc\n")
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
         for cmd in (git + ["init", "-q"], git + ["add", "-A"], git + ["commit", "-q", "-m", "x"]):
             subprocess.run(cmd, cwd=str(self.plugin), check=True, stdout=subprocess.DEVNULL)
@@ -421,6 +439,23 @@ class SealTests(unittest.TestCase):
         proc = other.cli("run", *other.common())
         self.assertEqual(proc.returncode, 2)
         self.assertIn("did not record a plugin tree", proc.stderr)
+
+    def test_export_keeps_dot_directories_and_matches_git_archive_minus_evals(self):
+        sb = Sandbox(self)
+        dest = sb.tmp / "export"
+        cmp_run.export_frozen(sb.plugin, dest)
+        self.assertTrue((dest / ".claude-plugin" / "plugin.json").is_file())
+        self.assertTrue((dest / ".agents" / "notes.md").is_file())
+        self.assertTrue((dest / ".gitignore").is_file())
+        self.assertFalse((dest / "claude-plugin").exists())
+        self.assertFalse((dest / "evals").exists())
+        listing = subprocess.run("git archive --format=tar HEAD | tar -t", shell=True, cwd=str(sb.plugin), stdout=subprocess.PIPE, universal_newlines=True).stdout
+        want = {ln.rstrip("/") for ln in listing.splitlines() if ln.strip() and not ln.startswith("evals")}
+        got = set()
+        for base, dirs, files in os.walk(str(dest)):
+            for name in dirs + files:
+                got.add(os.path.relpath(os.path.join(base, name), str(dest)))
+        self.assertEqual(got, want)
 
     def test_frozen_export_leaves_out_evals_and_is_hashed(self):
         sb = Sandbox(self)
@@ -806,6 +841,66 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.status(proc.stdout, "off arm: permission denials"), "FAIL")
         self.assertEqual(len(sb.calls()), 1)
 
+    def test_real_denial_messages_pass_unless_they_name_the_permission_mode(self):
+        benign = [
+            "A nested command in this command can't be checked before it runs",
+            'This Bash command contains multiple operations. The following part requires approval: echo "EXIT=$?"',
+        ]
+        for message in benign:
+            with self.subTest(message[:40]):
+                sb = Sandbox(self, bash_calls=5, denials={"off": [{"tool_name": "Bash", "tool_use_id": "tb2", "decision_reason_type": "other", "message": message}]})
+                proc = sb.cli("pilot", *sb.common())
+                self.assertEqual(proc.returncode, 0, proc.stdout)
+                self.assertEqual(self.status(proc.stdout, "off arm: permission denials"), "PASS")
+                self.assertEqual(self.status(proc.stdout, "off arm: Bash allow rules work"), "PASS")
+                result = json.loads((sb.out / "pilot" / "off" / "result.json").read_text())
+                self.assertIn(message[:30], result["permission_denial_reasons"][0])
+        mode = "Permission to use Bash has been denied because Claude Code is running in don't ask mode."
+        sb = Sandbox(self, bash_calls=5, denials={"off": [{"tool_name": "Bash", "tool_use_id": "tb2", "decision_reason_type": "mode", "message": mode}]})
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(self.status(proc.stdout, "off arm: permission denials"), "FAIL")
+        self.assertEqual(self.status(proc.stdout, "off arm: Bash allow rules work"), "FAIL")
+
+    def test_denial_events_are_joined_to_the_result_entries_by_tool_use_id(self):
+        events = [{"type": "system", "subtype": "permission_denied", "tool_use_id": "t1", "tool_name": "Bash", "decision_reason_type": "other", "message": "m1"},
+                  {"type": "system", "subtype": "permission_denied", "tool_use_id": "t9", "tool_name": "Bash", "decision_reason_type": "mode", "message": "only in the stream"},
+                  {"type": "result", "subtype": "success", "permission_denials": [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {}},
+                                                                                   {"tool_name": "Edit", "tool_use_id": "t2", "tool_input": {}}]}]
+        info = cmp_run.analyse_stream(events)
+        reasons = {d.get("tool_use_id"): cmp_run.denial_reason(d) for d in info["denials"]}
+        self.assertEqual(sorted(reasons), ["t1", "t2", "t9"])
+        self.assertEqual(reasons["t1"], "other | m1")
+        self.assertEqual(reasons["t2"], "")
+        self.assertIn("mode", reasons["t9"])
+
+    def test_pilot_fails_when_the_plugin_loaded_under_the_wrong_name(self):
+        sb = Sandbox(self, plugin_name="plugin")
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 1)
+        line = [ln for ln in proc.stdout.splitlines() if "plugin, slash command and agent are present" in ln][0]
+        self.assertTrue(line.startswith("FAIL"))
+        self.assertIn("mitosis-orchestrator:orchestrate", line)
+        self.assertIn("plugin:flash-worker:flash-worker", line)
+
+    def test_skill_expansion_is_judged_on_user_side_text_only(self):
+        # the assistant quotes the H1 but the user message was never expanded: still FAIL
+        sb = Sandbox(self, expand=False, quote_marker=True)
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(self.status(proc.stdout, "on arm skill expanded under -p"), "FAIL")
+        self.assertIn("-p does not appear to expand plugin slash commands", proc.stdout)
+        self.assertEqual(proc.returncode, 1)
+
+    def test_run_specific_init_fields_are_not_a_plugin_effect_but_real_ones_are(self):
+        sb = Sandbox(self, vary_volatile_only_in_on=True)
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(self.status(proc.stdout, "init events differ only in mitosis items"), "PASS")
+        sb2 = Sandbox(self, on_init_extra={"model": "sonnet"})
+        proc2 = sb2.cli("pilot", *sb2.common())
+        self.assertEqual(proc2.returncode, 1)
+        self.assertIn("key model differs", proc2.stdout)
+
     def test_pilot_fails_on_mitosis_hooks_in_the_off_arm(self):
         sb = Sandbox(self, hook_events={"off": ["python3 enforce-orchestrator.py pre-tool-use"]})
         proc = sb.cli("pilot", *sb.common())
@@ -851,16 +946,18 @@ class TextRules(unittest.TestCase):
 
     def test_allowed_tools_lists(self):
         always = {"Agent", "Read", "Grep", "Glob", "Edit", "Write", "Skill", "SendMessage"}
+        extra = {"echo", "cd", "pwd", "sort", "uniq", "cut", "diff"}
         bash = {
-            "lookup": {"ls", "cat", "grep", "sed", "find", "wc", "head", "tail"},
-            "fix": {"python3", "git", "ls", "cat", "grep", "sed", "find", "wc", "head", "tail"},
-            "ops": {"python3", "ls", "cat", "grep", "sed", "find", "wc", "head", "tail", "mkdir", "cp", "mv", "sha256sum", "date"},
+            "lookup": {"ls", "cat", "grep", "sed", "find", "wc", "head", "tail"} | extra,
+            "fix": {"python3", "git", "ls", "cat", "grep", "sed", "find", "wc", "head", "tail"} | extra,
+            "ops": {"python3", "ls", "cat", "grep", "sed", "find", "wc", "head", "tail", "mkdir", "cp", "mv", "sha256sum", "date"} | extra,
         }
         for task, cmds in bash.items():
             rules = [ln.strip() for ln in (TASKS / task / "allowed_tools.txt").read_text().splitlines() if ln.strip()]
             self.assertTrue(always <= set(rules), task)
             scoped = {re.match(r"^Bash\((\w+):\*\)$", r).group(1) for r in rules if r.startswith("Bash")}
             self.assertEqual(scoped, cmds, task)
+            self.assertEqual("python3" in scoped, task != "lookup")
             self.assertNotIn("Bash", rules)
 
     def test_docs_and_runner_text(self):

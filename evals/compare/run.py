@@ -210,7 +210,8 @@ def export_frozen(plugin_dir, dest):
     dest.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
         for member in tar.getmembers():
-            name = member.name.lstrip("./")
+            name = member.name[2:] if member.name.startswith("./") else member.name
+            name = name.rstrip("/")
             if not name or name == "evals" or name.startswith("evals/") or name == "pax_global_header":
                 continue
             if name.startswith("/") or ".." in name.split("/"):
@@ -416,7 +417,7 @@ def analyse_stream(events):
             usage = message.get("usage") or {}
             ctx = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
             peak = max(peak, ctx)
-    denials = list((final or {}).get("permission_denials") or [])
+    denials = merge_denials((final or {}).get("permission_denials") or [], events)
     bash_calls = len([b for b in tool_blocks if b.get("name") == "Bash"])
     costs = [float(r["total_cost_usd"]) for r in results if isinstance(r.get("total_cost_usd"), (int, float))]
     return {
@@ -470,6 +471,26 @@ def leak_scan(tool_blocks, workdir, subagent_dir=None):
     return hits
 
 
+def merge_denials(result_denials, events):
+    """Denials from the result event (tool_name, tool_use_id, tool_input only) joined by tool_use_id with the
+    system `permission_denied` stream events, which carry decision_reason_type and message."""
+    by_id = {}
+    order = []
+    for d in result_denials:
+        if isinstance(d, dict):
+            key = d.get("tool_use_id") or "result-%d" % len(order)
+            by_id[key] = dict(d)
+            order.append(key)
+    for e in events:
+        if e.get("type") == "system" and e.get("subtype") == "permission_denied":
+            key = e.get("tool_use_id") or "event-%d" % len(order)
+            if key not in by_id:
+                order.append(key)
+                by_id[key] = {}
+            by_id[key].update({k: e[k] for k in ("tool_name", "tool_use_id", "decision_reason_type", "message") if k in e})
+    return [by_id[k] for k in order]
+
+
 def denial_reason(d):
     if not isinstance(d, dict):
         return str(d)[:200]
@@ -477,7 +498,9 @@ def denial_reason(d):
     return " | ".join(parts)[:300]
 
 
-CONFIG_REASON = re.compile(r"\b(mode|rules?|allowedtools|allowlist|allow list|deny list|settings)\b", re.I)
+# A denial is a misconfiguration only when it names the permission mode. Claude Code's own limits on
+# model-written commands ("can't be checked before it runs", "requires approval") are not.
+CONFIG_REASON = re.compile(r"\bmode\b", re.I)
 
 
 def projects_root():
@@ -727,7 +750,7 @@ def cmd_run(args):
 # pilot
 # ---------------------------------------------------------------------------------------------
 
-INIT_VOLATILE = ("session_id", "uuid", "cwd", "timestamp")
+INIT_VOLATILE = ("session_id", "uuid", "cwd", "timestamp", "memory_paths", "messaging_socket_path", "original_cwd")
 INIT_MITOSIS_LISTS = ("plugins", "agents", "skills", "slash_commands")
 
 
@@ -788,20 +811,39 @@ def pilot_checks(off, on, plugin_dir):
         out.append(("UNKNOWN", name, "hook events are not in the stream and %d events mention mitosis" % len(other_mitosis)))
     else:
         out.append(("UNKNOWN", name, "hook events are not in the stream; only absence of mitosis items and strings is shown"))
-    # 3. on arm skill expanded under -p
+    # 3a. the plugin loaded under its own name (catches a broken export or manifest, independent of any marker)
+    name = "on arm: plugin, slash command and agent are present"
+    if on is None:
+        out.append(("UNKNOWN", name, "on arm not run yet"))
+    elif on["info"]["init"] is None:
+        out.append(("UNKNOWN", name, "no init event"))
+    else:
+        on_init = on["info"]["init"]
+        missing = []
+        if not any(n == "mitosis-orchestrator" or n.startswith("mitosis-orchestrator@") for n in _names(on_init.get("plugins"))):
+            missing.append("plugin named mitosis-orchestrator (saw %s)" % sorted(_names(on_init.get("plugins")))[:4])
+        if "mitosis-orchestrator:orchestrate" not in _names(on_init.get("slash_commands")) | _names(on_init.get("skills")):
+            missing.append("slash command or skill mitosis-orchestrator:orchestrate")
+        if "mitosis-orchestrator:flash-worker" not in _names(on_init.get("agents")):
+            missing.append("agent mitosis-orchestrator:flash-worker (saw %s)" % sorted(n for n in _names(on_init.get("agents")) if "worker" in n)[:3])
+        out.append(("FAIL", name, "missing: " + "; ".join(missing)) if missing else ("PASS", name, "plugin, /mitosis-orchestrator:orchestrate and mitosis-orchestrator:flash-worker are in init"))
+    # 3b. the skill body reached the model as the user's message
     name = "on arm skill expanded under -p"
     if on is None:
         out.append(("UNKNOWN", name, "on arm not run yet"))
     else:
-        marker = _skill_marker(plugin_dir)
-        text = on.get("transcript_text")
-        blob = json.dumps(on["info"].get("events", []))
-        if marker and (marker in (text or "") or marker in blob):
-            out.append(("PASS", name, "skill body marker found: %r" % marker))
-        elif text is None:
-            out.append(("UNKNOWN", name, "no transcript to inspect and no marker %r in the stream" % marker))
+        markers = _skill_markers(plugin_dir)
+        user_side = _user_side_text(on["info"].get("events", []), on.get("transcript_text"))
+        found = [m for m in markers if m in user_side]
+        if found:
+            out.append(("PASS", name, "skill text found in a user-side message: %r" % found[0][:60]))
+        elif on.get("transcript_text") is None and not any(e.get("type") == "user" for e in on["info"].get("events", [])):
+            out.append(("UNKNOWN", name, "no transcript and no user events in the stream to inspect"))
+        elif not markers:
+            out.append(("UNKNOWN", name, "no skill text to look for in SKILL.md"))
         else:
-            out.append(("FAIL", name, "marker %r not found in the transcript; the slash command may not have expanded" % marker))
+            out.append(("FAIL", name, "the skill text %r is not in any user-side message of the stream or transcript; "
+                                      "-p does not appear to expand plugin slash commands, so the on arm would not run the skill" % markers[0][:60]))
     # 4. Bash rules work, 5. denials. Claude Code's own limits on model-written compound commands are not
     # a misconfiguration: FAIL only when Bash could not run at all or a denial names the mode or the rules.
     for label, run in (("off", off), ("on", on)):
@@ -865,14 +907,49 @@ def pilot_checks(off, on, plugin_dir):
     return out
 
 
-def _skill_marker(plugin_dir):
+def _names(items):
+    out = set()
+    for x in items or []:
+        out.add(x if isinstance(x, str) else str(x.get("name", "")) if isinstance(x, dict) else str(x))
+    return out
+
+
+def _skill_markers(plugin_dir):
+    """Text of SKILL.md that only appears if the skill body was expanded: the H1 and the first prose line after it."""
     path = Path(plugin_dir) / "skills" / "orchestrate" / "SKILL.md"
     if not path.is_file():
-        return None
+        return []
+    markers = []
+    seen_h1 = False
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith("# "):
-            return line[2:].split(" (")[0].strip()
-    return None
+        if line.startswith("# ") and not seen_h1:
+            markers.append(line[2:].split(" (")[0].strip())
+            seen_h1 = True
+        elif seen_h1 and line.strip() and not line.startswith(("#", "|", "-", "`", ">", "---")):
+            markers.append(line.strip()[:80])
+            break
+    return markers
+
+
+def _flatten(content):
+    """Plain text of a user message; tool_result blocks are skipped so that reading SKILL.md does not count."""
+    if isinstance(content, str):
+        return content
+    return "\n".join(str(b.get("text", "")) if isinstance(b, dict) else str(b) for b in (content or [])
+                     if isinstance(b, str) or (isinstance(b, dict) and b.get("type") == "text"))
+
+
+def _user_side_text(events, transcript_text):
+    """Text of user messages only: stream events of type user and transcript records of type user."""
+    parts = [_flatten((e.get("message") or {}).get("content")) for e in events if e.get("type") == "user" and isinstance(e.get("message"), dict)]
+    for line in (transcript_text or "").splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("type") == "user" and isinstance(rec.get("message"), dict):
+            parts.append(_flatten(rec["message"].get("content")))
+    return "\n".join(parts)
 
 
 def read_text_or_none(path):
