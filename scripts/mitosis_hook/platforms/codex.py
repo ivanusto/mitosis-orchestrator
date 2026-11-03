@@ -21,6 +21,7 @@ from ..common import (
 from ..guards import _parse_codex_exec, _rewrite_codex_exec_model
 from ..models import codex_tier_effort, codex_tier_model
 from .agy import _handle_invoke_subagent
+from ..pin_verify import codex_rollout_models, record_pin_verdict
 from ..report import (
     REPORT_BLOCK_REASON,
     _append_report_format_enabled,
@@ -31,6 +32,7 @@ from ..report import (
 from ..routing import _tier_effort, decide_subagent, find_mutation
 from ..state import (
     _RECENT_DECISIONS,
+    _record_tier,
     apply_escalation,
     escalation_for_record,
     report_failure_status,
@@ -450,6 +452,10 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
     rec["last_turn_id"] = payload.get("turn_id")
     if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
         rec["report_ok"] = validate_subagent_report(str(payload.get("last_assistant_message") or "")) is None
+        # v2 spawns carry no model, so the role file alone pins the child: this is the only check it worked.
+        if _get_env("CODEX_MITOSIS_VERIFY_PIN", default="1") != "0":
+            path = payload.get("agent_transcript_path") or payload.get("transcript_path")
+            record_pin_verdict(rec, codex_tier_model(_record_tier(rec)), codex_rollout_models(path))
     return key
 
 

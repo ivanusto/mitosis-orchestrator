@@ -30,6 +30,7 @@ from ..report import (
     prompt_has_report_format,
     validate_subagent_report,
 )
+from ..pin_verify import claude_handback_report, claude_transcript_models, record_pin_verdict
 from ..routing import NUMBERED_RULE_RE, decide_subagent, find_mutation
 from ..state import (
     apply_escalation,
@@ -179,6 +180,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         "type": target_type,
         "model": target_tier,
         "tier": target_tier,
+        "pinned_model": claude_model,
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }]
@@ -361,22 +363,55 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         for meta in state.setdefault("subagents", {}).values():
             meta["active_branch"] = False
 
+    # A systemMessage on SubagentStop never reaches the screen, so handle_stop delivers the warning.
+    pin_warning = _claude_verify_pin(record, payload)
+    if pin_warning:
+        state.setdefault("pin_warnings", []).append(pin_warning)
+
+    # Auto mode delivers the report through SubagentHandback, which leaves last_assistant_message unset.
+    # PostToolUse keeps it; the transcript is only a fallback because it may lag behind this event.
+    message = str(payload.get("last_assistant_message") or "")
+    stored = state.get("handback_reports", {}).pop(agent_id, "") if isinstance(state.get("handback_reports"), dict) else ""
+    handback = "" if message.strip() else (stored or claude_handback_report(payload.get("agent_transcript_path")))
+    report = handback or message
+
     # One save for every outcome (the report_nagged flag is part of the same write).
     result: Dict[str, Any] = {}
-    if payload.get("stop_hook_active") is not True and _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") != "0":
+    if _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") != "0":
         type_name = agent_type or (str(record.get("type") or "") if record else "")
         if _is_plugin_agent_type(type_name):
-            error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
-            if error is not None:
+            error = validate_subagent_report(report)
+            if record is not None and report.strip():
+                record["report_ok"] = error is None
+            if error is None:
+                if record is not None:
+                    _claude_escalate_on_stop(state, record, report, agent_id)
+            # A handed-back report is already delivered, and a stop without any report gives nothing to judge.
+            elif payload.get("stop_hook_active") is not True and not handback and "last_assistant_message" in payload:
                 nagged: List[str] = state.setdefault("report_nagged", [])
                 key = agent_id or type_name
                 if key not in nagged:
                     nagged.append(key)
                     result = {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
-            elif record is not None:
-                _claude_escalate_on_stop(state, record, str(payload.get("last_assistant_message") or ""), agent_id)
     save_state(payload, state)
     return result
+
+
+def _claude_verify_pin(record: Optional[Dict[str, Any]], payload: Dict[str, Any]) -> str:
+    """Compare the pinned model with the subagent's transcript. Returns a one-time warning on a mismatch.
+
+    Only records with pinned_model take part: forks, built-ins and synthetic records were never pinned.
+    """
+    if record is None or not record.get("pinned_model") or _get_env("CLAUDE_MITOSIS_VERIFY_PIN", default="1") == "0":
+        return ""
+    models = claude_transcript_models(payload.get("agent_transcript_path"))
+    verdict = record_pin_verdict(record, record["pinned_model"], models)
+    if verdict is not False or record.get("pin_warned"):
+        return ""
+    record["pin_warned"] = True
+    return (f"[Mitosis Orchestrator] Subagent '{record.get('role') or record.get('type')}' was pinned to "
+            f"{record['pinned_model']} but ran on {record.get('actual_model')}, possibly a model fallback. "
+            "Run scripts/mitosis-doctor.py.")
 
 
 def _claude_escalate_on_stop(state: Dict[str, Any], record: Dict[str, Any], message: str, agent_id: str) -> None:

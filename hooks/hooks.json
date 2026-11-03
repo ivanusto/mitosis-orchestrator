@@ -34,7 +34,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Agent|Bash",
+        "matcher": "Agent|Bash|SubagentHandback",
         "hooks": [
           {
             "type": "command",

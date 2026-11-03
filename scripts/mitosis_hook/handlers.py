@@ -495,9 +495,21 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
     return False
 
 
+HANDBACK_REPORT_CAP = 20000
+
+
 @_releases_state_locks
 def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, tool_args = _extract_tool_call(payload)
+    if tool_name == "SubagentHandback":
+        # The transcript may not hold this call yet when SubagentStop fires, so keep the report for it.
+        agent_id = str(payload.get("agent_id") or "").strip().lower()
+        report = tool_args.get("message")
+        if agent_id and isinstance(report, str) and report.strip():
+            state = load_state(payload)
+            state.setdefault("handback_reports", {})[agent_id] = report[:HANDBACK_REPORT_CAP]
+            save_state(payload, state)
+        return {}
     # A subagent's own tool call (Claude and Codex both send agent_id) must not touch the
     # primary's state: its failures are not the primary's failures, and skipping the
     # load/save avoids needless lock contention.
@@ -604,17 +616,19 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {}
         state = load_state(payload)
         sync_subagents(payload, state)
+        warnings = state.pop("pin_warnings", None)
+        notice: Dict[str, Any] = {"systemMessage": " ".join(warnings)} if warnings else {}
         active = [cid for cid, m in state.get("subagents", {}).items() if m.get("active_branch")]
         active += [m.get("role", "worker") for m in state.get("pending_spawns", []) if m.get("active_branch")]
         if not active:
             save_state(payload, state)
-            return {}
+            return notice
 
         key = ",".join(sorted(active))
         reminded: List[str] = state.setdefault("stop_reminded_sets", [])
         if key in reminded:
             save_state(payload, state)
-            return {}
+            return notice
         reminded.append(key)
         save_state(payload, state)
         return {
@@ -623,6 +637,7 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"[Mitosis Orchestrator] Branch worktrees are still active ({', '.join(active)}). "
                 "Merge or discard their changes, then clean them up before finishing."
             ),
+            **notice,
         }
 
     # Antigravity handling
