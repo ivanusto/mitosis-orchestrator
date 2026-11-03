@@ -60,3 +60,17 @@ class ReturnService:
 
     def total_refunded(self):
         return sum(r.refund_cents for r in self._records)
+
+
+def exchange_difference(returned_line_total_cents, new_line_total_cents):
+    """What the customer pays (positive) or gets back (negative) when swapping one item for another."""
+    return new_line_total_cents - returned_line_total_cents
+
+
+def returns_by_reason(records, reasons):
+    """Count return records per reason; reasons maps (order id, sku) to a reason string."""
+    out = {}
+    for r in records:
+        reason = reasons.get((r.order_id, r.sku), "unknown")
+        out[reason] = out.get(reason, 0) + r.qty
+    return dict(sorted(out.items()))

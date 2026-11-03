@@ -1,0 +1,212 @@
+[
+ {
+  "answer_kind": "str",
+  "id": "q01",
+  "name": "XMLNS_NAMESPACE",
+  "path": "xml/dom/expatbuilder.py",
+  "type": "imported_const"
+ },
+ {
+  "cls": "URLopener",
+  "func": "http_error_default",
+  "id": "q02",
+  "path": "urllib/request.py",
+  "type": "raise_class"
+ },
+ {
+  "answer_kind": "str",
+  "id": "q03",
+  "name": "feature_namespaces",
+  "path": "xml/sax/expatreader.py",
+  "type": "imported_const"
+ },
+ {
+  "cls": "Task",
+  "func": "__step",
+  "id": "q04",
+  "path": "asyncio/tasks.py",
+  "type": "raise_class"
+ },
+ {
+  "cls": "Process",
+  "id": "q05",
+  "method": "ident",
+  "path": "multiprocessing/context.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "_WindowsSelectorEventLoop",
+  "id": "q06",
+  "method": "_make_read_pipe_transport",
+  "path": "asyncio/windows_events.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "BaseEventLoop",
+  "func": "run_until_complete",
+  "id": "q07",
+  "path": "asyncio/base_events.py",
+  "type": "caller_callee"
+ },
+ {
+  "answer_kind": "int",
+  "cls": "MemoryHandler",
+  "func": "__init__",
+  "id": "q08",
+  "param": "flushLevel",
+  "path": "logging/handlers.py",
+  "type": "default_chain"
+ },
+ {
+  "cls": "Future",
+  "func": "exception",
+  "id": "q09",
+  "path": "asyncio/futures.py",
+  "type": "raise_class"
+ },
+ {
+  "cls": "_FailedTest",
+  "id": "q10",
+  "method": "doCleanups",
+  "path": "unittest/loader.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "ContentTypeHeader",
+  "func": "init",
+  "id": "q11",
+  "path": "email/headerregistry.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "DOMBuilder",
+  "func": "_parse_bytestream",
+  "id": "q12",
+  "path": "xml/dom/xmlbuilder.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "Queue",
+  "id": "q13",
+  "method": "_get_loop",
+  "path": "asyncio/queues.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "StreamReaderProtocol",
+  "func": "connection_made",
+  "id": "q14",
+  "path": "asyncio/streams.py",
+  "type": "caller_callee"
+ },
+ {
+  "func": "parse",
+  "id": "q15",
+  "path": "xml/dom/pulldom.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "XMLReader",
+  "func": "getFeature",
+  "id": "q16",
+  "path": "xml/sax/xmlreader.py",
+  "type": "raise_class"
+ },
+ {
+  "cls": "MIMENonMultipart",
+  "id": "q17",
+  "method": "get_unixfrom",
+  "path": "email/mime/nonmultipart.py",
+  "type": "method_origin"
+ },
+ {
+  "func": "get_address",
+  "id": "q18",
+  "path": "email/_header_value_parser.py",
+  "type": "raise_class"
+ },
+ {
+  "answer_kind": "int",
+  "func": "create_subprocess_shell",
+  "id": "q19",
+  "param": "limit",
+  "path": "asyncio/subprocess.py",
+  "type": "default_chain"
+ },
+ {
+  "cls": "XMLFilterBase",
+  "id": "q20",
+  "method": "setEntityResolver",
+  "path": "xml/sax/saxutils.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "MIMEText",
+  "id": "q21",
+  "method": "get_param",
+  "path": "email/mime/text.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "NamedNodeMap",
+  "func": "removeNamedItem",
+  "id": "q22",
+  "path": "xml/dom/minidom.py",
+  "type": "raise_class"
+ },
+ {
+  "cls": "Message",
+  "id": "q23",
+  "method": "as_string",
+  "path": "importlib/metadata/_adapters.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "HTTPMessage",
+  "id": "q24",
+  "method": "get_all",
+  "path": "http/client.py",
+  "type": "method_origin"
+ },
+ {
+  "func": "get_preparation_data",
+  "id": "q25",
+  "path": "multiprocessing/spawn.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "_SafeQueue",
+  "id": "q26",
+  "method": "cancel_join_thread",
+  "path": "concurrent/futures/process.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "Pool",
+  "func": "_handle_results",
+  "id": "q27",
+  "path": "multiprocessing/pool.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "_CapturingHandler",
+  "id": "q28",
+  "method": "handleError",
+  "path": "unittest/_log.py",
+  "type": "method_origin"
+ },
+ {
+  "cls": "DictConfigurator",
+  "func": "configure_logger",
+  "id": "q29",
+  "path": "logging/config.py",
+  "type": "caller_callee"
+ },
+ {
+  "cls": "Popen",
+  "id": "q30",
+  "method": "close",
+  "path": "multiprocessing/popen_spawn_posix.py",
+  "type": "method_origin"
+ }
+]

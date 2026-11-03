@@ -1,0 +1,7 @@
+{
+  "site": "east-5",
+  "env": "staging",
+  "retention_days": 14,
+  "db_path": "state/east5.db",
+  "log_path": "logs/east-5.log"
+}

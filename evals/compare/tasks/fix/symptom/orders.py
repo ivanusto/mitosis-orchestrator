@@ -150,6 +150,22 @@ class OrderService:
         return order
 
 
+def order_summary(order):
+    return "%s %s lines=%d total=%d" % (order.id, order.status, len(order.lines), order.total_cents)
+
+
+def reprice(service, order_id, new_items):
+    """Replace the basket of an unpaid order and price it again with the same coupon."""
+    order = service.get(order_id)
+    if order.status != "new":
+        raise InvalidState("order %s is %s, only new orders can be repriced" % (order.id, order.status))
+    fresh = service.create(order.customer_id, new_items, order.coupon_code)
+    del service._orders[fresh.id]
+    order.lines = fresh.lines
+    order.shipping_cents = fresh.shipping_cents
+    return order
+
+
 def _quote(zone, weight_g, subtotal_cents):
     try:
         return shipping.quote(zone, weight_g, subtotal_cents)

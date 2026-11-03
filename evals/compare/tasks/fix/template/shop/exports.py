@@ -41,3 +41,14 @@ def orders_json(orders):
             "lines": [{"sku": l.sku, "qty": l.qty, "net": l.net_cents} for l in o.lines],
         })
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def ledger_csv(ledger, customers):
+    """Open items per customer as CSV text."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["customer", "invoice", "due", "amount", "paid", "balance"])
+    for customer in sorted(customers):
+        for i in ledger.open_items(customer):
+            writer.writerow([customer, i.number, i.due.isoformat(), money.format_cents(i.amount), money.format_cents(i.paid), money.format_cents(i.balance)])
+    return buffer.getvalue()

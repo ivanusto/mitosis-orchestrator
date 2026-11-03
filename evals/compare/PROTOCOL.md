@@ -19,9 +19,11 @@ The on arm sees a frozen export, not the working checkout: `run` exports a commi
 
 | name | what it is | success |
 | --- | --- | --- |
-| lookup | 8 multi-hop questions over a pinned, read-only copy of four standard library packages (70 files, 1.4 MB, sha256 manifest, offline) | every answer in `answers.json` equals the key |
-| fix | a synthetic order-to-cash package (31 modules, about 1,600 lines, 94 visible tests) with three independent root causes at three layers; one is masked until another is fixed; the visible tests do not catch a work-around at the symptoms | pristine visible tests and hidden tests both pass |
-| ops | 8 dependent local steps (config, sqlite migrations, CSV import, log rotation, summary, manifest); mostly sequential, so it is expected to favour the off arm and is kept as that control | the final state matches the asserted state exactly |
+| lookup | 30 questions over a pinned, read-only copy of eleven standard library packages (168 files, 3.0 MB, sha256 manifest, offline). Every question needs two or more files: an imported constant or default, the file that holds the `def` an inherited method really comes from (full method resolution order), the one cross-file function a function calls, or the exception class a function raises. The key is re-derived from the source by `ast` (`verify_key.py`), and the questions were picked by a deterministic generator (`make_questions.py`). | at most 1 of the 30 answers wrong (pre-registered below) |
+| fix | a synthetic order-to-cash package (62 modules, about 3,600 lines, 151 visible tests) with six independent root causes in six modules across the layers; two are masked until another is fixed; a work-around at the symptoms passes every visible test | pristine visible tests and hidden tests both pass |
+| ops | three sites worked one after the other (config from a template, sqlite database and migrations, CSV import, log rotation), then a combined summary and manifest; 21 dependent steps, each site's first step reads the previous site's result, and each site has its own trap (settings guard on the first import at north-7, a non-default log path at south-2, duplicate serials at east-5). Sequential by design, so it is expected to favour the off arm and is kept as that control | the final state matches the asserted state exactly |
+
+Lookup pass mark. Locations are exact-match strings (`path:line`) and there are 30 of them, so a single slip is likely even for a careful reader, and one slip says little about whether the work was done. Two or more wrong answers do. The pass mark is therefore at most 1 wrong, fixed here before any run. The grader prints only the ids of wrong answers.
 
 ## Design
 

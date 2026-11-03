@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grade the lookup task: python3 grade.py WORKDIR. Exit 0 only if every answer is right.
+"""Grade the lookup task: python3 grade.py WORKDIR. Exit 0 if at most MAX_WRONG answers are wrong.
 
 The key lives next to this file (outside the working directory). Output names only the ids of wrong
 answers, never the expected values. The stdlib copy must still match the sha256 manifest.
@@ -12,6 +12,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import scaffold  # noqa: E402
+
+
+# Pre-registered pass mark: at most one wrong answer out of the 30 (see PROTOCOL.md). Exact-match locations such as
+# `path:line` make one slip likely in 30 questions even for a careful reader, and one slip says little about whether
+# the task was done; two or more wrong answers do.
+MAX_WRONG = 1
 
 
 def same(answer, expected):
@@ -58,8 +64,8 @@ def main(argv):
     wrong = [q for q in sorted(key) if q not in answers or not same(answers[q], key[q])]
     for q in wrong:
         print("%s wrong or missing" % q)
-    print("lookup: %d of %d correct" % (len(key) - len(wrong), len(key)))
-    return 1 if wrong else 0
+    print("lookup: %d of %d correct (pass mark: at most %d wrong)" % (len(key) - len(wrong), len(key), MAX_WRONG))
+    return 1 if len(wrong) > MAX_WRONG else 0
 
 
 if __name__ == "__main__":

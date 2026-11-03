@@ -1,0 +1,7 @@
+{
+  "site": "south-2",
+  "env": "production",
+  "retention_days": 90,
+  "db_path": "state/south/s2.db",
+  "log_path": "logs/south/current.log"
+}

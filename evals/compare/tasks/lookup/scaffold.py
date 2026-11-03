@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create the lookup working directory: python3 scaffold.py WORKDIR.
 
-Copies the *.py files of asyncio, email, http and logging from this machine's Python standard
+Copies the *.py files of eleven packages (see PACKAGES) from this machine's Python standard
 library into WORKDIR/stdlib, verifies every file against stdlib.manifest.json (sha256), and makes
 the copy read-only. A mismatch (different Python build, missing or extra file) exits 2 and removes
 the directory, so the harness refuses to run instead of asking questions about a different tree.
@@ -18,7 +18,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MANIFEST = os.path.join(HERE, "stdlib.manifest.json")
-PACKAGES = ("asyncio", "email", "http", "logging")
+PACKAGES = ("asyncio", "concurrent", "email", "http", "importlib", "json", "logging", "multiprocessing", "unittest", "urllib", "xml")
 
 
 def stdlib_root():
@@ -38,7 +38,7 @@ def list_files(root):
     out = []
     for pkg in PACKAGES:
         for base, dirs, files in os.walk(os.path.join(root, pkg)):
-            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            dirs[:] = sorted(d for d in dirs if d not in ("__pycache__", "test", "tests"))
             for name in sorted(files):
                 if name.endswith(".py"):
                     out.append(os.path.relpath(os.path.join(base, name), root).replace(os.sep, "/"))

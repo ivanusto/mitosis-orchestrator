@@ -211,7 +211,7 @@ if cfg.get("solve", True):
     if task == "lookup":
         shutil.copy(os.path.join(tasks_dir, "lookup", "reference", "answers.json"), "answers.json")
     elif task == "fix":
-        for part, name in (("A", "money.py"), ("B", "shipping.py"), ("C", "fulfilment.py")):
+        for part, name in (("A", "money.py"), ("B", "shipping.py"), ("C", "fulfilment.py"), ("D", "calendar.py"), ("E", "ledger.py"), ("F", "currency.py")):
             shutil.copy(os.path.join(tasks_dir, "fix", "reference", part, name), os.path.join("shop", name))
     else:
         subprocess.check_call([sys.executable, os.path.join(tasks_dir, "ops", "reference", "solve.py"), cwd])
@@ -1078,28 +1078,54 @@ class LookupFixture(unittest.TestCase):
         shutil.copy(str(TASKS / "lookup" / "reference" / "answers.json"), str(work / "answers.json"))
         proc = grade("lookup", work)
         self.assertEqual(proc.returncode, 0, proc.stdout)
-        self.assertIn("8 of 8", proc.stdout)
+        self.assertIn("30 of 30", proc.stdout)
 
-    def test_all_answers_are_needed_and_expected_values_are_not_printed(self):
+    def test_pass_mark_is_at_most_one_wrong_and_expected_values_are_not_printed(self):
         work = scaffold("lookup", self.tmp / "w")
         key = json.loads((TASKS / "lookup" / "key.json").read_text())
-        self.assertEqual(len(key), 8)
-        for q in sorted(key):
-            wrong = dict(key)
-            wrong[q] = "wrong" if not isinstance(key[q], (int, float)) else key[q] + 1
-            (work / "answers.json").write_text(json.dumps(wrong))
-            proc = grade("lookup", work)
-            self.assertEqual(proc.returncode, 1, q)
+        self.assertEqual(len(key), 30)
+
+        def broken(*ids):
+            out = dict(key)
+            for q in ids:
+                out[q] = "wrong" if not isinstance(key[q], (int, float)) else key[q] + 1
+            (work / "answers.json").write_text(json.dumps(out))
+            return grade("lookup", work)
+
+        ids = sorted(key)
+        for q in ids:
+            proc = broken(q)
+            self.assertEqual(proc.returncode, 0, q)        # one slip is within the pass mark
             self.assertIn("%s wrong" % q, proc.stdout)
             for value in key.values():
                 if isinstance(value, str):
                     self.assertNotIn(value, proc.stdout)
+        two = broken(ids[0], ids[1])
+        self.assertEqual(two.returncode, 1)
+        self.assertIn("28 of 30", two.stdout)
         partial = dict(key)
-        del partial["q3"]
+        del partial[ids[0]], partial[ids[1]]
         (work / "answers.json").write_text(json.dumps(partial))
         self.assertEqual(grade("lookup", work).returncode, 1)
         (work / "answers.json").write_text("not json")
         self.assertEqual(grade("lookup", work).returncode, 1)
+        self.assertIn("MAX_WRONG = 1", (TASKS / "lookup" / "grade.py").read_text())
+
+    def test_questions_need_more_than_one_grep(self):
+        specs = json.loads((TASKS / "lookup" / "questions.json").read_text())
+        self.assertEqual(len(specs), 30)
+        self.assertEqual([s["id"] for s in specs], ["q%02d" % i for i in range(1, 31)])
+        self.assertLessEqual({s["type"] for s in specs}, {"imported_const", "default_chain", "method_origin", "caller_callee", "raise_class", "const_chain"})
+        self.assertGreaterEqual(len({s["path"] for s in specs}), 28)
+        self.assertGreaterEqual(len({s["path"].split("/")[0] for s in specs}), 8)
+        key = json.loads((TASKS / "lookup" / "key.json").read_text())
+        for s in specs:
+            answer = key[s["id"]]
+            if s["type"] in ("method_origin", "caller_callee", "raise_class"):
+                self.assertNotEqual(answer.split(":")[0], s["path"], s["id"])   # the answer is always in another file
+        text = (TASKS / "lookup" / "prompt.md").read_text()
+        for s in specs:
+            self.assertIn("- %s: " % s["id"], text)
 
     def test_key_is_derived_from_the_real_tree_by_script(self):
         proc = sh([sys.executable, str(TASKS / "lookup" / "verify_key.py")])
@@ -1109,21 +1135,29 @@ class LookupFixture(unittest.TestCase):
         proc = sh([sys.executable, str(TASKS / "lookup" / "verify_key.py"), str(work / "stdlib")])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
+    def test_questions_are_reproducible_from_the_generator(self):
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(str(TASKS / "lookup"), str(Path(d) / "lookup"), ignore=shutil.ignore_patterns("__pycache__"))
+            proc = sh([sys.executable, str(Path(d) / "lookup" / "make_questions.py")])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            for name in ("questions.json", "key.json", "prompt.md"):
+                self.assertEqual((Path(d) / "lookup" / name).read_text(), (TASKS / "lookup" / name).read_text(), name)
+
     def test_verify_key_catches_a_wrong_key(self):
         with tempfile.TemporaryDirectory() as d:
             shutil.copytree(str(TASKS / "lookup"), str(Path(d) / "lookup"), ignore=shutil.ignore_patterns("__pycache__"))
             kp = Path(d) / "lookup" / "key.json"
             key = json.loads(kp.read_text())
-            key["q1"] = 1
+            key["q01"] = "somewhere/else.py:1"
             kp.write_text(json.dumps(key))
             proc = sh([sys.executable, str(Path(d) / "lookup" / "verify_key.py")])
             self.assertEqual(proc.returncode, 1)
-            self.assertIn("MISMATCH q1", proc.stdout)
+            self.assertIn("MISMATCH q01", proc.stdout)
 
     def test_tree_is_read_only_and_pinned(self):
         work = scaffold("lookup", self.tmp / "w")
         manifest = json.loads((TASKS / "lookup" / "stdlib.manifest.json").read_text())
-        self.assertGreater(len(manifest["files"]), 50)
+        self.assertGreater(len(manifest["files"]), 150)
         self.assertEqual(lookup_scaffold.verify_tree(str(work / "stdlib")), [])
         if os.geteuid() != 0:
             with self.assertRaises(OSError):
@@ -1172,21 +1206,29 @@ NON_MIRRORING_ALLOCATE = '''def allocate(total, weights):
         shares[i] += 1
     return shares'''
 
-FIX_PARTS = {"A": "money.py", "B": "shipping.py", "C": "fulfilment.py"}
+FIX_PARTS = {"A": "money.py", "B": "shipping.py", "C": "fulfilment.py", "D": "calendar.py", "E": "ledger.py", "F": "currency.py"}
+MASKED_BY = {"C": "B", "E": "D"}
 
 
 class FixFixture(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="cmp-fix-"))
+        cls.base = scaffold("fix", cls.tmp / "base")
+
+    @classmethod
+    def tearDownClass(cls):
+        rmtree(cls.tmp)
+
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="cmp-fix-"))
-        self.addCleanup(rmtree, self.tmp)
         self.n = 0
 
-    def fresh(self, fixes=""):
-        self.n += 1
-        work = scaffold("fix", self.tmp / ("w%d" % self.n))
-        for part in fixes:
-            shutil.copy(str(TASKS / "fix" / "reference" / part / FIX_PARTS[part]), str(work / "shop" / FIX_PARTS[part]))
-        return work
+    def with_fixes(self, fixes):
+        """The scaffolded package with the reference file of every cause in `fixes` put in place."""
+        for part, name in FIX_PARTS.items():
+            src = (TASKS / "fix" / "reference" / part / name) if part in fixes else (TASKS / "fix" / "template" / "shop" / name)
+            shutil.copy(str(src), str(self.base / "shop" / name))
+        return self.base
 
     def suite(self, work, tests_dir):
         env = dict(os.environ, PYTHONPATH=str(work), PYTHONDONTWRITEBYTECODE="1")
@@ -1198,16 +1240,21 @@ class FixFixture(unittest.TestCase):
     def test_package_size_and_layers(self):
         pkg = TASKS / "fix" / "template" / "shop"
         mods = sorted(p.name for p in pkg.glob("*.py"))
-        self.assertGreaterEqual(len(mods), 25)
+        self.assertGreaterEqual(len(mods), 60)
         lines = sum(len(p.read_text().splitlines()) for p in pkg.glob("*.py"))
         tests = sum(len(p.read_text().splitlines()) for p in (TASKS / "fix" / "template" / "tests").glob("*.py"))
-        self.assertGreaterEqual(lines + tests, 2400)
-        # layering: lower layers never import higher ones
-        layers = {0: ["errors", "clock", "ids", "units", "money", "validate", "textutil", "calendar"],
-                  1: ["store", "catalog", "customers", "addresses", "inventory"],
-                  2: ["pricing", "tax", "promotions", "discounts", "shipping", "loyalty"],
-                  3: ["orders", "fulfilment", "invoicing", "returns"]}
+        self.assertGreaterEqual(lines, 3500)
+        self.assertGreaterEqual(lines + tests, 5000)
+        layers = {0: ["errors", "clock", "ids", "units", "money", "validate", "textutil", "calendar", "events", "cache", "rate_limit", "serializers"],
+                  1: ["store", "catalog", "customers", "addresses", "inventory", "fx_rates", "suppliers", "warehouse", "address_book", "wishlist", "reviews",
+                      "permissions", "payments"],
+                  2: ["pricing", "tax", "promotions", "discounts", "shipping", "loyalty", "currency", "pricelists", "tax_rules", "carriers", "sla", "bundles",
+                      "gift_cards", "returns_policy", "recommendations"],
+                  3: ["orders", "fulfilment", "invoicing", "returns", "ledger", "subscriptions", "dunning", "purchasing", "picking", "tracking"]}
         rank = {m: n for n, names in layers.items() for m in names}
+        self.assertEqual(sorted(rank), sorted(m[:-3] for m in mods if m not in ("__init__.py",) and m[:-3] not in
+                                              ("audit", "notifications", "config", "search", "forecast", "reports", "exports", "api", "cli",
+                                               "analytics", "dashboard", "importers")))
         for mod, n in rank.items():
             text = (pkg / (mod + ".py")).read_text()
             for other in re.findall(r"^(?:from shop import|from shop\.(\w+) import) ?(.*)$", text, re.M):
@@ -1217,97 +1264,113 @@ class FixFixture(unittest.TestCase):
                         self.assertLessEqual(rank[name], n, "%s (layer %d) imports %s (layer %d)" % (mod, n, name, rank[name]))
 
     def test_untouched_scaffold_fails_and_the_reference_passes(self):
-        work = self.fresh()
-        self.assertEqual(self.both(work), (1, 1))
-        self.assertNotEqual(grade("fix", work).returncode, 0)
-        full = self.fresh("ABC")
+        self.assertEqual(self.both(self.with_fixes("")), (1, 1))
+        self.assertNotEqual(grade("fix", self.with_fixes("")).returncode, 0)
+        full = self.with_fixes("ABCDEF")
         self.assertEqual(self.both(full), (0, 0))
         proc = grade("fix", full)
         self.assertEqual(proc.returncode, 0, proc.stdout)
 
+    def test_no_proper_subset_of_the_six_fixes_is_enough(self):
+        import itertools
+        checked = 0
+        for r in range(0, 6):
+            for fixes in itertools.combinations("ABCDEF", r):
+                work = self.with_fixes("".join(fixes))
+                self.assertEqual(self.both(work), (1, 1), "".join(fixes) or "none")
+                checked += 1
+        self.assertEqual(checked, 63)  # every proper subset of the six fixes, the empty one included
+        self.assertNotEqual(grade("fix", self.with_fixes("ABCDE")).returncode, 0)
+
+    def test_the_causes_are_in_six_modules_and_two_are_masked(self):
+        template = TASKS / "fix" / "template" / "shop"
+        self.assertEqual(len(set(FIX_PARTS.values())), 6)
+        for part, name in FIX_PARTS.items():
+            ref = TASKS / "fix" / "reference" / part
+            self.assertEqual([f for f in os.listdir(str(ref)) if f != "__pycache__"], [name])
+            self.assertNotEqual((ref / name).read_text(), (template / name).read_text())
+        for masked, hider in MASKED_BY.items():
+            names = {"C": "test_cancelling_after_a_partial_shipment_only_releases_the_rest", "E": "test_payments_settle_the_oldest_invoice_first"}
+            test = names[masked]
+            first = self.suite(self.with_fixes(""), self.base / "tests").stderr
+            self.assertIn("ERROR: " + test, first)
+            self.assertNotIn("FAIL: " + test, first)
+            after = self.suite(self.with_fixes(hider), self.base / "tests").stderr
+            self.assertIn("FAIL: " + test, after)
+
+    def test_failures_show_up_in_several_test_modules(self):
+        text = self.suite(self.with_fixes(""), self.base / "tests").stderr
+        modules = set(re.findall(r"^(?:FAIL|ERROR): \w+ \((\w+)\.", text, re.M))
+        self.assertGreaterEqual(len(modules), 6, modules)
+
+    def test_a_patch_that_works_around_the_symptoms_passes_visible_and_fails_hidden(self):
+        work = self.with_fixes("")
+        saved = {}
+        for f in sorted((TASKS / "fix" / "symptom").glob("*.py")):
+            saved[f.name] = (work / "shop" / f.name).read_text()
+            shutil.copy(str(f), str(work / "shop" / f.name))
+        try:
+            self.assertEqual(self.suite(work, work / "tests").returncode, 0)
+            self.assertNotEqual(self.suite(work, TASKS / "fix" / "hidden").returncode, 0)
+            proc = grade("fix", work)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("visible: exit 0", proc.stdout)
+            self.assertIn("hidden: exit 1", proc.stdout)
+        finally:
+            for name, text in saved.items():
+                (work / "shop" / name).write_text(text)
+        self.assertEqual(sorted(saved), ["api.py", "discounts.py", "fulfilment.py", "invoicing.py", "orders.py", "pricelists.py", "returns.py", "subscriptions.py"])
+
     def test_hidden_requirements_are_all_documented_or_pinned_by_visible_tests(self):
-        money_src = (TASKS / "fix" / "template" / "shop" / "money.py").read_text()
+        pkg = TASKS / "fix" / "template" / "shop"
+        money_src = (pkg / "money.py").read_text()
         doc = money_src.split("def allocate")[1].split('"""')[1]
         self.assertIn("negative total", doc)
         self.assertIn("sign flipped", doc)
         self.assertIn("add up to total exactly", doc)
         self.assertIn("earlier parts", money_src.split("def split_evenly")[1].split('"""')[1])
-        shipping_src = (TASKS / "fix" / "template" / "shop" / "shipping.py").read_text()
-        self.assertIn("heaviest parcel in grams that fits the tier", shipping_src)
+        self.assertIn("heaviest parcel in grams that fits the tier", (pkg / "shipping.py").read_text())
+        self.assertIn("clamped to its last day", (pkg / "calendar.py").read_text().split("def add_months")[1])
+        self.assertIn("never takes more from an invoice than its remaining balance", " ".join((pkg / "ledger.py").read_text().split()))
+        self.assertIn("oldest due date first (invoice number breaks ties)", (pkg / "ledger.py").read_text())
+        self.assertIn("rounded to the nearest cent (halves away from zero)", (pkg / "currency.py").read_text())
+        self.assertIn("Always counted from the start date", " ".join((pkg / "subscriptions.py").read_text().split()))
         visible = "\n".join(p.read_text() for p in (TASKS / "fix" / "template" / "tests").glob("test_*.py"))
-        for pinned in ("[145, 331, 24]", "[34, 33, 33]", "largest_remainders", "(5000, 5000, 1295)", "[209, 476, 110]", "-1563"):
+        for pinned in ("[145, 331, 24]", "[34, 33, 33]", "largest_remainders", "(5000, 5000, 1295)", "[209, 476, 110]", "-1563",
+                       "DATE(2026, 2, 28), DATE(2026, 3, 31)", '[("SIN-00001", 700), ("SIN-00002", 500)]', '"P-BOOK": 2169'):
             self.assertIn(pinned, visible)
 
     def test_a_fix_that_follows_every_documented_requirement_passes_hidden(self):
-        alt = ALT_ALLOCATE
-        work = self.fresh("BC")
+        work = self.with_fixes("BCDEF")
         text = (work / "shop" / "money.py").read_text()
-        a = text.index("def allocate")
-        b = text.index("def split_evenly")
-        (work / "shop" / "money.py").write_text(text[:a] + alt + "\n\n" + text[b:])
-        self.assertEqual(self.both(work), (0, 0))
+        a, b = text.index("def allocate"), text.index("def split_evenly")
+        (work / "shop" / "money.py").write_text(text[:a] + ALT_ALLOCATE + "\n\n" + text[b:])
+        try:
+            self.assertEqual(self.both(work), (0, 0))
+        finally:
+            shutil.copy(str(TASKS / "fix" / "template" / "shop" / "money.py"), str(work / "shop" / "money.py"))
 
     def test_a_largest_remainder_fix_that_does_not_mirror_negatives_fails_exactly_the_two_documented_hidden_tests(self):
-        work = self.fresh("BC")
+        work = self.with_fixes("BCDEF")
         text = (work / "shop" / "money.py").read_text()
-        a = text.index("def allocate")
-        b = text.index("def split_evenly")
+        a, b = text.index("def allocate"), text.index("def split_evenly")
         (work / "shop" / "money.py").write_text(text[:a] + NON_MIRRORING_ALLOCATE + "\n\n" + text[b:])
-        self.assertEqual(self.suite(work, work / "tests").returncode, 0)
-        out = self.suite(work, TASKS / "fix" / "hidden").stderr
-        failed = sorted(set(re.findall(r"^FAIL: (\w+)", out, re.M)))
-        self.assertEqual(failed, ["test_installments_and_refund_splits_elsewhere", "test_negative_totals_mirror_positive_ones"])
-
-    def test_no_proper_subset_of_the_three_fixes_is_enough(self):
-        for fixes in ("A", "B", "C", "AB", "AC", "BC"):
-            with self.subTest(fixes=fixes):
-                work = self.fresh(fixes)
-                self.assertEqual(self.both(work), (1, 1), fixes)
-                self.assertNotEqual(grade("fix", work).returncode, 0)
-
-    def test_the_causes_are_in_different_modules_and_layers_and_one_is_masked(self):
-        template = TASKS / "fix" / "template" / "shop"
-        for part, name in FIX_PARTS.items():
-            ref = TASKS / "fix" / "reference" / part
-            self.assertEqual([f for f in os.listdir(str(ref)) if f != "__pycache__"], [name])          # one module per cause, no shared fix
-            self.assertNotEqual((ref / name).read_text(), (template / name).read_text())
-        self.assertEqual(len(set(FIX_PARTS.values())), 3)
-        # masked: with the shipping cause unfixed, the first run shows no stock failure for the cancel path
-        work = self.fresh()
-        first = self.suite(work, work / "tests").stderr
-        self.assertNotIn("FAIL: test_cancelling_after_a_partial_shipment", first)
-        self.assertIn("ERROR: test_cancelling_after_a_partial_shipment", first)
-        self.assertIn("IndexError", first)
-        # fix the shipping cause and the cancel failure appears
-        work_b = self.fresh("B")
-        after_b = self.suite(work_b, work_b / "tests").stderr
-        self.assertIn("FAIL: test_cancelling_after_a_partial_shipment", after_b)
-
-    def test_failures_show_up_in_several_test_modules(self):
-        work = self.fresh()
-        text = self.suite(work, work / "tests").stderr
-        modules = set(re.findall(r"^(?:FAIL|ERROR): \w+ \((\w+)\.", text, re.M))
-        self.assertGreaterEqual(len(modules), 4, modules)
-
-    def test_a_patch_that_works_around_the_symptoms_passes_visible_and_fails_hidden(self):
-        work = self.fresh()
-        for f in sorted((TASKS / "fix" / "symptom").glob("*.py")):
-            shutil.copy(str(f), str(work / "shop" / f.name))
-        self.assertEqual(self.suite(work, work / "tests").returncode, 0)
-        self.assertNotEqual(self.suite(work, TASKS / "fix" / "hidden").returncode, 0)
-        proc = grade("fix", work)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("visible: exit 0", proc.stdout)
-        self.assertIn("hidden: exit 1", proc.stdout)
+        try:
+            self.assertEqual(self.suite(work, work / "tests").returncode, 0)
+            out = self.suite(work, TASKS / "fix" / "hidden").stderr
+            failed = sorted(set(re.findall(r"^FAIL: (\w+)", out, re.M)))
+            self.assertEqual(failed, ["test_installments_and_refund_splits_elsewhere", "test_negative_totals_mirror_positive_ones"])
+        finally:
+            shutil.copy(str(TASKS / "fix" / "template" / "shop" / "money.py"), str(work / "shop" / "money.py"))
 
     def test_editing_the_visible_tests_does_not_help(self):
-        work = self.fresh()
+        work = scaffold("fix", self.tmp / "edit")
         for p in (work / "tests").glob("test_*.py"):
             p.write_text("import unittest\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
         self.assertNotEqual(grade("fix", work).returncode, 0)
 
     def test_scaffold_is_a_git_repo_with_a_clean_initial_commit(self):
-        work = self.fresh()
+        work = scaffold("fix", self.tmp / "git")
         self.assertEqual(sh(["git", "status", "--porcelain"], cwd=str(work)).stdout.strip(), "")
         self.assertEqual(sh(["git", "rev-list", "--count", "HEAD"], cwd=str(work)).stdout.strip(), "1")
 
@@ -1330,48 +1393,79 @@ class OpsFixture(unittest.TestCase):
         proc = grade("ops", work)
         self.assertEqual(proc.returncode, 0, proc.stdout)
 
-    def test_grader_fails_on_every_incomplete_prefix(self):
+    def test_three_sites_and_a_long_chain(self):
+        self.assertEqual(solve_mod.SITES, ["north-7", "south-2", "east-5"])
+        self.assertEqual(len(solve_mod.STEPS), 3 * 6 + 3)
+        self.assertEqual([p.name for p in sorted((TASKS / "ops" / "template" / "params").iterdir())], ["east-5.json", "north-7.json", "south-2.json"])
+        work = self.fresh()
+        solve_mod.run(str(work))
+        manifest = (work / "out" / "MANIFEST.sha256").read_text().splitlines()
+        self.assertEqual(len(manifest), 1 + 3 * 5)
+        conf = {s: solve_mod.read_conf(str(work), s) for s in solve_mod.SITES}
+        self.assertEqual([conf[s]["upstream_build"] for s in solve_mod.SITES], ["none", conf["north-7"]["build_id"], conf["south-2"]["build_id"]])
+        self.assertEqual(len({c["db_path"] for c in conf.values()}), 3)
+        self.assertEqual(len({os.path.dirname(c["log_path"]) for c in conf.values()}), 2)
+
+    def test_grader_fails_on_every_incomplete_state(self):
+        work = self.fresh()
+        self.assertEqual(grade("ops", work).returncode, 1)
         steps = solve_mod.STEPS
-        for k in range(0, 7):
-            with self.subTest(steps_done=k):
-                work = self.fresh()
-                for step in steps[:k]:
-                    step(str(work))
-                self.assertEqual(grade("ops", work).returncode, 1)
-        for k in (8, 9):
-            work = self.fresh()
-            for step in steps[:k]:
-                step(str(work))
-            self.assertEqual(grade("ops", work).returncode, 0, k)
+        for i, (label, fn) in enumerate(steps, 1):
+            fn(str(work))
+            expected = 1 if i < len(steps) - 1 else 0          # complete once the manifest is written; the last step only checks
+            self.assertEqual(grade("ops", work).returncode, expected, "after %s" % label)
 
     def test_each_step_depends_on_the_one_before_it(self):
         steps = solve_mod.STEPS
-        self.assertEqual(len(steps), 9)
         for idx in range(1, len(steps)):
-            with self.subTest(step=steps[idx].__name__, without=steps[idx - 1].__name__):
+            with self.subTest(step=steps[idx][0], without=steps[idx - 1][0]):
                 work = self.fresh()
-                for step in steps[:idx - 1]:
-                    step(str(work))
+                for _, fn in steps[:idx - 1]:
+                    fn(str(work))
                 with self.assertRaises(Exception):
-                    steps[idx](str(work))
+                    steps[idx][1](str(work))
 
-    def test_import_fails_the_first_time_unless_the_config_was_read(self):
-        work = self.fresh()
-        for step in (solve_mod.step_render, solve_mod.step_create_db, solve_mod.step_migrate):
-            step(str(work))
+    def test_the_site_guard_bites_the_first_import_unless_the_config_was_read(self):
         import sqlite3
+        work = self.fresh()
+        for label in ("render north-7", "create_db north-7", "migrate north-7"):
+            dict(solve_mod.STEPS)[label](str(work))
         with self.assertRaises(sqlite3.IntegrityError) as ctx:
-            solve_mod.step_import(str(work))
+            solve_mod.step_import(str(work), "north-7")
         self.assertIn("settings.site", str(ctx.exception))
-        solve_mod.step_set_site(str(work))
-        solve_mod.step_import(str(work))
+        solve_mod.step_set_site(str(work), "north-7")
+        solve_mod.step_import(str(work), "north-7")
+
+    def test_a_script_copied_from_north_7_fails_on_south_2_and_on_east_5(self):
+        import sqlite3
+        steps = solve_mod.STEPS
+        work = self.fresh()
+        for _, fn in steps[:6 + 5]:               # north-7 done, south-2 through its import
+            fn(str(work))
+        with self.assertRaises(FileNotFoundError):
+            solve_mod.naive_rotate(str(work), "south-2")      # its log is not at logs/<site>.log
+        self.assertIn("south/current.log", solve_mod.read_conf(str(work), "south-2")["log_path"])
+        work2 = self.fresh()
+        for _, fn in steps[:12 + 4]:              # everything up to east-5's set_site
+            fn(str(work2))
+        with self.assertRaises(sqlite3.IntegrityError):
+            solve_mod.naive_import(str(work2), "east-5")      # duplicate serials hit the unique index
+        solve_mod.step_import(str(work2), "east-5")           # the stated rule resolves them
+
+    def test_duplicate_rule_keeps_the_largest_qty_and_the_earlier_row_on_a_tie(self):
+        rows = {r[0]: r for r in solve_mod.csv_rows(str(TASKS / "ops" / "template"), "east-5")}
+        self.assertEqual(rows["E5-0003"][3], 21)
+        self.assertEqual(rows["E5-0007"][1], "Gateway G2")
+        self.assertEqual(rows["E5-0011"][3], 7)
+        self.assertEqual(len(solve_mod.csv_rows(str(TASKS / "ops" / "template"), "east-5", dedupe=False)) - len(rows), 3)
 
     def test_tampering_after_the_manifest_is_caught(self):
         for label, mutate in (
-            ("device row", lambda w: self._sql(w, "UPDATE devices SET qty = qty + 1 WHERE serial = 'N7-0001'")),
-            ("summary", lambda w: (w / "out" / "summary.json").write_text('{"site": "x"}')),
-            ("rotated log", lambda w: (w / "logs" / "app.log.1").write_text("other\n")),
-            ("input csv", lambda w: (w / "data" / "devices.csv").write_text("serial,model,site,qty\n")),
+            ("device row", lambda w: self._sql(w, "UPDATE devices SET qty = qty + 1 WHERE serial = 'S2-0001'")),
+            ("summary", lambda w: (w / "out" / "summary.json").write_text('{"sites": {}}')),
+            ("rotated log", lambda w: (w / "logs" / "south" / "current.log.1").write_text("other\n")),
+            ("input csv", lambda w: (w / "data" / "east-5.csv").write_text("serial,model,site,qty\n")),
+            ("conf", lambda w: (w / "conf" / "east-5.conf").write_text("x\n")),
             ("manifest order", lambda w: (w / "out" / "MANIFEST.sha256").write_text("".join(reversed((w / "out" / "MANIFEST.sha256").read_text().splitlines(True))))),
         ):
             with self.subTest(label):
@@ -1382,7 +1476,7 @@ class OpsFixture(unittest.TestCase):
 
     def _sql(self, work, statement):
         import sqlite3
-        con = sqlite3.connect(str(work / "state" / "north7.db"))
+        con = sqlite3.connect(str(work / "state" / "south" / "s2.db"))
         con.execute(statement)
         con.commit()
         con.close()
@@ -1390,12 +1484,13 @@ class OpsFixture(unittest.TestCase):
     def test_grader_output_has_no_expected_values(self):
         work = self.fresh()
         out = grade("ops", work).stdout
-        self.assertNotIn("north-7", out)
-        self.assertNotIn(solve_mod.hashlib.sha256((TASKS / "ops" / "template" / "params.json").read_bytes()).hexdigest()[:12], out)
+        self.assertNotIn("north-7", out.replace("[north-7]", ""))
+        digest = solve_mod.hashlib.sha256((TASKS / "ops" / "template" / "params" / "north-7.json").read_bytes()).hexdigest()[:12]
+        self.assertNotIn(digest, out)
 
-    def test_prompt_has_eight_numbered_steps(self):
+    def test_prompt_has_seven_numbered_steps(self):
         text = (TASKS / "ops" / "prompt.md").read_text()
-        self.assertEqual(re.findall(r"^(\d+)\. ", text, re.M), [str(i) for i in range(1, 9)])
+        self.assertEqual(re.findall(r"^(\d+)\. ", text, re.M), [str(i) for i in range(1, 8)])
 
 
 if __name__ == "__main__":

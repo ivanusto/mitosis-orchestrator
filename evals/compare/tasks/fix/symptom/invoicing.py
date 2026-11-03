@@ -85,6 +85,26 @@ def render(invoice):
     return "%s for order %s\n%s\ntotal %s" % (invoice.number, invoice.order_id, table, money.format_cents(invoice.total))
 
 
+def credit_note(invoice, sku, qty):
+    """A credit note for qty units of one line: the same shares of amount, discount, tax and shipping, negated."""
+    line = next(l for l in invoice.lines if l.sku == sku)
+    if qty <= 0 or qty > line.qty:
+        raise ValueError("cannot credit %d of %d" % (qty, line.qty))
+    return InvoiceLine(sku, "credit: " + line.description, qty,
+                       -money.round_div(line.amount * qty, line.qty), -money.round_div(line.discount * qty, line.qty),
+                       -money.round_div(line.tax * qty, line.qty), -money.round_div(line.shipping * qty, line.qty))
+
+
+def payment_schedule(invoice, count, first_due):
+    """[(due date, cents)] splitting an invoice over count monthly payments."""
+    from shop import calendar
+    return [(calendar.add_months(first_due, i), cents) for i, cents in enumerate(installments(invoice.total, count))]
+
+
+def summary_line(invoice):
+    return "%s %s %s" % (invoice.number, invoice.order_id, money.format_cents(invoice.total))
+
+
 def _spread_cents(total, weights):
     """Largest remainder split kept next to its only caller."""
     sign = -1 if total < 0 else 1

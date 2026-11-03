@@ -1,0 +1,20 @@
+qty,serial,site,model
+6,S2-0001,south-2,Battery B9
+11,S2-0002,south-2,Relay R1
+16,S2-0003,south-2,"Sensor, outdoor"
+21,S2-0004,south-2,Gateway G3
+3,S2-0005,south-2,Display D4
+8,S2-0006,south-2,"Sensor, indoor"
+13,S2-0007,south-2,Gateway G2
+18,S2-0008,south-2,Battery B9
+23,S2-0009,south-2,Relay R1
+5,S2-0010,south-2,"Sensor, outdoor"
+10,S2-0011,south-2,Gateway G3
+15,S2-0012,south-2,Display D4
+20,S2-0013,south-2,"Sensor, indoor"
+2,S2-0014,south-2,Gateway G2
+7,S2-0015,south-2,Battery B9
+12,S2-0016,south-2,Relay R1
+17,S2-0017,south-2,"Sensor, outdoor"
+22,S2-0018,south-2,Gateway G3
+4,S2-0019,south-2,Display D4

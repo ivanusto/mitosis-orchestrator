@@ -41,3 +41,10 @@ class Repository:
 
     def __len__(self):
         return len(self._items)
+
+
+def group_by(items, key):
+    out = {}
+    for item in items:
+        out.setdefault(key(item), []).append(item)
+    return out

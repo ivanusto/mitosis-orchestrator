@@ -57,3 +57,55 @@ class Inventory:
 
     def low_stock(self, threshold):
         return sorted(sku for sku in self._on_hand if self.available(sku) <= threshold)
+
+
+class LotInventory:
+    """Stock tracked in dated lots, so the oldest expiry ships first (first-expiry-first-out)."""
+
+    def __init__(self):
+        self._lots = {}
+
+    def receive(self, sku, qty, lot, expires=None):
+        validate.require_positive_int(qty, "qty")
+        lots = self._lots.setdefault(sku, {})
+        entry = lots.setdefault(lot, {"qty": 0, "expires": expires})
+        entry["qty"] += qty
+        if expires is not None:
+            entry["expires"] = expires
+
+    def lots(self, sku):
+        """[(lot, qty, expires)] in picking order: soonest expiry first, undated lots last, then lot name."""
+        items = [(lot, e["qty"], e["expires"]) for lot, e in self._lots.get(sku, {}).items() if e["qty"] > 0]
+        return sorted(items, key=lambda t: (t[2] is None, t[2] or 0, t[0]))
+
+    def on_hand(self, sku):
+        return sum(q for _, q, _ in self.lots(sku))
+
+    def take(self, sku, qty, today=None):
+        """Remove qty units, oldest expiry first; expired lots are skipped. Returns [(lot, qty)]."""
+        taken = []
+        need = qty
+        for lot, have, expires in self.lots(sku):
+            if need <= 0:
+                break
+            if today is not None and expires is not None and expires < today:
+                continue
+            part = min(need, have)
+            self._lots[sku][lot]["qty"] -= part
+            taken.append((lot, part))
+            need -= part
+        if need > 0:
+            for lot, part in taken:
+                self._lots[sku][lot]["qty"] += part
+            raise OutOfStock(sku, qty, qty - need)
+        return taken
+
+    def expired(self, today):
+        return sorted((sku, lot, q) for sku in self._lots for lot, q, e in self.lots(sku) if e is not None and e < today)
+
+    def write_off(self, today):
+        total = 0
+        for sku, lot, q in self.expired(today):
+            self._lots[sku][lot]["qty"] = 0
+            total += q
+        return total

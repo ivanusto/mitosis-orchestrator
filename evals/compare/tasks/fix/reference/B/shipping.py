@@ -55,3 +55,31 @@ def split_parcels(zone, weights):
         else:
             parcels.append([weight])
     return parcels
+
+
+DIM_DIVISOR = 5000
+
+
+def dimensional_weight_g(length_cm, width_cm, height_cm):
+    """Volumetric weight in grams: carriers bill the larger of this and the real weight."""
+    return (length_cm * width_cm * height_cm) * 1000 // DIM_DIVISOR
+
+
+def billable_weight_g(real_g, dims_cm):
+    return max(real_g, dimensional_weight_g(*dims_cm))
+
+
+REMOTE_SURCHARGE_CENTS = {"US-OR": 250, "UK": 150}
+
+
+def remote_surcharge(region):
+    return REMOTE_SURCHARGE_CENTS.get(region, 0)
+
+
+def quote_with_surcharge(zone, region, weight_g, subtotal_cents):
+    base = quote(zone, weight_g, subtotal_cents)
+    return base + (remote_surcharge(region) if base else 0)
+
+
+def parcels_needed(zone, weights):
+    return len(split_parcels(zone, weights))

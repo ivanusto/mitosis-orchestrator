@@ -10,7 +10,10 @@ from fractions import Fraction
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "template", "tests"))
 
 from helpers import ShopCase, make_shop  # noqa: E402
-from shop import invoicing, money, shipping  # noqa: E402
+from shop import calendar, currency, gift_cards, invoicing, money, pricelists, shipping  # noqa: E402
+from shop.clock import FixedClock  # noqa: E402
+from shop.ledger import Ledger  # noqa: E402
+from shop.subscriptions import Plan, SubscriptionService  # noqa: E402
 from shop.errors import OverweightError  # noqa: E402
 
 
@@ -61,6 +64,80 @@ class TierBoundaries(unittest.TestCase):
         self.assertEqual(shipping.quote("EU", 500, 100), 495)
         self.assertEqual(shipping.quote("US", 2000, 100), 1195)
         self.assertEqual(shipping.quote("UK", 10000, 100), 2295)
+
+
+DATE = datetime.date
+
+
+class MonthArithmetic(unittest.TestCase):
+    def test_add_months_clamps_to_the_last_day(self):
+        self.assertEqual(calendar.add_months(DATE(2026, 1, 31), 1), DATE(2026, 2, 28))
+        self.assertEqual(calendar.add_months(DATE(2028, 1, 31), 1), DATE(2028, 2, 29))
+        self.assertEqual(calendar.add_months(DATE(2026, 3, 31), -1), DATE(2026, 2, 28))
+        self.assertEqual(calendar.add_months(DATE(2026, 8, 31), 1), DATE(2026, 9, 30))
+        self.assertEqual(calendar.add_months(DATE(2026, 1, 31), 13), DATE(2027, 2, 28))
+        self.assertEqual(calendar.add_months(DATE(2026, 12, 31), 2), DATE(2027, 2, 28))
+        self.assertEqual(calendar.add_months(DATE(2026, 5, 15), 0), DATE(2026, 5, 15))
+
+    def test_gift_card_issued_on_a_leap_day(self):
+        book = gift_cards.GiftCardBook(FixedClock(datetime.datetime(2028, 2, 29, 9, 0)))
+        self.assertEqual(book.issue("G", 1000), DATE(2029, 2, 28))
+
+    def test_subscription_anchored_on_the_thirtieth_and_thirty_first(self):
+        service = SubscriptionService(Ledger(), FixedClock(datetime.datetime(2026, 3, 2, 9, 0)))
+        service.add_plan(Plan("M", "Monthly", 1000, 1))
+        service.add_plan(Plan("Q", "Quarterly", 2500, 3))
+        autumn = service.subscribe("C1", "M", DATE(2026, 10, 31))
+        self.assertEqual([service.renewal_date(autumn, n) for n in (1, 2, 3, 4)], [DATE(2026, 11, 30), DATE(2026, 12, 31), DATE(2027, 1, 31), DATE(2027, 2, 28)])
+        quarterly = service.subscribe("C1", "Q", DATE(2026, 11, 30))
+        self.assertEqual([service.renewal_date(quarterly, n) for n in (1, 2)], [DATE(2027, 2, 28), DATE(2027, 5, 30)])
+
+
+class ReceivablesRules(unittest.TestCase):
+    def ledger(self):
+        ledger = Ledger()
+        ledger.open_invoice("I1", "C1", 1000, DATE(2026, 3, 10))
+        ledger.open_invoice("I2", "C1", 800, DATE(2026, 4, 10))
+        return ledger
+
+    def test_a_payment_never_takes_more_than_the_balance(self):
+        ledger = self.ledger()
+        self.assertEqual(ledger.apply_payment("C1", 300), [("I1", 300)])
+        self.assertEqual(ledger.apply_payment("C1", 900), [("I1", 700), ("I2", 200)])
+        self.assertEqual((ledger.get("I1").balance, ledger.get("I2").balance, ledger.credit("C1")), (0, 600, 0))
+
+    def test_leftover_becomes_credit_and_ties_go_to_the_lower_number(self):
+        ledger = Ledger()
+        ledger.open_invoice("B2", "C1", 500, DATE(2026, 3, 10))
+        ledger.open_invoice("A9", "C1", 500, DATE(2026, 3, 10))
+        self.assertEqual(ledger.apply_payment("C1", 700), [("A9", 500), ("B2", 200)])
+        self.assertEqual(ledger.apply_payment("C1", 1000), [("B2", 300)])
+        self.assertEqual(ledger.credit("C1"), 700)
+
+    def test_stored_credit_respects_balances(self):
+        ledger = self.ledger()
+        ledger.apply_payment("C1", 2500)
+        self.assertEqual(ledger.credit("C1"), 700)
+        ledger.open_invoice("I3", "C1", 300, DATE(2026, 5, 10))
+        ledger.open_invoice("I4", "C1", 900, DATE(2026, 6, 10))
+        self.assertEqual(ledger.use_credit("C1"), [("I3", 300), ("I4", 400)])
+        self.assertEqual((ledger.balance("C1"), ledger.credit("C1")), (500, 0))
+
+
+class CurrencyRounding(unittest.TestCase):
+    def test_convert_rounds_to_the_nearest_cent_away_from_zero(self):
+        self.assertEqual(currency.convert(999, "EUR", "USD"), 1084)
+        self.assertEqual(currency.convert(-999, "EUR", "USD"), -1084)
+        self.assertEqual(currency.convert(1, "EUR", "SEK"), 11)
+        self.assertEqual(currency.convert(4, "EUR", "SEK"), 45)
+        self.assertEqual(currency.convert(500, "GBP", "USD"), 634)
+        self.assertEqual(currency.convert(1085, "USD", "EUR"), 1000)
+
+    def test_totals_and_price_lists_in_other_currencies(self):
+        self.assertEqual(currency.total_in({"USD": 999, "GBP": 999}, "EUR"), 921 + 1167)
+        shop = make_shop()
+        sek = pricelists.PriceList(shop.catalog, "SEK")
+        self.assertEqual((sek.price("P-SOCK"), sek.price("P-BOOK")), (3740, 22449))
 
 
 class ThroughTheServices(ShopCase):

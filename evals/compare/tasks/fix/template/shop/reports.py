@@ -64,3 +64,30 @@ def receivable_aging(invoices, today, holidays=frozenset()):
 
 def money_lines(summary):
     return "\n".join("%-9s %s" % (k, money.format_cents(v) if k != "orders" else v) for k, v in summary.items())
+
+
+def category_sales(orders, catalog):
+    """{category: net sales in cents} over non-cancelled orders."""
+    out = {}
+    for order in live_orders(orders):
+        for line in order.lines:
+            cat = catalog.get(line.sku).category
+            out[cat] = out.get(cat, 0) + line.net_cents
+    return dict(sorted(out.items()))
+
+
+def customer_ranking(orders, n):
+    spend = {}
+    for order in live_orders(orders):
+        spend[order.customer_id] = spend.get(order.customer_id, 0) + order.total_cents
+    return sorted(spend.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+
+
+def shipping_income(orders):
+    return sum(o.shipping_cents for o in live_orders(orders))
+
+
+def discount_rate_bps(orders):
+    live = live_orders(orders)
+    gross = sum(o.subtotal_cents for o in live)
+    return money.round_div(sum(o.discount_cents for o in live) * 10000, gross) if gross else 0

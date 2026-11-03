@@ -33,3 +33,21 @@ def render_table(header, rows, right_align=()):
 
 def truncate(text, width):
     return text if len(text) <= width else text[: max(0, width - 1)] + "~"
+
+
+def wrap_words(text, width):
+    lines, current = [], ""
+    for word in text.split():
+        if current and len(current) + 1 + len(word) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = (current + " " + word).strip()
+    if current:
+        lines.append(current)
+    return lines
+
+
+def ordinal(n):
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return "%d%s" % (n, suffix)

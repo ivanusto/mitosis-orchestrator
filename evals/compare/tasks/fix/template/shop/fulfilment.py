@@ -78,3 +78,45 @@ class FulfilmentService:
     def backlog(self):
         """Orders that still have units to ship, oldest first."""
         return [o for o in self.orders.all() if o.status in ("allocated", "partial")]
+
+
+class WavePlanner:
+    """Groups allocated orders into pick waves by shipping zone, heaviest zone first."""
+
+    def __init__(self, service, max_orders_per_wave=5):
+        self.service = service
+        self.size = max_orders_per_wave
+
+    def plan(self):
+        by_zone = {}
+        for order in self.service.backlog():
+            by_zone.setdefault(order.zone, []).append(order)
+        waves = []
+        for zone in sorted(by_zone, key=lambda z: (-sum(o.weight_g for o in by_zone[z]), z)):
+            orders = sorted(by_zone[zone], key=lambda o: (self.service.ship_by(o.id), o.id))
+            for i in range(0, len(orders), self.size):
+                waves.append({"zone": zone, "orders": [o.id for o in orders[i:i + self.size]]})
+        return waves
+
+    def urgent(self, today):
+        """Orders whose ship-by date has arrived."""
+        return sorted(o.id for o in self.service.backlog() if self.service.ship_by(o.id) <= today)
+
+
+def hold(service, order_id, reason):
+    """Put an allocated order on hold: its stock stays reserved but it leaves the backlog."""
+    order = service.orders.get(order_id)
+    if order.status not in ("allocated", "partial"):
+        raise InvalidState("order %s is %s, cannot hold" % (order.id, order.status))
+    order.hold_reason = reason
+    order.status = "held"
+    return order
+
+
+def release_hold(service, order_id):
+    order = service.orders.get(order_id)
+    if order.status != "held":
+        raise InvalidState("order %s is not held" % order.id)
+    order.status = "partial" if order.shipped else "allocated"
+    order.hold_reason = None
+    return order

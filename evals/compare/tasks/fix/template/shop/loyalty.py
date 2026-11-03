@@ -43,3 +43,17 @@ class LoyaltyBook:
 
     def history(self, customer_id):
         return [(r, p) for c, r, p in self._history if c == customer_id]
+
+
+def expiring_points(history, today_ordinal, window=365):
+    """Points earned more than `window` days before today (given as day ordinals) are expiring.
+
+    history is [(day ordinal, points)]; spending is not tracked here, so this is an upper bound.
+    """
+    return sum(points for day, points in history if points > 0 and today_ordinal - day > window)
+
+
+def tier_progress_bps(spend_cents, target_cents):
+    if target_cents <= 0:
+        return 10000
+    return min(10000, spend_cents * 10000 // target_cents)

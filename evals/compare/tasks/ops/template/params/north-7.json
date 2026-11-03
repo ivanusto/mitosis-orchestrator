@@ -2,5 +2,6 @@
   "site": "north-7",
   "env": "staging",
   "retention_days": 30,
-  "db_path": "state/north7.db"
+  "db_path": "state/north7.db",
+  "log_path": "logs/north-7.log"
 }

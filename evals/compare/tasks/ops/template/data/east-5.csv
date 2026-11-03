@@ -1,0 +1,19 @@
+serial,model,site,qty
+E5-0001,Display D4,east-5,12
+E5-0002,"Sensor, outdoor",east-5,23
+E5-0003,Battery B9,east-5,11
+E5-0004,"Sensor, indoor",east-5,22
+E5-0005,Gateway G3,east-5,10
+E5-0006,Relay R1,east-5,21
+E5-0007,Gateway G2,east-5,9
+E5-0008,Display D4,east-5,20
+E5-0009,"Sensor, outdoor",east-5,8
+E5-0010,Battery B9,east-5,19
+E5-0011,"Sensor, indoor",east-5,7
+E5-0012,Gateway G3,east-5,18
+E5-0013,Relay R1,east-5,6
+E5-0014,Gateway G2,east-5,17
+E5-0015,Display D4,east-5,5
+E5-0003,Relay R1,east-5,21
+E5-0007,Display D4,east-5,9
+E5-0011,Battery B9,east-5,1

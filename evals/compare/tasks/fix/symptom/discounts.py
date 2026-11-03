@@ -56,6 +56,25 @@ class CouponBook:
             raise ValidationError("unknown coupon: %s" % code)
 
 
+def stack(coupons, subtotal_cents, limit_bps=5000):
+    """Apply several coupons one after another, never taking more than limit_bps of the subtotal in total."""
+    remaining = subtotal_cents
+    total = 0
+    for coupon in coupons:
+        amount = coupon_amount(coupon, remaining)
+        remaining -= amount
+        total += amount
+    cap = money.percent(subtotal_cents, limit_bps)
+    return min(total, cap)
+
+
+def best_coupon(coupons, subtotal_cents):
+    """The coupon that takes the most off; the lexically smaller code wins ties."""
+    if not coupons:
+        return None
+    return sorted(coupons, key=lambda c: (-coupon_amount(c, subtotal_cents), c.code))[0]
+
+
 def _spread_cents(total, weights):
     """Largest remainder split kept next to its only caller."""
     sign = -1 if total < 0 else 1
