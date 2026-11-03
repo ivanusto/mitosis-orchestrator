@@ -35,6 +35,10 @@ PROMPT = (
 )
 
 
+# What the hook guarantees. The header line varies: a prompt with its own report format gets "REPORT FORMAT (required ...".
+REPORT_HEADERS = ("STATUS:", "FILES_CHANGED:", "VERIFICATION:", "NOTES:")
+
+
 def run(cmd, **kw):
     return subprocess.run(cmd, text=True, capture_output=True, **kw)
 
@@ -103,7 +107,7 @@ def main(argv=None) -> int:
                 if entry.get("mode") == "pre-tool-use" and entry.get("tool") in ("Agent", "Task"):
                     out = (entry.get("result") or {}).get("hookSpecificOutput") or {}
                     ui = out.get("updatedInput") or {}
-                    pinned.append((ui.get("model"), ui.get("effort"), ui.get("subagent_type"), out.get("permissionDecisionReason"), "REPORT FORMAT:" in str(ui.get("prompt") or "")))
+                    pinned.append((ui.get("model"), ui.get("effort"), ui.get("subagent_type"), out.get("permissionDecisionReason"), all(h in str(ui.get("prompt") or "") for h in REPORT_HEADERS)))
                 if entry.get("mode") == "subagent-stop" and (entry.get("result") or {}).get("decision") == "block":
                     report_blocks += 1
             print(f"hook: SubagentStop report rewrites requested: {report_blocks}")
