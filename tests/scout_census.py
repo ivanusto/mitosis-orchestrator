@@ -12,7 +12,14 @@ For every program in SCOUT_READ_ONLY_COMMANDS and every git subcommand in SCOUT_
 systemctl and journalctl are never run (only --help is read) and are compared with the guard statically.
 
     python3 tests/scout_census.py --guard-root <dir> --out <dir> [--programs ls,git:log] [--jobs 8]
+    python3 tests/scout_census.py --wrappers --guard-root <dir> --out <dir> [--programs 'find(bfs),grep(ugrep)']
     python3 tests/scout_census.py --merge <dir> <dir> ... --out <dir>
+
+Wrapper mode (--wrappers) adds the programs Claude Code's Bash tool puts behind shell functions: find runs bfs and
+grep runs ugrep, both embedded in the claude binary ($CLAUDE_CODE_EXECPATH or ~/.local/bin/claude), and rg runs the
+embedded ripgrep. They are counted as separate programs, "find(bfs)", "grep(ugrep)" and "rg(claude)". Each is run as
+exec -a <name> <claude> <wrapper prefix> <args>; the grep wrapper's fallback to GNU grep for some options is left
+out on purpose, so the options it would divert are still covered.
 
 <dir> for --guard-root holds scripts/enforce-orchestrator.py (the repo root, or an extracted archive).
 """
@@ -64,6 +71,14 @@ GIT_TEMPLATES = {
 # Options every tool may take without listing them in its own help (git wraps --help into man).
 UNIVERSAL = set(["--help", "-h", "--version", "-V", "--usage"])
 SHELL_SCRIPT_OK = ("sh", "dash", "bash")
+# label -> (guard program name, argv0, arguments the shell function puts before the user's arguments)
+WRAPPERS = {
+    "find(bfs)": ("find", "bfs", ["-S", "dfs", "-regextype", "findutils-default"]),
+    "grep(ugrep)": ("grep", "ugrep", ["-G", "--ignore-files", "--hidden", "-I", "--exclude-dir=.git",
+                                      "--exclude-dir=.svn", "--exclude-dir=.hg", "--exclude-dir=.bzr",
+                                      "--exclude-dir=.jj", "--exclude-dir=.sl"]),
+    "rg(claude)": ("rg", "rg", []),
+}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -145,6 +160,18 @@ def versions(bins):
     out["strace"] = (text.splitlines() or [""])[0]
     out["python"] = sys.version.split()[0]
     return out
+
+
+def find_claude():
+    cands = [os.environ.get("CLAUDE_CODE_EXECPATH", ""), os.path.expanduser("~/.local/bin/claude")]
+    for c in cands:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return os.path.realpath(c)
+    return None
+
+
+def sysrun_argv0(claude, argv0, args, timeout=20):
+    return sysrun(["bash", "-c", 'exec -a "$0" "$@"', argv0, claude] + list(args), timeout=timeout)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -254,6 +281,62 @@ def enumerate_git_sub(gitbin, sub):
         inline |= b
     return {"sources": sorted(texts), "listed": len(listed), "inline": len(inline), "binary_strings": 0,
             "options": sorted(listed | inline | UNIVERSAL)}
+
+
+_BRACKET = re.compile(r"^-\[([A-Za-z]+)\]([a-z]+)$")
+
+
+def _expand_bfs(tok):
+    """bfs prints -[aBcm]min and -newerXY as patterns; return the concrete option names."""
+    m = _BRACKET.match(tok)
+    if m:
+        return ["-" + c + m.group(2) for c in m.group(1)]
+    if tok == "-newerXY":
+        return ["-newer" + x + y for x in "aBcm" for y in "aBcmt"]
+    if tok == "-ON":
+        return ["-O0", "-O1", "-O2", "-O3", "-O4"]
+    if tok == "-jN":
+        return ["-j1", "-j4"]
+    return None
+
+
+def enumerate_wrapper(label, claude):
+    """Options of bfs (-help) or ugrep (--help and every --help WHAT) or the embedded ripgrep (--help)."""
+    prog, argv0, _prefix = WRAPPERS[label]
+    texts = {}
+    if argv0 == "bfs":
+        rc, out = sysrun_argv0(claude, argv0, ["-help"])
+        texts["-help"] = out
+        raw = []
+        for line in out.splitlines():
+            if re.match(r"^\s{1,40}-", line):
+                raw.extend(t for t in re.split(r"[,\s]+", line.strip()) if t.startswith("-"))
+        expanded = set()
+        for t in raw:
+            e = _expand_bfs(t)
+            if e:
+                expanded.update(e)
+    else:
+        rc, out = sysrun_argv0(claude, argv0, ["--help"])
+        texts["--help"] = out
+        expanded = set()
+        a, b = parse_options(out)
+        for sub in sorted(set(x[2:] for x in a | b if x.startswith("--"))) + ["format", "regex", "globs", "fuzzy"]:
+            rc2, out2 = sysrun_argv0(claude, argv0, ["--help", sub])
+            if rc2 == 0:
+                texts["--help " + sub] = out2
+        if argv0 == "ugrep":
+            expanded.update("-" + str(d) for d in range(1, 10))  # -NUM context shorthand
+    listed, inline = set(), set()
+    for t in texts.values():
+        a, b = parse_options(t)
+        listed |= a
+        inline |= b
+    allopts = listed | inline | expanded | UNIVERSAL
+    if argv0 == "bfs":
+        allopts |= set(["-help", "-version"])
+    return {"sources": sorted(texts), "listed": len(listed), "inline": len(inline), "binary_strings": len(expanded),
+            "options": sorted(allopts)}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -497,14 +580,18 @@ class Runner(object):
         restore(template, self.fx)
         self.base = snapshot(self.fx)
 
-    def run(self, argv, prog, binpath, is_script):
+    def run(self, argv, prog, binpath, is_script, wrap=None):
         fx = self.fx
         log = os.path.join(self.logdir, "trace.txt")
         if os.path.exists(log):
             os.unlink(log)
         cmd = ["bwrap", "--ro-bind", "/", "/", "--bind", fx, fx, "--bind", self.logdir, self.logdir,
                "--dev", "/dev", "--proc", "/proc", "--unshare-net", "--die-with-parent", "--chdir", fx,
-               "strace", "-f", "-s", "300", "-o", log, "-e", "trace=" + TRACE, "--", binpath] + argv[1:]
+               "strace", "-f", "-s", "300", "-o", log, "-e", "trace=" + TRACE, "--"]
+        if wrap:  # (argv0, prefix): the shell function's exec -a <argv0> <claude> <prefix> <args>
+            cmd += ["bash", "-c", 'exec -a "$0" "$@"', wrap[0], binpath] + list(wrap[1]) + argv[1:]
+        else:
+            cmd += [binpath] + argv[1:]
         env = {"PATH": fx + ":" + SYSPATH, "HOME": self.home, "LC_ALL": "C", "TERM": "dumb",
                "GIT_CONFIG_NOSYSTEM": "1", "GIT_PAGER": "cat", "PWD": fx}
         t0 = time.time()
@@ -592,6 +679,29 @@ def run_census(args):
             continue
         en = enumerate_program(p, b)
         plan.append((p, p, b, open(b, "rb").read(2) == b"#!", en, TEMPLATES.get(p, [p + " {F}"])))
+    claude = find_claude() if args.wrappers else None
+    wraps = {}
+    if args.wrappers:
+        for label in sorted(WRAPPERS):
+            if want and label not in want:
+                continue
+            gprog, argv0, prefix = WRAPPERS[label]
+            if not claude or gprog not in guard_progs:
+                results["unchecked"].append("%s: claude binary or guard program missing" % label)
+                continue
+            en = enumerate_wrapper(label, claude)
+            wraps[label] = (argv0, prefix)
+            tpl = TEMPLATES.get(gprog, [gprog + " {F}"])
+            plan.append((label, gprog, claude, False, en, tpl))
+        results["wrappers"] = {"claude": claude, "claude_version": sysrun([claude, "--version"])[1].strip(),
+                               "rg_census_default": bins.get("rg"),
+                               "rg_census_default_version": (sysrun([bins["rg"], "--version"])[1].splitlines() or [""])[0]
+                               if bins.get("rg") else "none",
+                               "rg_shell_function_version": (sysrun_argv0(claude, "rg", ["--version"])[1].splitlines()
+                                                             or [""])[0] if claude else "none",
+                               "bfs_version": sysrun_argv0(claude, "bfs", ["-version"])[1].strip()[:200] if claude else "",
+                               "ugrep_version": (sysrun_argv0(claude, "ugrep", ["--version"])[1].splitlines() or [""])[0]
+                               if claude else ""}
     gitbin = bins.get("git")
     for s in guard_subs:
         label = "git:" + s
@@ -633,6 +743,7 @@ def run_census(args):
         jobs = jobs[:args.max_runs]
 
     progmap = dict((l, (p, b, s)) for l, p, b, s, e, t in plan)
+    wrapmap = wraps
     jobs_n = max(1, args.jobs)
     runners = []
     for i in range(jobs_n):
@@ -648,9 +759,9 @@ def run_census(args):
             slot = free.pop()
         try:
             prog, b, script = progmap[label]
-            r = runners[slot].run(cmd.split(), prog, b, script)
+            r = runners[slot].run(cmd.split(), prog, b, script, wrapmap.get(label))
             if "TIMEOUT" in r["all"]:  # a stall under load is not a finding: run once more
-                r2 = runners[slot].run(cmd.split(), prog, b, script)
+                r2 = runners[slot].run(cmd.split(), prog, b, script, wrapmap.get(label))
                 r2["retried_after_timeout"] = True
                 r = r2
         finally:
@@ -662,7 +773,6 @@ def run_census(args):
                 sys.stderr.write("  %d/%d runs, %.0fs\n" % (done[0], len(jobs), time.time() - started))
         return job, r
 
-    deadline = started + args.budget
     with ThreadPoolExecutor(max_workers=jobs_n) as ex:
         futs = []
         for job in jobs:
@@ -674,7 +784,7 @@ def run_census(args):
         if "TIMEOUT" in r["all"]:
             label = job[0]
             prog, b, script = progmap[label]
-            r2 = runners[0].run(job[1].split(), prog, b, script)
+            r2 = runners[0].run(job[1].split(), prog, b, script, wrapmap.get(label))
             r2["rechecked_alone"] = True
             r2["first_pass_timeout"] = True
             collected[idx] = (job, r2)
@@ -744,7 +854,6 @@ def systemd_report(mod):
         longs, shorts, words = classify(opts)
         rows = []
         for o in opts:
-            base = "--" + o[2:] if o.startswith("--") else o
             if prog == "systemctl":
                 tpls = ["systemctl status {F}", "systemctl {F}", "systemctl {F} status"]
             else:
@@ -826,6 +935,8 @@ def main():
     ap.add_argument("--budget", type=float, default=520.0)
     ap.add_argument("--max-runs", type=int, default=0)
     ap.add_argument("--skip-systemd", action="store_true")
+    ap.add_argument("--wrappers", action="store_true",
+                    help="also census find(bfs), grep(ugrep) and rg(claude) from the claude binary")
     ap.add_argument("--merge", nargs="+")
     args = ap.parse_args()
     if args.merge:

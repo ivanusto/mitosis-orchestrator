@@ -42,6 +42,26 @@ ALLOWED = (
     "journalctl -u nginx -n 50 --no-pager",
     "find . -name '*.py' -type f",
     "ls ~/src",
+    "git branch --list 'feat/*'",
+    "ls '&'",
+    "rg 'a\\' .",
+    "git log --pretty=format:'%h %s' -5",
+    "jq -r '.[] | select(.x > 1)' f.json",
+    "find . -name '*.py' -not -path './.git/*'",
+    "rg 'def (foo|bar)\\(' src",
+    "grep -rn 'a&&b' src | head -5",
+    'git show HEAD:README.md | head',
+    "git tag -l 'v2.*'",
+    'git remote get-url origin',
+    'ls -la src/ | sort -k5 -n | tail -3',
+    'wc -l src/*.py | tail -1',
+    'du -sh . 2>/dev/null',
+    'date -u +%F',
+    'date -d tomorrow +%F',
+    'sort -t, -k2,2n f',
+    'diff -ru a b',
+    'rg "\\$HOME" .',
+    'NO_COLOR=1 git log -1',
 )
 
 DENIED = (
@@ -100,6 +120,47 @@ DENIED = (
     ("trailing-or", "ls ||"),
     ("brace-group", "{ rm x; }"),
     ("glob-option", "rg * x"),
+    ('git-log-help', 'git log --help'),
+    ('git-status-abbrev-help', 'git status --he'),
+    ('git-log-remerge-diff', 'git log --remerge-diff'),
+    ('git-show-remerge-abbrev', 'git show --remerge'),
+    ('file-p', 'file -p f'),
+    ('file-pre', 'file --pre f'),
+    ('tail-f', 'tail -f x'),
+    ('tail-F-cluster', 'tail -Fn5 x'),
+    ('tail-follow-eq', 'tail --follow=name x'),
+    ('journalctl-M', 'journalctl -M c'),
+    ('journalctl-image', 'journalctl --image=x'),
+    ('systemctl-r', 'systemctl -r list-units'),
+    ('grep-filter', 'grep --filter=x y f'),
+    ('grep-pager', 'grep --pager=x y f'),
+    ('grep-save-config', 'grep --save-config'),
+    ('grep-Q', 'grep -Q x'),
+    ('fgrep-view', 'fgrep --view=x y f'),
+    ('double-semicolon', 'ls ;;'),
+    ('double-and', 'ls && && wc'),
+    ('leading-pipe', '| ls'),
+    ('leading-and', '&& ls'),
+    ('trailing-backslash', 'ls \\'),
+    ('crlf', 'ls\r\n'),
+    ('assign-semicolon', 'LC_ALL=C; ls'),
+    ('redirect-glued', 'ls >/dev/null>x'),
+    ('redirect-then-amp', 'ls >/dev/null&'),
+    ('quoted-program', "'rm' x"),
+    ('split-quoted-program', "r''m x"),
+    ('backslash-program', '\\rm x'),
+    ('find-split-delete', "find . -de''lete"),
+    ('find-escaped-delete', 'find . \\-delete'),
+    ('git-branch-l-creates', 'git branch -l x'),
+    ('date-positional', 'date 0101120020'),
+    ('date-positional-cc', 'date 010112002020'),
+    ('date-positional-sec', 'date -u 0101120020.30'),
+    ('redirect-only-newline', 'ls\n>/dev/null'),
+    ('redirect-only-semicolon', 'ls; >/dev/null'),
+    ('redirect-only-fd', 'ls\n 2>&1'),
+    # Claude Code runs find as bfs, where -rm deletes like -delete (census, wrapper mode: false allows).
+    ('bfs-rm', 'find . -rm'),
+    ('bfs-rm-first', 'find -rm ./evil .'),
 )
 
 STRICT_ALLOWED = ("rg foo src | head -5",)
@@ -138,22 +199,6 @@ class TestScoutTables(unittest.TestCase):
         for cmd in STRICT_DENIED:
             with self.subTest(cmd=cmd):
                 self.assertFalse(eo.scout_command_is_read_only(cmd, strict_windows=True)[0], "false allow: %r" % cmd)
-
-
-class TestScoutKnownGaps(unittest.TestCase):
-    """Found by review and by the oracle. These FAIL on purpose until the guard denies them."""
-
-    def test_date_positional_sets_the_clock(self):
-        # GNU date reads MMDDhhmm[[CC]YY][.ss] as "set the system time" (root only, so a scout that is root).
-        for cmd in ("date 0101120020", "date 010112002020", "date -u 0101120020.30"):
-            with self.subTest(cmd=cmd):
-                self.assertFalse(eo.scout_command_is_read_only(cmd)[0], "false allow: %r" % cmd)
-
-    def test_redirect_only_line_runs_a_program_in_zsh(self):
-        # zsh runs $NULLCMD (cat) for a line that is only a redirect; the scanner sees no command there.
-        for cmd in ("ls\n>/dev/null", "ls; >/dev/null", "ls\n 2>&1"):
-            with self.subTest(cmd=cmd):
-                self.assertFalse(eo.scout_command_is_read_only(cmd)[0], "unpredicted program: %r" % cmd)
 
 
 class TestScoutHook(EnvCase):

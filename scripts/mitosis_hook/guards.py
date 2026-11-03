@@ -492,7 +492,7 @@ _SCOUT_GIT_GLOBAL_FLAGS = {"--no-pager", "-P", "--no-optional-locks"}
 _SCOUT_GIT_DIFF_OPTIONS = {"--output", "--ext-diff", "--remerge-diff"}  # writes, runs a program, writes objects
 _SCOUT_GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _SCOUT_GIT_REMOTE_FLAGS = {"-v", "--verbose", "--all", "--push"}
-_SCOUT_FIND_FORBIDDEN = ("-delete", "-exec", "-ok", "-fprint", "-fls")
+_SCOUT_FIND_FORBIDDEN = ("-delete", "-rm", "-exec", "-ok", "-fprint", "-fls")  # -rm: bfs, which runs as find in Claude Code
 
 _SCOUT_UGREP_FORBIDDEN = {
     "-Q", "-@", "--query", "--filter", "--filter-magic-label", "--pager", "--view", "--save-config", "--config",
