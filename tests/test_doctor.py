@@ -23,7 +23,6 @@ DOCTOR = ROOT / "scripts" / "mitosis-doctor.py"
 KEY = "mitosis-orchestrator@mitosis-orchestrator"
 EVENTS = ("pre_tool_use", "post_tool_use", "session_start", "user_prompt_submit", "subagent_stop", "stop")
 MARKER = "ZZ-SECRET-MARKER-9137"
-POSIX = os.name != "nt"
 TREE_ITEMS = ("scripts", "hooks", "hooks.json", "plugin.json", "spec", "claude-agents", "codex-agents", "agents", ".claude-plugin", ".codex-plugin")
 
 _spec = importlib.util.spec_from_file_location("mitosis_doctor_under_test", str(DOCTOR))
@@ -74,7 +73,8 @@ class Fixture:
 
     @property
     def hb_dir(self):
-        return self.home / ".cache" / "mitosis-orchestrator"
+        base = self.home / "AppData" / "Local" if os.name == "nt" else self.home / ".cache"
+        return base / "mitosis-orchestrator"
 
     def write_claude(self):
         d = self.home / ".claude"
@@ -103,6 +103,9 @@ class Fixture:
     def shims(self):
         self.bin.mkdir(exist_ok=True)
         for name in ("claude", "codex", "agy"):
+            if os.name == "nt":  # found through PATHEXT
+                (self.bin / (name + ".cmd")).write_text("@echo %s 9.9.9\r\n" % name, encoding="ascii", newline="")
+                continue
             path = self.bin / name
             path.write_text("#!/bin/sh\necho '%s 9.9.9'\n" % name, encoding="ascii")
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -148,7 +151,6 @@ class DoctorCase(unittest.TestCase):
             self.assertIn(text, checks[cid]["message"])
 
 
-@unittest.skipUnless(POSIX, "fixture CLIs are POSIX shell shims")
 class TestHealthy(DoctorCase):
     def test_claude_all_ok_exit_0(self):
         checks = self.fx.checks("--platform", "claude")
@@ -181,7 +183,6 @@ class TestHealthy(DoctorCase):
             self.assertNotIn("DOCTOR_MARKER_ENV", out + err)
 
 
-@unittest.skipUnless(POSIX, "fixture CLIs are POSIX shell shims")
 class TestHeartbeat(DoctorCase):
     def test_missing_heartbeat_is_unknown_and_exit_1(self):
         (self.fx.hb_dir / "heartbeat-claude.json").unlink()
@@ -223,7 +224,6 @@ class TestHeartbeat(DoctorCase):
         self.assertEqual(self.status(self.fx.checks("--platform", "claude"), "claude.heartbeat"), "UNKNOWN")
 
 
-@unittest.skipUnless(POSIX, "fixture CLIs are POSIX shell shims")
 class TestStatic(DoctorCase):
     def test_platform_not_installed_is_skip(self):
         shutil.rmtree(str(self.fx.home / ".codex"))
@@ -244,9 +244,86 @@ class TestStatic(DoctorCase):
         self.assertFail(self.fx.checks("--platform", "claude"), "claude.enabled")
         self.assertEqual(self.fx.last_rc, 2)
 
-    def test_claude_missing_plugin_entry_is_fail(self):
+    def platform_rows(self, checks, platform):
+        return [c for c in checks.values() if c["platform"] == platform]
+
+    def assertOnlySkip(self, checks, platform, text=None):
+        rows = self.platform_rows(checks, platform)
+        self.assertEqual([r["status"] for r in rows], ["SKIP"], rows)
+        if text:
+            self.assertIn(text, rows[0]["message"])
+
+    def test_claude_without_entry_is_one_skip_row_even_with_cli(self):
         (self.fx.home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {}}), encoding="utf-8")
-        self.assertFail(self.fx.checks("--platform", "claude"), "claude.plugin")
+        checks = self.fx.checks("--platform", "claude")
+        self.assertOnlySkip(checks, "claude", "installed_plugins.json")
+        self.assertEqual(self.fx.last_rc, 0)
+
+    def test_claude_missing_installed_plugins_file_is_skip(self):
+        (self.fx.home / ".claude" / "plugins" / "installed_plugins.json").unlink()
+        self.assertOnlySkip(self.fx.checks("--platform", "claude"), "claude")
+
+    def test_claude_malformed_installed_plugins_is_unknown_not_skip(self):
+        path = self.fx.home / ".claude" / "plugins" / "installed_plugins.json"
+        for text in ("{not json", json.dumps(["x"])):
+            path.write_text(text, encoding="utf-8")
+            checks = self.fx.checks("--platform", "claude")
+            self.assertEqual(self.status(checks, "claude.plugin"), "UNKNOWN", text)
+            self.assertNotIn("SKIP", {c["status"] for c in checks.values()})
+            self.assertEqual(self.fx.last_rc, 1)
+
+    def test_claude_not_installed_with_root_probes_the_tree_only(self):
+        (self.fx.home / ".claude" / "plugins" / "installed_plugins.json").unlink()
+        checks = self.fx.checks("--platform", "claude", "--root", str(self.fx.claude_tree))
+        self.assertEqual(self.status(checks, "claude.installed"), "SKIP")
+        self.assertEqual(self.status(checks, "claude.probe.scout"), "OK")
+        self.assertEqual({c["status"] for c in checks.values()}, {"SKIP", "OK"})
+        self.assertFalse([k for k in checks if "heartbeat" in k or k.endswith(".cli")])
+
+    def test_codex_without_entry_or_cache_is_one_skip_row(self):
+        shutil.rmtree(str(self.fx.home / ".codex" / "plugins"))
+        (self.fx.home / ".codex" / "config.toml").write_text('model = "x"\n', encoding="utf-8")
+        checks = self.fx.checks("--platform", "codex")
+        self.assertOnlySkip(checks, "codex", "config.toml")
+        self.assertEqual(self.fx.last_rc, 0)
+
+    def test_codex_dir_without_config_or_cache_is_skip_and_root_still_probes(self):
+        shutil.rmtree(str(self.fx.home / ".codex" / "plugins"))
+        (self.fx.home / ".codex" / "config.toml").unlink()
+        self.assertOnlySkip(self.fx.checks("--platform", "codex"), "codex")
+        checks = self.fx.checks("--platform", "codex", "--root", str(self.fx.claude_tree))
+        self.assertEqual(self.status(checks, "codex.installed"), "SKIP")
+        self.assertEqual(self.status(checks, "codex.probe.opaque"), "OK")
+        self.assertFalse([k for k in checks if "trust" in k or "hooks_feature" in k or "heartbeat" in k])
+
+    def test_broken_codex_config_with_cache_is_never_skip(self):
+        (self.fx.home / ".codex" / "config.toml").write_text("[features\nhooks = = true\n", encoding="utf-8")
+        checks = self.fx.checks("--platform", "codex")
+        self.assertNotIn("SKIP", {c["status"] for c in checks.values()})
+        self.assertEqual(self.status(checks, "codex.hooks_feature"), "UNKNOWN")
+        self.assertEqual(self.status(checks, "codex.trust.stop"), "UNKNOWN")
+        self.assertEqual(self.fx.last_rc, 1)
+
+    def test_broken_codex_config_without_cache_is_not_skip_either(self):
+        shutil.rmtree(str(self.fx.home / ".codex" / "plugins"))
+        (self.fx.home / ".codex" / "config.toml").write_text("[features\nhooks = = true\n", encoding="utf-8")
+        checks = self.fx.checks("--platform", "codex")
+        self.assertNotIn("SKIP", {c["status"] for c in checks.values()})
+        self.assertNotEqual(self.fx.last_rc, 0)
+
+    def test_codex_cache_without_config_is_fail_not_skip(self):
+        (self.fx.home / ".codex" / "config.toml").unlink()
+        checks = self.fx.checks("--platform", "codex")
+        self.assertFail(checks, "codex.hooks_feature")
+        self.assertEqual(self.fx.last_rc, 2)
+
+    def test_agy_without_plugin_dir_is_one_skip_row_and_root_probes(self):
+        shutil.rmtree(str(self.fx.agy_tree))
+        self.assertOnlySkip(self.fx.checks("--platform", "agy"), "agy", "plugin directory")
+        checks = self.fx.checks("--platform", "agy", "--root", str(self.fx.codex_tree))
+        self.assertEqual(self.status(checks, "agy.installed"), "SKIP")
+        self.assertEqual(self.status(checks, "agy.probe.flat"), "OK")
+        self.assertFalse([k for k in checks if "heartbeat" in k or "pin_verify" in k])
 
     def test_claude_missing_hooks_file_is_fail(self):
         (self.fx.claude_tree / "hooks" / "hooks.json").unlink()
@@ -308,7 +385,6 @@ class TestStatic(DoctorCase):
         self.assertIs(doctor.parse_toml_fallback(text)["plugins"][KEY]["enabled"], True)
 
 
-@unittest.skipUnless(POSIX, "fault injection uses POSIX shells")
 class TestFaultInjection(DoctorCase):
     def test_1_no_python_in_chain_fails_with_empty_stdout(self):
         empty = self.fx.tmp / "empty-bin"

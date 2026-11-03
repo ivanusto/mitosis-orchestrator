@@ -549,23 +549,32 @@ def check_heartbeat(ctx: Ctx, platform: str, installed: Optional[str]) -> None:
 
 # --------------------------------------------------------------------------- platforms
 
+def not_installed(ctx: Ctx, platform: str, reason: str, tool: str) -> None:
+    """One SKIP row. With --root the tree itself is still probed (that tests the tree, not the install)."""
+    ctx.add(platform, "installed", SKIP, "plugin not installed: " + reason)
+    if ctx.root is not None:
+        offline_probe(ctx, platform, ctx.root)
+
+
 def check_claude(ctx: Ctx, live: bool) -> None:
     p = "claude"
     cdir = ctx.home / ".claude"
-    if not cdir.is_dir() and ctx.root is None:
-        ctx.add(p, "installed", SKIP, "~/.claude not found: Claude Code is not installed for this user")
-        return
-    check_cli(ctx, p, "claude")
     data, err = load_json(cdir / "plugins" / "installed_plugins.json")
+    if err == "missing":
+        return not_installed(ctx, p, "~/.claude/plugins/installed_plugins.json not found", "claude")
+    plugins = dig(data, "plugins")
+    if err is None and isinstance(plugins, dict) and plugins.get(PLUGIN_KEY) is None:
+        return not_installed(ctx, p, "`%s` has no entry in installed_plugins.json" % PLUGIN_KEY, "claude")
+    check_cli(ctx, p, "claude")
     root = ctx.root
     version = None
-    if err:
-        ctx.add(p, "plugin", FAIL if err == "missing" else UNKNOWN, "installed_plugins.json is %s" % err)
+    if err or not isinstance(plugins, dict):
+        ctx.add(p, "plugin", UNKNOWN, "installed_plugins.json is %s" % (err or "malformed (no `plugins` object)"))
     else:
-        entries = dig(data, "plugins", PLUGIN_KEY)
+        entries = plugins.get(PLUGIN_KEY)
         entry = next((e for e in entries if isinstance(e, dict) and isinstance(e.get("installPath"), str)), None) if isinstance(entries, list) else None
         if entry is None:
-            ctx.add(p, "plugin", FAIL, "`%s` is not in installed_plugins.json" % PLUGIN_KEY)
+            ctx.add(p, "plugin", UNKNOWN, "the `%s` entry in installed_plugins.json is malformed (no installPath)" % PLUGIN_KEY)
         else:
             version = entry.get("version") if isinstance(entry.get("version"), str) else None
             sha = entry.get("gitCommitSha")
@@ -633,11 +642,11 @@ def newest_version_dir(base: Path) -> Optional[Path]:
 def check_codex(ctx: Ctx) -> None:
     p = "codex"
     xdir = ctx.home / ".codex"
-    if not xdir.is_dir() and ctx.root is None:
-        ctx.add(p, "installed", SKIP, "~/.codex not found: Codex is not installed for this user")
-        return
-    check_cli(ctx, p, "codex")
     cfg, err = load_toml(xdir / "config.toml")
+    cache_dir = newest_version_dir(xdir / "plugins" / "cache" / PLUGIN / PLUGIN)
+    if cache_dir is None and err != "unreadable" and not isinstance(dig(cfg, "plugins", PLUGIN_KEY), dict):
+        return not_installed(ctx, p, "no [plugins.\"%s\"] entry in ~/.codex/config.toml and no cache under ~/.codex/plugins/cache" % PLUGIN_KEY, "codex")
+    check_cli(ctx, p, "codex")
     if err == "missing":
         ctx.add(p, "hooks_feature", FAIL, "config.toml is missing: `[features] hooks = true` is absent, hooks are silently off")
     elif err:
@@ -658,7 +667,7 @@ def check_codex(ctx: Ctx) -> None:
             ctx.add(p, "plugin", OK, "plugin entry present and enabled")
         else:
             ctx.add(p, "plugin", UNKNOWN, "plugin entry has no readable `enabled` key")
-    version_dir = newest_version_dir(xdir / "plugins" / "cache" / PLUGIN / PLUGIN)
+    version_dir = cache_dir
     root = ctx.root or version_dir
     version = version_dir.name if version_dir else None
     if version_dir is None:
@@ -709,9 +718,8 @@ def check_codex(ctx: Ctx) -> None:
 def check_agy(ctx: Ctx) -> None:
     p = "agy"
     default = ctx.home / ".gemini" / "config" / "plugins" / PLUGIN
-    if not (ctx.home / ".gemini").is_dir() and ctx.root is None:
-        ctx.add(p, "installed", SKIP, "~/.gemini not found: agy is not installed for this user")
-        return
+    if not default.is_dir():
+        return not_installed(ctx, p, "plugin directory ~/.gemini/config/plugins/%s not found" % PLUGIN, "agy")
     check_cli(ctx, p, "agy")
     root = ctx.root or default
     if not root.is_dir():
