@@ -1169,7 +1169,8 @@ TEST_RUNNER_RE = re.compile(
 
 
 # Commands that are never English prose; the rest need a flag or a path as first argument.
-_PLAIN_COMMANDS = {"ls", "wc", "rg", "grep", "egrep", "fgrep", "du", "df", "pwd", "jq", "nl", "stat", "md5sum", "sha256sum"}
+_PLAIN_COMMANDS = {"ls", "wc", "rg", "grep", "egrep", "fgrep", "du", "df", "pwd", "jq", "nl", "stat", "md5sum", "sha256sum",
+                   "uptime", "journalctl", "systemctl"}
 _PATHISH_ARG_RE = re.compile(r"^(?:-\S|[~./]|\S*[/.]\S*)")
 
 
@@ -1691,6 +1692,29 @@ def _cjk_clause_action(clause: str, after_separator: bool = False) -> bool:
     return False
 
 
+# A later sentence that narrows the search rather than asking for work: "Exclude the .git directory."
+# A destination turns it into an edit ("Exclude vendor/ from tsconfig.json", "Exclude the flaky test from CI"),
+# unless that destination is the lookup's own output.
+_SEARCH_SCOPE_SENTENCE_RE = re.compile(
+    r"\W*(?:exclude|ignore|omit)\b(?!.*\b(?:from|in|to|into)\b(?!\s+(?:the\s+|your\s+)?"
+    r"(?:search|results?|scan|output|listing|count|answer|report|grep)\b))",
+    re.IGNORECASE,
+)
+_SCOPE_VERB_RE = re.compile(r"\W*(?:exclude|ignore|omit)\b", re.IGNORECASE)
+# "End your reply by <doing>": only a verb of reporting keeps it a statement about the answer.
+_ANSWER_BY_ACTION_RE = re.compile(
+    r"\bby\s+(?!(?:listing|naming|stating|summari[sz]ing|reporting|giving|quoting|citing|noting|showing|linking)\b)\w+ing\b",
+    re.IGNORECASE,
+)
+# How to answer, not what to do: "End your reply with the four headers."
+_ANSWER_FORMAT_SENTENCE_RE = re.compile(
+    r"\W*(?:(?:end|finish|close|conclude|start|begin|keep|limit|format|structure)\s+(?:your|the)\s+(?:final\s+)?"
+    r"(?:reply|response|answer|report|output|message)\b"
+    r"|(?:use|follow)\s+(?:this|the following|these|the)\s+(?:\w+\s+)?(?:report\s+)?(?:format|headers?|template)\b)",
+    re.IGNORECASE,
+)
+
+
 def _action_sentence(prompt: str) -> Optional[str]:
     """Any sentence (not only the first) that opens with a non-read verb + it/the/a/this/that or a code token.
 
@@ -1698,10 +1722,19 @@ def _action_sentence(prompt: str) -> Optional[str]:
     """
     if len(prompt) > 600:
         return None  # long briefs: their sentences are background and list items (see _scout_trailing_imperative)
-    for sentence, term in _split_sentences(prompt):
+    if is_read_only_command(prompt):
+        return None
+    for index, (sentence, term) in enumerate(_split_sentences(prompt)):
         sentence = re.sub(r"^\W*(?:(?:and|then|also|please|just|now)\s+)+", "", sentence, flags=re.IGNORECASE)
+        if _SCOPE_VERB_RE.match(sentence) and not _SEARCH_SCOPE_SENTENCE_RE.match(sentence):
+            return sentence[:60]  # it names a destination: "Ignore build/ in .gitignore."
+        if _ANSWER_FORMAT_SENTENCE_RE.match(sentence):
+            if _ANSWER_BY_ACTION_RE.search(sentence):
+                return sentence[:60]  # "End your reply by committing the change."
+            continue
         if (_TRAILING_READONLY_RE.match(sentence) or _WORKER_READ_START_RE.match(sentence)
-                or re.match(r"\W*(?:without|point|do not|don't|dont|never|avoid|only)\b", sentence, re.IGNORECASE)):
+                or re.match(r"\W*(?:without|point|do not|don't|dont|never|avoid|only)\b", sentence, re.IGNORECASE)
+                or (index > 0 and _SEARCH_SCOPE_SENTENCE_RE.match(sentence))):
             continue
         if _opening_clause_action(sentence, term == "?"):
             return sentence[:60]
@@ -1729,6 +1762,10 @@ def _scout_opening_action(prompt: str) -> Optional[str]:
     "utils/text.py 的 slugify，順手處理一下中文。". A tail that is a question stays a lookup.
     """
     text = prompt.strip()
+    if is_read_only_command(text):
+        return None  # "systemctl --failed" is a lookup although "--failed" reads like prose
+    if re.match(r"(?:systemctl|journalctl)\b", text):
+        return re.split(r"[.?!;\n]", text, 1)[0][:60]  # the same command with a subcommand the scout cannot run
     cjk_clause = re.split(r"[。？！；\n]", text, 1)[0]
     if _cjk_clause_action(cjk_clause):
         return cjk_clause[:60]

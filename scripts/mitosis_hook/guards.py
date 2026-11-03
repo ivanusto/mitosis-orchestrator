@@ -458,8 +458,20 @@ SCOUT_READ_ONLY_COMMANDS = {
     "ls", "cat", "head", "tail", "wc", "rg", "grep", "egrep", "fgrep", "find", "stat", "file",
     "du", "df", "pwd", "which", "tree", "sort", "cut", "jq", "basename",
     "dirname", "realpath", "readlink", "echo", "date", "uname", "nl", "diff", "cmp", "md5sum",
-    "sha256sum",
+    "sha256sum", "uptime",
 }
+
+# System inspection. The first non-flag word of systemctl must be one of these; no word means list-units.
+SCOUT_SYSTEMCTL_SUBCOMMANDS = {
+    "status", "show", "cat", "is-active", "is-enabled", "is-failed", "is-system-running", "get-default",
+    "list-units", "list-unit-files", "list-timers", "list-sockets", "list-jobs", "list-dependencies",
+}
+_SCOUT_SYSTEMCTL_FORBIDDEN_RE = re.compile(r"^(?:-H|-M|--host\b|--machine\b)")  # would reach another machine
+# journalctl: following never ends, and these flags change the journal or the machine.
+_SCOUT_JOURNALCTL_FORBIDDEN_RE = re.compile(
+    r"^(?:--follow\b|--vacuum-|--rotate\b|--flush\b|--sync\b|--relinquish-var\b|--smart-relinquish-var\b|"
+    r"--setup-keys\b|--update-catalog\b|--cursor-file\b|-[A-Za-z]*f)"
+)
 
 
 SCOUT_GIT_SUBCOMMANDS = {
@@ -518,6 +530,17 @@ def scout_command_is_read_only(command: str) -> Tuple[bool, str]:
                 bad = bad or {"<create>"}
             if bad:
                 return False, f"git {sub} {sorted(bad)[0]} changes the repository"
+            continue
+        if prog == "systemctl":
+            sub = next((w for w in words[1:] if not w.startswith("-")), "")
+            if sub and sub not in SCOUT_SYSTEMCTL_SUBCOMMANDS:
+                return False, f"systemctl {sub} is not read-only"
+            if any(_SCOUT_SYSTEMCTL_FORBIDDEN_RE.match(w) for w in words[1:]):
+                return False, "systemctl on another machine"
+            continue
+        if prog == "journalctl":
+            if any(_SCOUT_JOURNALCTL_FORBIDDEN_RE.match(w) for w in words[1:]):
+                return False, "journalctl that follows or changes the journal"
             continue
         if prog not in SCOUT_READ_ONLY_COMMANDS:
             return False, f"'{prog}' is not on the scout allowlist"

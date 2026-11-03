@@ -56,10 +56,40 @@ REPORT_FORMAT_WORKER = _GEN.REPORT_FORMAT_WORKER
 # describe the answer, not the task, so routing ignores them.
 REPORT_FORMAT_TAIL_RE = re.compile(r"(?:^|\n|[.!?]\s+)[ \t]*(?:#+\s*|\*\*)?REPORT FORMAT\b.*\Z", re.IGNORECASE | re.DOTALL)
 
+# The four header lines in order, as the primary writes them itself under its own lead-in.
+_HEADER_LINE = r"[ \t]*[-*`]*[ \t]*{}[*`]*:[^\n]*"
+_REPORT_HEADERS_RE = re.compile(
+    r"(?:^|\n)" + r"\n".join(_HEADER_LINE.format(h) for h in ("STATUS", "FILES_CHANGED", "VERIFICATION", "NOTES"))
+    + r"(?:\n[ \t]*-[^\n]*)*"
+)
+# The sentence announcing that block ("End your reply with this report format:"). It must open with a
+# format verb, so "Fix the bug and report in this format:" keeps its action.
+_REPORT_LEAD_RE = re.compile(
+    r"(?:^|(?<=[.!?。！？])\s*)\W*(?:(?:then|and|please|finally)\s+)*"
+    r"(?:(?:end|finish|close|conclude|reply|respond|answer|return|format|structure|use|give)\b"
+    r"[^.!?\n]*\b(?:report|reply|response|answer|format|headers?|message)\b[^.!?\n]*"
+    r"|your\s+(?:final\s+)?(?:reply|response|report|answer|message)\b[^.!?\n]*"
+    r"|(?:最後|最后|結尾|结尾|回覆|回复|回報|回报|請用|请用)[^。\n]*(?:格式|標頭|标题|回報|回报)[^。\n]*)"
+    r"[:：]\s*\Z",
+    re.IGNORECASE,
+)
+
 
 def strip_report_format(prompt: str) -> str:
-    """Drop a trailing REPORT FORMAT block, if any, before classification."""
-    return REPORT_FORMAT_TAIL_RE.sub("", prompt or "").strip()
+    """Drop the report instructions before classification: they describe the answer, not the task.
+
+    Covers a trailing REPORT FORMAT block and the four header lines under the primary's own lead-in.
+    Text after the header lines is kept, so a task cannot hide behind them.
+    """
+    text = REPORT_FORMAT_TAIL_RE.sub("", prompt or "").strip()
+    match = _REPORT_HEADERS_RE.search(text)
+    if match:
+        head = text[:match.start()].rstrip()
+        lead = _REPORT_LEAD_RE.search(head.rsplit("\n", 1)[-1])
+        if lead:
+            head = head[:len(head) - len(head.rsplit("\n", 1)[-1]) + lead.start()].rstrip()
+        text = (head + "\n" + text[match.end():]).strip()
+    return text
 
 
 def prompt_has_report_format(prompt: str) -> bool:

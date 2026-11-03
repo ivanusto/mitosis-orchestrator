@@ -154,11 +154,23 @@ WINDOWS_CASES = [
 
 class WindowsPathTableTest(unittest.TestCase):
     def test_table(self):
-        for command, cwd, root, expected in WINDOWS_CASES:
-            with self.subTest(command=command, cwd=cwd, root=str(root)):
-                ok, why = check(command, cwd, root)
-                self.assertEqual(ok, expected, why)
-                self.assertEqual(bool(why), not expected)
+        # No drive exists as far as _drive_relative_is_path knows, so lowercase x:y is text on every machine.
+        with mock.patch.object(guards.os.path, "exists", return_value=False):
+            for command, cwd, root, expected in WINDOWS_CASES:
+                with self.subTest(command=command, cwd=cwd, root=str(root)):
+                    ok, why = check(command, cwd, root)
+                    self.assertEqual(ok, expected, why)
+                    self.assertEqual(bool(why), not expected)
+
+    def test_lowercase_drive_relative_word_when_drive_is_absent(self):
+        with mock.patch.object(guards.os, "name", "nt"), mock.patch.object(guards.os.path, "exists", return_value=False):
+            self.assertTrue(check("git log --format=x:y", "C:\\repo", REPO)[0])
+
+    def test_lowercase_drive_relative_word_when_drive_exists(self):
+        with mock.patch.object(guards.os, "name", "nt"), mock.patch.object(guards.os.path, "exists", return_value=True):
+            ok, why = check("git log --format=x:y", "C:\\repo", REPO)
+            self.assertFalse(ok)
+            self.assertIn("drive-relative", why)
 
     def test_any_root_may_match(self):
         self.assertTrue(check("type \\\\server\\share\\f", "C:\\repo", REPO, SHARE)[0])
