@@ -1,6 +1,6 @@
 # Claude Code 主核模型選擇：Fable 5.1 與 Opus 5.5
 
-價格與量測數據截至 2026-10-22，使用前請查官方價目表。
+價格截至 2026-10-22，使用量量測為 2026-10-23 至 2026-11-02（2.4.0），使用前請查官方價目表。
 
 [English](./cost.md) · [回到 README](../README.zh-TW.md)
 
@@ -18,7 +18,13 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 - **單價差 2.5 倍。** Fable 5.1 與 Opus 5.5 屬同一 tokenizer 家族，同樣的對話在 Fable 上約貴 2.5 倍。在 Mitosis 架構下這個倍率只作用在主核的部分（規劃、拆解、審查 diff、整合）；scout 與 worker 的費用在兩種主核下完全相同。
 - **任務時間。** Fable 5.1 的單一回合較長：在 `high` effort 下，一個需要蒐集情境、實作並自我驗證的請求常跑數分鐘，困難任務單一回合跑到 15 分鐘屬於正常現象。Opus 5.5 預設 `medium`，在這個等級就能以更少步驟與約一半的 token 達到或超過 Opus 5 的 `high`。兩者在 `xhigh` / `max` 都會明顯變慢。effort 是兩種模型共同的時間與費用主要控制桿：session 內用 `/effort`，或設定 `~/.claude/settings.json` 的 `effortLevel`，或環境變數 `CLAUDE_CODE_EFFORT_LEVEL`。
 - **能力。** Fable 5.1 在長程自主執行、需要主核自行釐清的模糊需求、牽涉隱含不變量的跨模組重構、深度程式碼審查，以及長時間協調平行子代理這些工作上領先；它的 `low` / `medium` 仍然很強，常超過前代模型的 `xhigh`。Opus 5.5 在規格明確的多步驟 agentic 開發與審查上性價比更好：不只每 token 便宜，每個解完的任務也更便宜。
-- **錢花在哪裡。** 編排 session 的帳單由主核的快取讀取與輸出主導，即使所有 scout 與 worker 都已釘定也是如此（下方兩場實測 session 中主核占總費用 70% 到 85%）。未釘定的子代理會繼承主核模型：內建的 `Explore` / `general-purpose` 代理與帶明確 `model` 的未指定型別 `Agent` 呼叫，hook 刻意不動它們；實測中一個繼承 `fable` 的子代理，費用約為十三個 `haiku` scout 的 40 倍。
+- **錢花在哪裡。** 帳單由主核的快取讀取與輸出主導。下方兩場 session（2026-10-19 至 2026-10-22 量測）中主核占總費用 70% 到 85%，2026-10-19 至 2026-10-22 的 session 整體約 90%。未釘定的子代理會繼承主核模型：內建的 `Explore` / `general-purpose` 代理與帶明確 `model` 的未指定型別 `Agent` 呼叫，hook 刻意不動它們；實測中一個繼承 `fable` 的子代理，費用約為十三個 `haiku` scout 的 40 倍。
+
+### 真實使用的樣子（2026-10-23 至 2026-11-02）
+
+一台機器，互動式 Claude Code，`mitosis-cost-report.py --fleet`，牌價：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%），Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。這樣的使用下外掛幾乎沒有委派。限制是單一使用者、單一機器、11 天與牌價；這不代表較常委派的使用者會看到同樣結果。
+
+較早的量測，2026-10-19 至 2026-10-22：主核約占 90% 費用；報表的全主核反事實低約 5.3%，大量委派的 session 低 15% 到 17%。這是重新計價，不是節省，而且下方的對照實驗並未重現成本上的好處。
 
 ### 建議
 
@@ -31,7 +37,7 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 | 牽涉不變量、並行或安全性的跨模組重構 | `fable` | `high` |
 | 大型 diff 的深度審查或 repo 歷史追查 | `fable` | `medium` |
 
-外掛在 Claude Code 上的預設釘定目標是 `opus`，理由相同。經驗法則：若成本報表顯示主核占了三分之二以上的 token，代表你正以主核的價格在做子細胞該做的事。先修委派（使用型別化的 `mitosis-orchestrator:*` 子代理、不要繼承模型），再考慮換模型。
+外掛在 Claude Code 上的預設釘定目標是 `opus`，理由相同。舊的經驗法則（主核占三分之二以上 token 就代表浪費主核價格）已撤回：數據不支持。在 11 天的量測中，主核承擔幾乎全部費用，因為大部分工作是主核上的 Bash，`Agent` 呼叫只占工具呼叫的 0.5%。數據支持的結論比較窄：用 `--fleet` 檢查有沒有未釘定的子代理（上述占子代理支出的 23.8%），以及子代理是否從未跑在 `haiku`，先修這些，再考慮換模型。
 
 **示例試算**（純假設，非實測）：主核每個任務讀 300K 輸入 token（80% 來自快取）、寫 30K 輸出 token。
 
@@ -52,11 +58,12 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 python3 scripts/mitosis-cost-report.py                     # 目前專案最新的 session
 python3 scripts/mitosis-cost-report.py --last 2            # 最新兩個 session 並排比較
 python3 scripts/mitosis-cost-report.py --session <id-A> --session <id-B> --json
+python3 scripts/mitosis-cost-report.py --fleet --since 2026-10-23 --until 2026-11-02 --entrypoint cli   # 委派率、每個子代理的模型、未釘定支出
 python3 scripts/mitosis-cost-report.py --format ccusage    # 格式同 `ccusage session --json`（ccusage 20.x）
 python3 scripts/mitosis-cost-report.py --debug-log /tmp/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log
 ```
 
-1.7.0 起報表多一行節省金額：把每筆子代理列改用主核模型重新計價（全尖端模型的反事實），再與實際釘定的偵察者與執行者費用比較。`--format text|json|ccusage` 選擇輸出格式（`--json` 仍是別名）。若存在 hook 除錯日誌（`*_MITOSIS_DEBUG=1`，自動依 session 尋找，或用 `--debug-log` 指定），報表會多一段路由統計，列出各階層的決策數與觸發的規則。
+1.7.0 起報表多一行反事實金額：把每筆子代理列改用主核模型重新計價（全尖端模型的反事實），再與實際釘定的偵察者與執行者費用比較。`--format text|json|ccusage` 選擇輸出格式（`--json` 仍是別名）。若存在 hook 除錯日誌（`*_MITOSIS_DEBUG=1`，自動依 session 尋找，或用 `--debug-log` 指定），報表會多一段路由統計，列出各階層的決策數與觸發的規則。
 
 兩場真實（但不同）任務的節錄輸出，各用一種主核：
 
@@ -74,6 +81,29 @@ Comparison
 ```
 
 下結論前請用同一個任務分別跑兩種主核；上面兩場是不同的工作。其中 `claude-fable-5-1 subagent` 那一列就是前述的繼承模型陷阱。
+
+`--fleet`（2.4.0）讀取時間範圍內所有 session，回報 `Agent` 呼叫占工具呼叫的比例、每個子代理實際使用的模型，以及未釘定的子代理支出。`--entrypoint` 依 session 的啟動方式篩選。2.4.0 也修正了專案目錄編碼：含底線的工作目錄在預設模式下會失敗。
+
+### 明確 `/orchestrate` 值得嗎？（對照實驗）
+
+事先登記於 `evals/compare/PROTOCOL.md`，在任何計分執行前以雜湊封存。三種任務（查詢、六個成因的修正、當作對照組的 21 步循序維運作業）乘以兩個組別（外掛關閉；外掛開啟並使用 `/mitosis-orchestrator:orchestrate`）乘以三次重複，共 18 次計分，相同模型與旗標，預算 60 美元。每種任務依成功數與成本的固定規則判為 BENEFIT、HARM 或 INCONCLUSIVE。
+
+範圍：短任務，主核尖峰情境為 39K 至 86K token。此判定對長 session 不置一詞，這裡的 INCONCLUSIVE 或 HARM 也不是反對在長 session 使用外掛的證據。
+
+結果（Claude Code，`opus` `medium`，18 次計分，全部成功，沒有觸頂、逾時或疑似洩漏；含 2 次暖機共 14.13 美元）。外掛 commit 為 `afefb43`。詳見 `evals/compare/RESULTS.md`。
+
+| 任務 | 關閉組中位數（美元） | 開啟組中位數（美元） | 差異 | 判定 |
+| :--- | ---: | ---: | :--- | :--- |
+| lookup | 0.6117 | 0.9694 | 開啟組高 58% | HARM |
+| ops | 0.4367 | 0.4857 | 開啟組高 11% | HARM |
+| fix | 0.8240 | 0.8159 | 開啟組低 1% | INCONCLUSIVE |
+
+1. 判定依照封存的規則。依事先登記的行動，技能現在說明何時不該使用，2.5 也不投資在委派率上。
+2. 它量到什麼：開啟組 9 次中有 7 次即使明確使用 `/orchestrate` 也沒有派出任何子代理，子代理成本一次為 0.05 美元、另一次為 0.35 美元。所以額外成本多半來自載入技能與 hook 情境，而不是子代理。這是由 `Agent` 次數與主核成本推論而來，並非對委派本身的量測。
+3. 限制：每組 n=3、3 次未校正的比較，ops 只是剛好越過 10% 線，絕對差距約 0.05 美元。任務很短（尖峰情境 40K 至 90K，真實 session 的中位數為 274K），所以對長 session 與情境保護不置一詞。
+4. 第一次嘗試在一次計分後停止，因為防竄改檢查把 hook 寫出的位元組碼當成變更。測試工具修正並重新封存；那次執行（成功，0.70 美元，關閉組）被捨棄，沒有重用。
+
+這些結果不支持任何「此外掛省錢」的說法。本實驗沒有量測的是：隔離主核情境，以及對真正可平行的工作做平行處理。
 
 ### 調整子細胞
 

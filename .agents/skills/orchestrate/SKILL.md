@@ -8,9 +8,14 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.3.2)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.4.0)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
+
+## When not to use
+
+- Skip it for a one-sitting set of independent lookups, and for sequential operational work whose steps depend on each other. In a measured comparison on short tasks the skill added cost there, and five of the six runs dispatched nothing.
+- For a multi-file fix of that size it made no measurable difference.
 
 ---
 

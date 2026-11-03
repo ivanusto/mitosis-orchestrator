@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.4.0 - 2026-11-03
+
+2.4 is about whether the plugin takes effect, not routing accuracy. Measured on one machine over 11 days (2026-10-23 to 2026-11-02, interactive Claude Code): 40 sessions, 27 `Agent` calls in 5,799 primary tool calls (0.5%), subagents 2.3% of spend, 23.8% of subagent spend unpinned, no subagent on haiku. One user, one machine, list prices.
+
+### Comparison experiment and what follows
+- `evals/compare/` ran 18 scored runs (Claude Code, opus medium): lookup HARM (on 58% higher), ops HARM (on 11% higher), fix INCONCLUSIVE (on 1% lower). Details in `evals/compare/RESULTS.md` and the README. 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`.
+- Pre-registered action: `skills/orchestrate/SKILL.md` gains a "When not to use" section, and 2.5 does not invest in dispatch rate. README and cost docs no longer claim savings.
+- Left open: why even explicit `/orchestrate` rarely dispatches.
+
+### Behaviour changes
+- **New Claude Code hooks: `PostToolUseFailure` and `SubagentHandback` (via `PostToolUse`).** Restart Claude Code to load them. `hooks/codex-hooks.json` did not change, so Codex needs no re-approval in `/hooks`.
+- **New user cache file** `heartbeat-<platform>.json` (counters and tool names only; no prompts, paths or messages). `MITOSIS_HEARTBEAT=0` turns it off, `MITOSIS_HEARTBEAT_DIR` moves it.
+- **Failed Claude Code Bash is now counted** (observe only). The circuit breaker does not trip on it, on purpose: a live one could trip on two failed greps.
+- **Pin verification** warns when a subagent ran on another model than the pin: Claude Code at `SubagentStop`, shown once on the primary's `Stop`; Codex state only; agy cannot verify. `CLAUDE_MITOSIS_VERIFY_PIN=0` and `CODEX_MITOSIS_VERIFY_PIN=0` turn it off.
+- **Scout allowlist** adds `uptime`, read-only `systemctl` subcommands and `journalctl` without follow or journal-changing flags.
+
+### Added
+- `scripts/mitosis-doctor.py`: per platform OK, WARN, FAIL, UNKNOWN or SKIP; exit 0 all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. Runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. What it cannot determine is UNKNOWN. A healthy Codex or agy install still exits 1 (Codex trust hash and agy child model cannot be checked). Flags `--platform`, `--json`, `--live` (costs money), `--root`, `--home`. Fault-injection tests reproduce the Codex namespace, agy flat parameter, cp950 and missing-Python failures.
+- `mitosis-cost-report.py --fleet --since --until --entrypoint`: dispatch rate, actual model per subagent, unpinned spend.
+- `evals/compare/`: pre-registered comparison of explicit `/orchestrate` against no plugin (see README). Short tasks only; it says nothing about long sessions.
+- Holdout v9 (80 prompts, sealed in 4ec78be) scored once per version: 2.3.0 74/80, 6 cost, 0 dangerous; 2.4.0 candidate 74/80, 6 cost, 0 dangerous, the same six misses. The 2.4 routing fixes did not move the blind score. v9 is no longer blind and is a regression test; the next routing round writes v10 first.
+
+### Fixed (silent failures)
+- Auto mode delivers subagent reports through `SubagentHandback`, so `SubagentStop` had no `last_assistant_message`: report validation and failure escalation were skipped and each stop got a false "report is empty" block. Fixed with a `PostToolUse` capture and a transcript fallback.
+- `SubagentStop` also fires for Claude Code's internal forks (empty `agent_type`). The FIFO fallback let them take a pending spawn, unregistering the real agent, and could block a fork. Pairing is by exact type now.
+- Scout calls that followed the plugin's own rule (a report format with the primary's lead-in) and search-scope sentences such as "Exclude the .git directory" were upgraded to the worker. A destination ("Exclude vendor/ from tsconfig.json") still counts as an edit.
+- Windows workspace guard: understands drive, UNC, drive-relative, `%VAR%`, `$env:`, quoted rooted, caret-escaped and comma-joined paths (they passed under `AUTO_ALLOW`). Best-effort defence in depth, not a sandbox (SECURITY.md).
+- `mitosis-cost-report.py` and `smoke-claude.py`: a working directory with an underscore failed project lookup in the default mode.
+
+### Tests
+- The full suite runs on Windows in CI; verified on a real Windows 11 machine: 648 tests OK, 11 skipped.
+- `tests/test_routing_eval.py`: `routing_holdout_v9.jsonl` regression test.
+
 ## 2.3.2 - 2026-11-03
 
 Verified live on agy 1.4.12 on Windows 11.

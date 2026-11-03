@@ -11,6 +11,7 @@
 ```bash
 python3 -m unittest discover -s tests
 python3 scripts/sync-generated.py --check
+python3 scripts/mitosis-doctor.py   # after changing hooks or install files (exit 1 is normal for Codex and agy)
 ruff check scripts tests
 vermin -t=3.8- --no-tips scripts
 agy plugin validate . --strict
@@ -34,7 +35,7 @@ See "Code layout" in [README.md](./README.md#code-layout).
 1. A new holdout `tests/routing_holdout_vN.jsonl` is written by someone who has not read `scripts/` or earlier datasets.
 2. It is sealed in its own commit, together with its sha256, before any rule change.
 3. It is scored once per version, in separate processes.
-4. After scoring it becomes a tuning set; the next blind check needs a new holdout.
+4. After scoring it becomes a tuning set; the next blind check needs a new holdout. v9 is scored, so the next routing round writes `routing_holdout_v10.jsonl` first.
 
 ## Commit style
 

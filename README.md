@@ -3,7 +3,7 @@
 [![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator: one frontier nucleus plans, cheap daughter cells do the lookups and edits, hooks enforce the split" />
+  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator: one frontier nucleus plans, daughter cells do the lookups and edits, hooks enforce the split" />
 </p>
 
 <p align="center">
@@ -16,11 +16,13 @@
 
 ## Overview: Why Mitosis?
 
-Inspired by biological **mitosis (cell division)**, **Mitosis Orchestrator** treats your chosen **frontier reasoning model** as the central **Master Nucleus (Primary Architect)**. Instead of spending high-cost frontier tokens and context window capacity on single-file searches, raw log reading, or repetitive edit-and-test cycles, Mitosis Orchestrator divides complex engineering work into specialized, context-bounded **daughter subagents**:
+Inspired by biological **mitosis (cell division)**, **Mitosis Orchestrator** treats your chosen **frontier reasoning model** as the central **Master Nucleus (Primary Architect)**. Instead of filling the frontier model's context window with single-file searches, raw log reading, or repetitive edit-and-test cycles, Mitosis Orchestrator divides complex engineering work into specialized, context-bounded **daughter subagents**:
 
 - **Master Nucleus (Primary Frontier Orchestrator)**: Retains full architectural context, designs API contracts, decomposes tasks, resolves cross-cutting invariants, and synthesizes final results.
 - **Execution Daughter Cells (`flash-worker` · `worker`)**: Execute parallel multi-file analysis, documentation/web research, scoped code edits, and unit/integration test loops within an explicit file allowlist.
-- **Reconnaissance Daughter Cells (`flash-lite-scout` · `explorer`)**: Perform high-fan-out, single-hop read-only lookups: locating symbols, running `grep`/`glob` searches, slicing `.log` or `transcript.jsonl` files, and inspecting single configs at minimal latency and cost.
+- **Reconnaissance Daughter Cells (`flash-lite-scout` · `explorer`)**: Perform high-fan-out, single-hop read-only lookups: locating symbols, running `grep`/`glob` searches, slicing `.log` or `transcript.jsonl` files, and inspecting single configs at minimal latency.
+
+**What it is for.** Isolating the primary's context from noisy reads, and parallelism for work that really is parallel. Neither was measured in the comparison experiment below; the one cost comparison we ran found no saving (see [Is the plugin taking effect?](#is-the-plugin-taking-effect-240)).
 
 ## Screenshots
 
@@ -28,7 +30,7 @@ A real Claude Code session (Opus 5.5 primary) running `/orchestrate` on a small 
 
 <p align="center"><img src="./assets/screenshots/orchestrate-en.png" width="820" alt="Claude Code session: the primary dispatches a flash-lite-scout and a flash-worker, then verifies the tests" /></p>
 
-`scripts/mitosis-cost-report.py` on a run of the same task: the scout ran on haiku, the worker on sonnet, and the primary still accounts for most of the cost (see [Choosing the Primary Model](./docs/cost.md#choosing-the-primary-model-on-claude-code-fable-51-vs-opus-55)):
+`scripts/mitosis-cost-report.py` on a run of the same task: the scout ran on haiku, the worker on sonnet, and the primary still accounts for most of the cost (orchestration did not make this run cheaper; see the comparison below) (see [Choosing the Primary Model](./docs/cost.md#choosing-the-primary-model-on-claude-code-fable-51-vs-opus-55)):
 
 <p align="center"><img src="./assets/screenshots/cost.png" width="820" alt="Cost ledger: haiku scout, sonnet worker, opus primary, total 0.41 USD" /></p>
 
@@ -120,7 +122,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.2)
+agy plugin list            # mitosis-orchestrator (enabled, 2.4.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -207,9 +209,9 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 | `PreToolUse` · `define_subagent` | Forces `enable_subagent_tools=false` to prevent recursive nested subagent spawning. |
 | `PreToolUse` · **Context Hygiene** | Blocks the primary agent from directly reading raw `.log` or `transcript.jsonl` files, keeping noisy logs out of the primary context window by delegating log slicing to reconnaissance scouts. |
 | `PreToolUse` · **Fast-Path Budget** | Caps direct workspace file mutations by the primary agent at `3` distinct files per turn (configurable via `*_MITOSIS_MAX_DIRECT_EDITS`) and blocks direct workspace edit + test-runner loops on the primary agent. |
-| `PreToolUse` · **Circuit Breaker** | Trips after `2` consecutive failures across `run_command` / `Bash` / subagent spawns, halting runaway retry loops until the next turn. |
+| `PreToolUse` · **Circuit Breaker** | Trips after `2` consecutive failures across `run_command` / `Bash` / subagent spawns, halting runaway retry loops until the next turn. Claude Code Bash failures are counted but do not trip it, on purpose. |
 | `PreToolUse` · **Workspace Guard** | Opt-in (`*_MITOSIS_AUTO_ALLOW=1`): auto-approves file and command tools that stay inside the workspace, while prompting (`ask`; `deny` on Codex, which has no `ask`) for outside paths, privilege escalation, root deletes, force pushes, or shell-piped downloads. When disabled it gives no verdict: on Claude Code the hook returns `{}`, so your normal permission rules and prompts apply (1.5.0 and earlier returned `allow`, which skipped them). |
-| `PostToolUse` | Pairs spawned subagents with platform metadata and updates failure streaks. |
+| `PostToolUse` · `PostToolUseFailure` (Claude Code) | Pairs spawned subagents with platform metadata and updates failure streaks. Captures `SubagentHandback` reports (auto mode). Failed Bash arrives as `PostToolUseFailure` and is counted, observe only. |
 | `SubagentStop` / `Stop` | When the turn is idle and branch worktrees remain alive, reminds the primary agent once per set of live workers to merge/discard changes and clean them up. On Claude Code and Codex (bound agents only; `CODEX_MITOSIS_ENFORCE_REPORT=0` disables there), `SubagentStop` also checks that a `flash-lite-scout` / `flash-worker` ended with the four-header report and, once per agent, sends it back to rewrite its final message (`CLAUDE_MITOSIS_ENFORCE_REPORT=0` disables). |
 
 #### Failure escalation (2.3)
@@ -287,6 +289,7 @@ Rule layer only, judge off. Cells read correct/40, cost errors, dangerous ("dang
 | holdout v6 (40) | sealed blind, scored once per version; used to pick the 2.2 gaps | | 29/40, 8, 3 | 32/40, 8, 0 | 35/40, 5, 0 | 35/40, 5, 0 |
 | holdout v7 (40) | sealed blind, scored once per version; two misses fixed afterwards | | | 31/40, 7, 2 | first contact 34/40, 4, 2; final 36/40, 4, 0 | 36/40, 4, 0 |
 | holdout v8 (40) | sealed blind, scored once per version; one miss fixed afterwards | | | | 35/40, 4, 1 | first contact 35/40, 4, 1; final 37/40, 3, 0 |
+| holdout v9 (80) | sealed blind, scored once per version; no longer blind | | | | | 74/80, 6, 0; 2.4.0 candidate 74/80, 6, 0 |
 
 v5 was written without access to the scripts or earlier sets, sealed by sha256 (`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`) and scored once against the 2.0 candidate rules. The one dangerous miss (`v5-en-19`, a polite request with a gerund) was already misrouted by 1.8.1; the `polite-request` rule was then written from new cases only, so v5 is no longer blind and the next tuning round needs a v6 first. 2.0.0 also closes three dangerous misroutes that 1.8.1 had (question followed by an imperative, shell mutations in pipelines, polite gerund requests); those rules are not judgeable. Known limitation: the rule layer is still lexical, with no embedding stage.
 
@@ -295,6 +298,8 @@ v6 (sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`) w
 v7 (sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`) was written blind by a subagent, sealed in commit 7dffeb0 and scored once on 2026-10-22 in separate processes: 2.1.0 31/40, 7 cost, 2 dangerous; the 2.2 candidate (c648116) 34/40, 4 cost, 2 dangerous. The two dangerous misses (scout-typed prompts that open with an action or run a writing command) were then fixed with general rules from new hand-written cases (416f754): 36/40, 4 cost, 0 dangerous. v7 is therefore no longer blind. The remaining cost errors include one lookup typed `flash-worker` that is kept on the worker and a read-only question that mentions fix/pytest.
 
 v8 (sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`) was written blind by a subagent, sealed in commit 27914e3 and scored once on 2026-10-22 in separate processes: 2.2.0 35/40, 4 cost, 1 dangerous; the 2.3 candidate (e237483) 35/40, 4 cost, 1 dangerous, the same five misses. The dangerous miss (a scout-typed comparison of third-party frameworks' current docs, which needs the web) was then fixed with general rules from new hand-written cases (d0b2624): 37/40, 3 cost, 0 dangerous. v8 is therefore no longer blind. The 2.3 rule work did not move the blind score: both versions missed the same five prompts. The 2.3 gains are on 175 private review probes in seven batches (on the 293 new cases 2.2.0 scored 205/293 with 67 dangerous) that each exposed a new action shape under the type-first default, which is why 2.3 inverted the default for scout-typed calls. The remaining v8 cost errors are two lookups typed `flash-worker` that stay on the worker and one simplified-Chinese question.
+
+v9 (80 prompts, sealed in commit 4ec78be) was scored once per version in separate processes: 2.3.0 74/80, 6 cost, 0 dangerous; the 2.4.0 candidate 74/80, 6 cost, 0 dangerous, the same six misses. The 2.4 routing fixes did not move the blind score. v9 has now been scored and is no longer blind (`tests/test_routing_eval.py` keeps it as a regression test), so the next routing round writes v10 first.
 
 **2.1 routing additions.**
 - Run phrases that only ask which command runs something are topics; a leftover "and run it" still upgrades.
@@ -342,6 +347,52 @@ The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets eac
 
 ---
 
+## Is the plugin taking effect? (2.4.0)
+
+2.4.0 is about whether the plugin takes effect, not about routing accuracy.
+
+**Measured use.** One machine, 2026-10-23 to 2026-11-02, interactive Claude Code, `mitosis-cost-report.py --fleet`: 40 sessions, 5,799 primary tool calls, 27 `Agent` calls (0.5%); Bash was 77% of tool calls. The primary cost about 492 USD and subagents about 11.4 USD (2.3%). Of the subagent spend, 23.8% was unpinned (2 `Explore` calls, 2.71 USD), and no subagent ran on haiku. Limit: one user, one machine, 11 days, list prices.
+
+**Doctor.** `python3 scripts/mitosis-doctor.py` checks each installed platform and prints OK, WARN, FAIL, UNKNOWN or SKIP. It runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. Anything it cannot determine is UNKNOWN, never OK. Exit 0 means all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. A healthy Codex or agy install still exits 1, because the Codex trust hash and agy's child model cannot be checked. Flags: `--platform`, `--json`, `--root`, `--home`, and `--live` (runs a real session, costs money). The tests inject the faults it exists to catch: the Codex namespace, the agy flat parameter, cp950 and a missing Python.
+
+**Pin verification.** Claude Code compares the pinned model with the subagent transcript at `SubagentStop` and warns once on the primary's `Stop` (a `systemMessage` on `SubagentStop` is not displayed). Codex compares with the last `turn_context` of the child rollout and records state only. agy cannot verify. `CLAUDE_MITOSIS_VERIFY_PIN=0` and `CODEX_MITOSIS_VERIFY_PIN=0` turn it off.
+
+**Heartbeat.** Each hook run updates `heartbeat-<platform>.json` in the user cache directory: counters and tool names only, no prompts, paths or messages. `MITOSIS_HEARTBEAT=0` turns it off; `MITOSIS_HEARTBEAT_DIR` moves it.
+
+**Cost report.** `--fleet` (with `--since`, `--until`, `--entrypoint`) reports dispatch rate, the actual model per subagent and unpinned spend. The project-directory encoding bug is fixed: any working directory with an underscore failed in the default mode, and in `smoke-claude.py`.
+
+### Silent failures found and fixed
+
+- **Auto mode reports.** Auto mode delivers subagent reports through the `SubagentHandback` tool, so `SubagentStop` had no `last_assistant_message`. Report validation and failure escalation were skipped without a sign, and each such stop got a false "report is empty" block. Fixed with a `PostToolUse` capture and a transcript fallback.
+- **Internal forks.** `SubagentStop` also fires for Claude Code's internal forks (empty `agent_type`). The FIFO fallback let those stops take a pending spawn, which unregistered the real agent, and could block a fork. Pairing is now by exact type.
+- **Failed Bash.** Claude Code sends failed Bash as `PostToolUseFailure`, which nothing listened to, so the circuit breaker never saw a Claude failure. It is now counted, observe only. The breaker stays off for these on purpose: a live one could trip on two failed greps.
+- **Scout upgrades.** Scout calls that followed the plugin's own rule (a report format with the primary's own lead-in) were upgraded to the worker, as were search-scope sentences such as "Exclude the .git directory". Fixed; a destination ("Exclude vendor/ from tsconfig.json") still counts as an edit.
+- **Scout allowlist.** Added `uptime`, read-only `systemctl` subcommands, and `journalctl` without follow or journal-changing flags.
+- **Windows workspace guard.** It now understands drive, UNC, drive-relative, `%VAR%`, `$env:`, quoted rooted, caret-escaped and comma-joined paths; these passed under `AUTO_ALLOW` before. The guard is best-effort defence in depth, not a sandbox (see [SECURITY.md](./SECURITY.md)). The full test suite now runs on Windows in CI, and on a real Windows 11 machine: 648 tests OK, 11 skipped.
+
+### Does explicit `/orchestrate` pay off? (comparison experiment)
+
+Pre-registered in `evals/compare/PROTOCOL.md` and sealed by hash before any scored run. Three task types (a 30-question lookup over a pinned standard library copy, a six-cause bug fix, and a 21-step sequential ops job kept as a control) times two arms (plugin off; plugin on with the `/mitosis-orchestrator:orchestrate` prefix) times three repeats: 18 scored runs on Claude Code with the same model and flags, budget 60 USD. Per task type the verdict is BENEFIT (success not lower, every on-arm cost below every off-arm cost, median at least 25% lower), HARM (success lower, or complete separation the other way with the median at least 10% higher) or INCONCLUSIVE.
+
+Scope: short tasks with a peak primary context of 39K to 86K tokens, while real sessions run far longer. The verdict says nothing about protecting context over a long session, and INCONCLUSIVE or HARM here is not evidence against that use.
+
+Result (Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, none capped, timed out or flagged as a leak; 14.13 USD including 2 warm-ups). Plugin commit `afefb43`. Details: `evals/compare/RESULTS.md`.
+
+| task | off median USD | on median USD | difference | verdict |
+| :--- | ---: | ---: | :--- | :--- |
+| lookup | 0.6117 | 0.9694 | on 58% higher | HARM |
+| ops | 0.4367 | 0.4857 | on 11% higher | HARM |
+| fix | 0.8240 | 0.8159 | on 1% lower | INCONCLUSIVE |
+
+1. The verdict follows the sealed rule. By the pre-registered action, the skill now says when not to use it, and 2.5 does not invest in dispatch rate.
+2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another. So the extra cost probably comes from loading the skill and hook context rather than from subagents. This is inferred from the `Agent` counts and the primary's cost; it is not a measurement of delegation itself.
+3. Limits: n=3 per arm, 3 uncorrected comparisons, and ops only just crosses the 10% line with a difference of about 0.05 USD. The tasks are short (peak context 40K to 90K against a 274K median in real sessions), so this says nothing about long sessions or context protection.
+4. A first attempt stopped after one scored run because the tamper check counted hook-written bytecode as a change. The harness was fixed and resealed; that run (success, 0.70 USD, off arm) was discarded, not reused.
+
+This plugin makes no savings claim. What is not measured here: isolating the primary's context, and parallelism for work that really is parallel.
+
+---
+
 ## Configuration & Environment Variables
 
 Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*` prefix (legacy `AGY_ARGON_*` names still work):
@@ -365,6 +416,9 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | Maximum distinct workspace files the primary agent may edit directly in a single turn. |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to allow unlimited direct workspace edits and direct edit-then-test loops on the primary agent. |
+| `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | Set to `0` to stop comparing the pinned model with the model the subagent actually ran on. |
+| `MITOSIS_HEARTBEAT` | `1` | Set to `0` to stop writing `heartbeat-<platform>.json`. |
+| `MITOSIS_HEARTBEAT_DIR` | user cache dir | Directory for the heartbeat files. |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | Set to `0` to disable the 2-consecutive-failure circuit breaker. |
 | `*_MITOSIS_DEBUG` | `0` | Set to `1` to append diagnostic JSON lines to `mitosis_orchestrator_debug.log` next to the state file. |
 | `MITOSIS_JUDGE_URL` | unset | Jev-compatible endpoint for low-confidence routing decisions; unset disables the judge. |
@@ -395,7 +449,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 The debug log (`*_MITOSIS_DEBUG=1`) records the same decisions, now with the pinned model, effort and platform.
 
-**Cost report.** `scripts/mitosis-cost-report.py` prints the savings against an all-frontier run, can emit `ccusage`-shaped JSON and summarises routing from the debug logs (see [Measure it](./docs/cost.md#measure-it-scriptsmitosis-cost-reportpy)).
+**Cost report.** `scripts/mitosis-cost-report.py` prints a re-pricing against an all-frontier counterfactual (not a measured saving), can emit `ccusage`-shaped JSON and summarises routing from the debug logs (see [Measure it](./docs/cost.md#measure-it-scriptsmitosis-cost-reportpy)). `--fleet` adds dispatch rate and unpinned spend across sessions. `scripts/mitosis-doctor.py` checks that the hooks really run (see above).
 
 **Statusline (optional).** Shows per-session scout and worker counts, for example `mitosis: scout 3 (1 live) | worker 2 | Opus | $1.23`. Add to `~/.claude/settings.json`:
 
@@ -412,9 +466,10 @@ On Windows use `python` or `py -3` instead of `python3` if that is what your ins
 ## Development & Verification
 
 ```bash
-python3 -m unittest discover -s tests -v     # 500 tests (hooks, launcher, judge, cost report, routing eval, packaging, Codex hooks)
+python3 -m unittest discover -s tests -v     # hooks, launcher, judge, cost report, doctor, routing eval, packaging, Codex hooks
 python3 tests/test_routing_eval.py          # prints the routing confusion matrix
 agy plugin validate . --strict
+python3 scripts/mitosis-doctor.py                   # per-platform install check
 python3 scripts/smoke-claude.py                       # headless Claude Code run: asserts the hook pinned haiku + effort low (a few cents)
 python3 scripts/mitosis-cost-report.py --last 1       # token / USD ledger of the newest Claude Code session
 ```

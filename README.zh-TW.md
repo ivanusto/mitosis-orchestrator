@@ -3,7 +3,7 @@
 [![CI](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ivanusto/mitosis-orchestrator/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator：尖端模型主核負責規劃，便宜的子細胞負責查找與修改，由 hook 強制分工" />
+  <img src="./assets/hero.png" width="100%" alt="Mitosis Orchestrator：尖端模型主核負責規劃，子細胞負責查找與修改，由 hook 強制分工" />
 </p>
 
 <p align="center">
@@ -16,11 +16,13 @@
 
 ## 專案簡介：為什麼命名為 Mitosis（有絲分裂）？
 
-靈感源自生物學的**細胞有絲分裂（Mitosis）**。**Mitosis Orchestrator** 將您選用的**尖端推理模型（Frontier Model）**定位為系統的**主核架構師（Master Nucleus）**。主核不再把昂貴的 Token 與上下文視窗消耗在單檔搜尋、原始 Log 翻找或反覆的「修改後再跑測試」迴圈，而是將複雜的工程任務有紀律地「分裂」並平行委派給兩類專職子細胞（Subagents）：
+靈感源自生物學的**細胞有絲分裂（Mitosis）**。**Mitosis Orchestrator** 將您選用的**尖端推理模型（Frontier Model）**定位為系統的**主核架構師（Master Nucleus）**。主核不再把上下文視窗填滿單檔搜尋、原始 Log 翻找或反覆的「修改後再跑測試」迴圈，而是將複雜的工程任務有紀律地「分裂」並平行委派給兩類專職子細胞（Subagents）：
 
 - **主核架構師（Primary Frontier Orchestrator）**：專注於高階架構設計、API 介面契約、跨模組重構決策、資安與並行性把關，以及最終結果的統合驗證。
 - **執行子代理（`flash-worker` · `worker`）**：負責跨檔案程式碼探索、呼叫圖（Call-Graph）追蹤、外部文件查證、撰寫與執行測試，以及在明確允許清單內的局部修改。
 - **偵察子代理（`flash-lite-scout` · `explorer`）**：負責高併發、低延遲的唯讀單跳偵察：快速定位檔案與符號、執行 `grep`/`glob` 搜尋、切片檢視 `.log` 與 `transcript.jsonl`，以及單一檔案結構摘要。
+
+**用途。** 把主核的情境與雜訊式的讀取隔開，以及對真正可平行的工作做平行處理。這兩點都沒有在下方的對照實驗中量測；我們唯一做過的成本比較沒有發現節省（見[外掛是否真的生效？](#外掛是否真的生效240)）。
 
 ## 實際畫面
 
@@ -28,7 +30,7 @@
 
 <p align="center"><img src="./assets/screenshots/orchestrate-zh.png" width="820" alt="Claude Code 工作階段：主核派出 flash-lite-scout 與 flash-worker，再自行驗證測試" /></p>
 
-同一場工作階段的 `scripts/mitosis-cost-report.py` 報表：scout 跑在 haiku、worker 跑在 sonnet，費用大部分仍來自主核（見 [Claude Code 主核模型選擇](./docs/cost.zh-TW.md#claude-code-主核模型選擇fable-51-與-opus-55)）：
+同一場工作階段的 `scripts/mitosis-cost-report.py` 報表：scout 跑在 haiku、worker 跑在 sonnet，費用大部分仍來自主核（編排並未讓這次執行變便宜，見下方對照實驗；見 [Claude Code 主核模型選擇](./docs/cost.zh-TW.md#claude-code-主核模型選擇fable-51-與-opus-55)）：
 
 <p align="center"><img src="./assets/screenshots/cost.png" width="820" alt="費用報表：haiku 偵察者、sonnet 執行者、opus 主核，合計 0.41 美元" /></p>
 
@@ -120,7 +122,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.3.2)
+agy plugin list            # mitosis-orchestrator (enabled, 2.4.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -207,9 +209,9 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
 | `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |
 | `PreToolUse` · **快捷修改預算 (Fast-Path Budget)** | 限制主代理單回合直接修改工作區檔案上限 `3` 個（`*_MITOSIS_MAX_DIRECT_EDITS` 可調），並禁止主代理在同回合直接修改檔案後執行測試框架。 |
-| `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 指令或子代理呼叫連續失敗達 `2` 次即熔斷，阻止無效重試並要求回報阻礙原因。 |
+| `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 指令或子代理呼叫連續失敗達 `2` 次即熔斷，阻止無效重試並要求回報阻礙原因。Claude Code 的 Bash 失敗會計數，但刻意不觸發熔斷。 |
 | `PreToolUse` · **工作區範圍守衛 (Workspace Guard)** | 選用（`*_MITOSIS_AUTO_ALLOW=1`）：工作區內的檔案讀寫與安全命令自動放行；跨出工作區、提權或危險指令轉為詢問（`ask`；Codex 沒有 `ask`，改為 `deny`）。未啟用時不表態：Claude Code 端回傳 `{}`，沿用使用者原本的權限規則與提示（1.5.0 以前回傳 `allow`，會略過權限提示）。 |
-| `PostToolUse` | 配對新建子代理中繼資料，並更新連續失敗計數。 |
+| `PostToolUse` · `PostToolUseFailure`（Claude Code） | 配對新建子代理中繼資料，並更新連續失敗計數。擷取 `SubagentHandback` 回報（auto mode）。失敗的 Bash 以 `PostToolUseFailure` 送達，只計數、僅供觀察。 |
 | `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。Claude Code 與 Codex（僅限已綁定的子代理，Codex 以 `CODEX_MITOSIS_ENFORCE_REPORT=0` 關閉）的 `SubagentStop` 另會檢查 `flash-lite-scout` / `flash-worker` 是否以四標頭回報結尾，不符時每個子代理退回一次要求重寫（`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 關閉）。 |
 
 #### 失敗升級（2.3）
@@ -293,6 +295,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | holdout v6（40） | 封存盲測，每版只評分一次；用來挑出 2.2 的缺口 | | 29/40，8，3 | 32/40，8，0 | 35/40，5，0 | 35/40，5，0 |
 | holdout v7（40） | 封存盲測，每版只評分一次；兩筆誤判於事後修正 | | | 31/40，7，2 | 首次 34/40，4，2；最終 36/40，4，0 | 36/40，4，0 |
 | holdout v8（40） | 封存盲測，每版只評分一次；一筆誤判於事後修正 | | | | 35/40，4，1 | 首次 35/40，4，1；最終 37/40，3，0 |
+| holdout v9（80） | 封存盲測，每版只評分一次；已不再是盲測 | | | | | 74/80，6，0；2.4.0 候選版 74/80，6，0 |
 
 v5 在不接觸腳本與先前資料集的情況下撰寫，以 sha256（`160c44e16043fdfee4534dd5af8f4466a85ad2ce9f9ee10e4d2e74cac9cf42ad`）封存，並只對 2.0 候選規則評分一次。唯一的危險誤判（`v5-en-19`，帶動名詞的禮貌請求）在 1.8.1 同樣誤判；之後的 `polite-request` 規則只依新案例撰寫，因此 v5 已不再是盲測，下一輪調校必須先準備 v6。2.0.0 也修掉 1.8.1 既有的三類危險誤判（問句後接命令、管線中的 shell 變更、帶動名詞的禮貌請求），這些規則不交給判斷器裁決。已知限制：規則層仍以字面比對為主，尚無 embedding 階段。
 
@@ -301,6 +304,8 @@ v6（sha256 `69d3cec3e684453d510898557d13d7eb0abaad61aa09599c60bb688ef331daf9`�
 v7（sha256 `8b6bf9167d44663ce7745ec5f79102cbdb00e4e3ed7e3afb2a6d438d2743273c`）由子代理盲寫，於 commit 7dffeb0 封存，並於 2026-10-22 以獨立程序各評分一次：2.1.0 為 31/40，7 筆成本誤差，2 筆危險；2.2 候選版（c648116）為 34/40，4 筆成本誤差，2 筆危險。兩筆危險誤判（標為偵察者、卻以行動開頭或執行寫入指令的提示詞）隨後依新的手寫案例以通用規則修正（416f754）：36/40，4 筆成本誤差，0 筆危險。因此 v7 已不再是盲測。其餘成本誤差包括一筆標為 `flash-worker` 的查詢（維持交給執行者），以及一筆提到 fix/pytest 的唯讀問題。
 
 v8（sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`）由子代理盲寫，於 commit 27914e3 封存，並於 2026-10-22 以獨立程序各評分一次：2.2.0 為 35/40，4 筆成本誤差，1 筆危險；2.3 候選版（e237483）為 35/40，4 筆成本誤差，1 筆危險，且是同樣五筆誤判。那筆危險誤判（標為偵察者、比較第三方框架現行文件，因此需要網路）隨後依新的手寫案例以通用規則修正（d0b2624）：37/40，3 筆成本誤差，0 筆危險。因此 v8 已不再是盲測。2.3 的規則工作並未提升盲測分數：兩個版本錯的是同樣五個提示詞。2.3 的進步來自 175 筆私下審查探測（分七批；在 293 筆新案例上，2.2.0 為 205/293，其中 67 筆危險），每一批都揭露了在「類型優先」預設下的新動作句型，所以 2.3 將標為偵察者之呼叫的預設反轉。v8 其餘的成本誤差是兩筆標為 `flash-worker` 的查詢（維持交給執行者）與一筆簡體中文問句。
+
+v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序各評分一次：2.3.0 為 74/80，6 筆成本誤差，0 筆危險；2.4.0 候選版為 74/80，6 筆成本誤差，0 筆危險，且是同樣六筆誤判。2.4 的路由修正並未提升盲測分數。v9 已評分過，不再是盲測（`tests/test_routing_eval.py` 把它留作回歸測試），所以下一輪路由工作要先寫 v10。
 
 **2.1 路由新增項目。**
 - 只是詢問「哪個指令會執行某事」的執行用語視為主題；若仍殘留「並執行它」之類的要求，仍會升級。
@@ -348,6 +353,52 @@ v8（sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`�
 
 ---
 
+## 外掛是否真的生效？（2.4.0）
+
+2.4.0 關心的是外掛是否真的生效，而不是路由準確度。
+
+**實測使用情形。** 一台機器，2026-10-23 至 2026-11-02，互動式 Claude Code，使用 `mitosis-cost-report.py --fleet`：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%）；Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中有 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。限制：單一使用者、單一機器、11 天、牌價。
+
+**Doctor。** `python3 scripts/mitosis-doctor.py` 逐平台檢查已安裝的外掛，輸出 OK、WARN、FAIL、UNKNOWN 或 SKIP。它以各平台的 payload（含 cp950 主控台下的中文文字）執行每個安裝的實際 hook 指令鏈，並讀取 heartbeat。無法判定的項目一律是 UNKNOWN，絕不是 OK。結束碼 0 表示全部 OK 或 SKIP，1 表示有 WARN 或 UNKNOWN，2 表示有 FAIL。健康的 Codex 或 agy 安裝仍會回傳 1，因為 Codex 的信任雜湊與 agy 子代理的模型無法檢查。旗標：`--platform`、`--json`、`--root`、`--home`，以及 `--live`（實際跑一個 session，會花錢）。測試以故障注入重現它要抓的問題：Codex 命名空間、agy 扁平參數、cp950 與缺少 Python。
+
+**釘定驗證。** Claude Code 在 `SubagentStop` 比對釘定的模型與子代理 transcript，並在主核的 `Stop` 警告一次（`SubagentStop` 上的 `systemMessage` 不會顯示）。Codex 比對子代理 rollout 最後一個 `turn_context`，只記錄狀態。agy 無法驗證。`CLAUDE_MITOSIS_VERIFY_PIN=0` 與 `CODEX_MITOSIS_VERIFY_PIN=0` 可關閉。
+
+**Heartbeat。** 每次 hook 執行都會更新使用者快取目錄下的 `heartbeat-<platform>.json`：只有計數器與工具名稱，沒有提示詞、路徑或訊息。`MITOSIS_HEARTBEAT=0` 關閉，`MITOSIS_HEARTBEAT_DIR` 改位置。
+
+**成本報表。** `--fleet`（可搭配 `--since`、`--until`、`--entrypoint`）回報委派率、每個子代理實際使用的模型與未釘定支出。專案目錄編碼錯誤已修正：任何含底線的工作目錄在預設模式下都會失敗，`smoke-claude.py` 也一樣。
+
+### 找到並修正的無聲失效
+
+- **auto mode 回報。** auto mode 經由 `SubagentHandback` 工具傳回子代理報告，所以 `SubagentStop` 沒有 `last_assistant_message`。回報驗證與失敗升級被無聲跳過，每次這類停止還會收到誤報的「report is empty」阻擋。已用 `PostToolUse` 擷取與 transcript 後備修正。
+- **內部 fork。** `SubagentStop` 也會在 Claude Code 內部 fork 觸發（`agent_type` 為空）。FIFO 後備讓這些停止取走待配對的 spawn，真正的代理因此被取消註冊，也可能擋下 fork。現在改為依確切型別配對。
+- **失敗的 Bash。** Claude Code 把失敗的 Bash 以 `PostToolUseFailure` 送出，而沒有任何東西監聽，所以熔斷機制從未看到 Claude 的失敗。現在會計數，僅供觀察。熔斷刻意不因此觸發：啟用的熔斷可能因為兩次失敗的 grep 就跳閘。
+- **偵察者升級。** 依外掛自己的規則撰寫的偵察者呼叫（含主核自己的開頭語的回報格式），以及「Exclude the .git directory」這類搜尋範圍句子，曾被升級為執行者。已修正；有目的地的句子（「Exclude vendor/ from tsconfig.json」）仍算編輯。
+- **偵察者白名單。** 新增 `uptime`、唯讀的 `systemctl` 子指令，以及不帶 follow 或會改動 journal 旗標的 `journalctl`。
+- **Windows 工作區守衛。** 現在能解析磁碟機、UNC、磁碟機相對、`%VAR%`、`$env:`、加引號的絕對、插入脫字元與逗號串接的路徑；這些路徑先前在 `AUTO_ALLOW` 下會被放行。守衛是盡力而為的縱深防禦，不是沙箱（見 [SECURITY.md](./SECURITY.md)）。完整測試現在在 CI 的 Windows 上執行，並已在真實的 Windows 11 機器上驗證：648 個測試通過，11 個略過。
+
+### 明確 `/orchestrate` 值得嗎？（對照實驗）
+
+事先登記於 `evals/compare/PROTOCOL.md`，在任何計分執行前以雜湊封存。三種任務（對固定的標準函式庫副本做 30 題查詢、六個成因的錯誤修正、當作對照組的 21 步循序維運作業）乘以兩個組別（外掛關閉；外掛開啟並加上 `/mitosis-orchestrator:orchestrate` 前綴）乘以三次重複：在 Claude Code 上以相同模型與旗標執行 18 次計分，預算 60 美元。每種任務的判定為 BENEFIT（成功數不較低、每次開啟組成本都低於每次關閉組成本、中位數至少低 25%）、HARM（成功數較低，或完全分離但方向相反且中位數至少高 10%），否則為 INCONCLUSIVE。
+
+範圍：短任務，主核尖峰情境為 39K 至 86K token，真實 session 長得多。此判定對長 session 中保護情境的作用不置一詞，這裡的 INCONCLUSIVE 或 HARM 也不是反對該用法的證據。
+
+結果（Claude Code，`opus` `medium`，18 次計分，全部成功，沒有觸頂、逾時或疑似洩漏；含 2 次暖機共 14.13 美元）。外掛 commit 為 `afefb43`。詳見 `evals/compare/RESULTS.md`。
+
+| 任務 | 關閉組中位數（美元） | 開啟組中位數（美元） | 差異 | 判定 |
+| :--- | ---: | ---: | :--- | :--- |
+| lookup | 0.6117 | 0.9694 | 開啟組高 58% | HARM |
+| ops | 0.4367 | 0.4857 | 開啟組高 11% | HARM |
+| fix | 0.8240 | 0.8159 | 開啟組低 1% | INCONCLUSIVE |
+
+1. 判定依照封存的規則。依事先登記的行動，技能現在說明何時不該使用，2.5 也不投資在委派率上。
+2. 它量到什麼：開啟組 9 次中有 7 次即使明確使用 `/orchestrate` 也沒有派出任何子代理，子代理成本一次為 0.05 美元、另一次為 0.35 美元。所以額外成本多半來自載入技能與 hook 情境，而不是子代理。這是由 `Agent` 次數與主核成本推論而來，並非對委派本身的量測。
+3. 限制：每組 n=3、3 次未校正的比較，ops 只是剛好越過 10% 線，絕對差距約 0.05 美元。任務很短（尖峰情境 40K 至 90K，真實 session 的中位數為 274K），所以對長 session 與情境保護不置一詞。
+4. 第一次嘗試在一次計分後停止，因為防竄改檢查把 hook 寫出的位元組碼當成變更。測試工具修正並重新封存；那次執行（成功，0.70 美元，關閉組）被捨棄，沒有重用。
+
+這些結果不支持任何「此外掛省錢」的說法。本實驗沒有量測的是：隔離主核情境，以及對真正可平行的工作做平行處理。
+
+---
+
 ## 環境變數設定
 
 所有變數都接受 `AGY_MITOSIS_*`、`CLAUDE_MITOSIS_*`、`CODEX_MITOSIS_*` 三種前綴（舊版 `AGY_ARGON_*` 仍相容）：
@@ -371,6 +422,9 @@ v8（sha256 `f9824228436592160454357236a858da84cc9a4289879d159695ce5786470d51`�
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時允許主代理繞過單回合修改數量限制與「修改後跑測試」限制。 |
+| `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | 設為 `0` 時，不再比對釘定的模型與子代理實際執行的模型。 |
+| `MITOSIS_HEARTBEAT` | `1` | 設為 `0` 時不再寫入 `heartbeat-<platform>.json`。 |
+| `MITOSIS_HEARTBEAT_DIR` | 使用者快取目錄 | heartbeat 檔案的目錄。 |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | 設為 `0` 時停用連續 2 次失敗熔斷機制。 |
 | `*_MITOSIS_DEBUG` | `0` | 設為 `1` 時在狀態檔旁的 `mitosis_orchestrator_debug.log` 記錄每次 Hook 呼叫的診斷 JSON。 |
 | `MITOSIS_JUDGE_URL` | 未設定 | 低信心分流決策要送往的 Jev 相容端點；未設定即停用判斷器。 |
@@ -401,7 +455,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 除錯日誌（`*_MITOSIS_DEBUG=1`）記錄相同的決策，現在也包含釘定的模型、effort 與平台。
 
-**成本報表。** `scripts/mitosis-cost-report.py` 會列出相對於全尖端模型執行的節省金額，可輸出 `ccusage` 格式的 JSON，並從除錯日誌彙整路由統計（見[實際量測](./docs/cost.zh-TW.md#實際量測scriptsmitosis-cost-reportpy)）。
+**成本報表。** `scripts/mitosis-cost-report.py` 會列出相對於全尖端模型執行的反事實重新計價（不是實測的節省），可輸出 `ccusage` 格式的 JSON，並從除錯日誌彙整路由統計（見[實際量測](./docs/cost.zh-TW.md#實際量測scriptsmitosis-cost-reportpy)）。`--fleet` 另外彙整跨 session 的委派率與未釘定支出。`scripts/mitosis-doctor.py` 檢查 hook 是否真的在跑（見上文）。
 
 **狀態列（選用）。** 顯示每個 session 的偵察者與執行者數量，例如 `mitosis: scout 3 (1 live) | worker 2 | Opus | $1.23`。加入 `~/.claude/settings.json`：
 
@@ -418,9 +472,10 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ## 開發與測試
 
 ```bash
-python3 -m unittest discover -s tests -v     # 500 個測試（hook、啟動鏈、判斷器、成本報表、路由評測、打包檢查、Codex hook）
+python3 -m unittest discover -s tests -v     # hook、啟動鏈、判斷器、成本報表、doctor、路由評測、打包檢查、Codex hook
 python3 tests/test_routing_eval.py          # 印出路由混淆矩陣
 agy plugin validate . --strict
+python3 scripts/mitosis-doctor.py                   # 逐平台安裝檢查
 python3 scripts/smoke-claude.py                       # Claude Code headless 實跑：驗證 hook 釘到 haiku 與 effort low（花費幾美分）
 python3 scripts/mitosis-cost-report.py --last 1       # 最新一場 Claude Code session 的 token 與費用報表
 ```
