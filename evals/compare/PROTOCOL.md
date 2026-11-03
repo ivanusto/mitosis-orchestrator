@@ -57,7 +57,11 @@ With 3 runs per arm, complete separation is the strongest evidence this design c
 
 ## Scope
 
-The conclusion applies only to explicit `/orchestrate`, on Claude only, on one machine, with small n. It says nothing about automatic dispatch, other models, other task types or other machines. Peak context of the primary is reported next to every verdict but does not decide it. Success (including the leak rule), cost and everything else in `report` come from the run files as written; `report` never tunes, drops or reweights a run.
+The conclusion applies only to explicit `/orchestrate`, on Claude only, on one machine, with small n. It says nothing about automatic dispatch, other models, other task types or other machines.
+
+These are short tasks. Calibration on the off arm before the seal measured 0.34 to 0.84 USD per run and a peak primary context of 39K to 86K tokens, while real interactive sessions on the same machine have a median peak near 274K and run for hours. The primary finished a six-cause fix in 9 tool calls by reading the files in bulk, so scaling the fixtures further raised reading, not delegation. The verdict therefore says nothing about protecting context over a long session, which is the main reason to orchestrate, and an INCONCLUSIVE or HARM here must not be reported as evidence against that use.
+
+Peak context of the primary is reported next to every verdict but does not decide it. Success (including the leak rule), cost and everything else in `report` come from the run files as written; `report` never tunes, drops or reweights a run.
 
 ## Files
 
