@@ -266,7 +266,8 @@ class CodexCollaborationTest(_CodexCollabBase):
         self.assertTrue(self.denied(self.pre("apply_patch", patch, **CHILD)))
         self.assertTrue(self.denied(self.pre("Bash", {"command": "echo delta >> a.txt"}, **CHILD)))
         self.assertTrue(self.denied(self.pre("Bash", {"command": "sed -i s/a/b/ a.txt"}, **CHILD)))
-        self.assertFalse(self.denied(self.pre("Bash", {"command": "ls -la && wc -l a.txt"}, **CHILD)))
+        # A pipe, not &&: Codex on Windows gets the strict character set, which has no &&.
+        self.assertFalse(self.denied(self.pre("Bash", {"command": "ls -la | wc -l"}, **CHILD)))
         worker = dict(CHILD, agent_type="worker")
         self.assertFalse(self.denied(self.pre("apply_patch", patch, **worker)))
 

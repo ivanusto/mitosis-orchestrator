@@ -233,6 +233,7 @@ class TestScoutHook(EnvCase):
         self.assertEqual(self.decision(self.codex("rg 'a|b' .", "C:\\repo")), "deny")
         self.assertEqual(self.decision(self.codex("ls; rm x", "C:\\repo")), "deny")
 
+    @unittest.skipIf(os.name == "nt", "os.name selects the strict rules on Windows whatever the cwd")
     def test_codex_explorer_with_posix_cwd_uses_posix_rules(self):
         self.assertEqual(self.codex("rg -n 'a|b' .", str(self.project)), {})
         self.assertEqual(self.decision(self.codex("ls & rm x", str(self.project))), "deny")
