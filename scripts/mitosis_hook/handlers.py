@@ -24,6 +24,7 @@ from .common import (
     is_codex_payload,
     is_primary_agent,
 )
+from . import heartbeat
 from .guards import (
     _iter_strings,
     PATH_ARG_KEYS,
@@ -65,6 +66,7 @@ from .platforms.claude import (
     _handle_claude_task_or_agent,
 )
 from .platforms.codex import (
+    CODEX_COLLAB_TOOLS,
     _codex_agent_key,
     _codex_confirm_spawn,
     _extract_tool_call,
@@ -288,6 +290,31 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
     return _allow("Mitosis Orchestrator: path is inside the workspace.", overrides=[f"{action}({t})" for t in targets], payload=payload)
 
 
+# Every tool name handle_pre_tool_use dispatches on, plus the Codex collaboration tools that are
+# known and intentionally unhandled (wait_agent ...). unhandled_spawn_tool() reads only this set.
+KNOWN_SPAWN_TOOLS = frozenset(CODEX_COLLAB_TOOLS) | frozenset({
+    "invoke_subagent", "Task", "Agent", "spawn_agent", "mitosis_invoke_subagent", "mitosis_scout",
+    "mitosis_worker", "send_message", "SendMessage", "followup_task", "run_workflow",
+    "define_subagent", "manage_subagents", "SubagentHandback",
+})
+SPAWN_LIKE_RE = re.compile(r"spawn|subagent|invoke|collaboration|delegate|(?:^|[^a-z])agent(?:$|[^a-z])", re.I)
+
+
+def unhandled_spawn_tool(payload: Dict[str, Any]) -> Optional[str]:
+    """Raw tool name when it looks like a spawn/delegation tool that no handler recognises, else None."""
+    try:
+        name, _ = _extract_tool_call(payload)
+        if name.startswith("mcp__mitosis__"):
+            name = name[len("mcp__mitosis__"):]
+        if not name or name in KNOWN_SPAWN_TOOLS or not SPAWN_LIKE_RE.search(name):
+            return None
+        if name.startswith("mcp__"):  # another server's tools are not ours to dispatch
+            return None
+        return name
+    except Exception:
+        return None
+
+
 @_releases_state_locks
 def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, args = _extract_tool_call(payload)
@@ -498,9 +525,63 @@ def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:
 HANDBACK_REPORT_CAP = 20000
 
 
+def _response_failed(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    if response.get("is_error") or response.get("isError"):
+        return True
+    for key in ("exitCode", "exit_code", "returncode"):
+        code = response.get(key)
+        if isinstance(code, int) and not isinstance(code, bool) and code != 0:
+            return True
+    return False
+
+
+def _observe_claude_failure(tool_name: str, payload: Dict[str, Any]) -> None:
+    """Count a failed Claude tool_response in the heartbeat. OBSERVE ONLY.
+
+    This must not feed _tool_failed, consecutive_failures or the circuit breaker: a live breaker
+    on this signal could trip after two failed greps (exit 1 means "no match"), which would
+    deny the primary's next Bash/Agent call. It also runs for subagent payloads, which count in
+    the heartbeat but never touch the primary's session state.
+    """
+    try:
+        if is_claude_code_payload(payload) and tool_name and _response_failed(payload.get("tool_response")):
+            heartbeat.note(failure=tool_name)
+    except Exception:
+        pass
+
+
+@_releases_state_locks
+def handle_post_tool_use_failure(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """PostToolUseFailure: OBSERVE ONLY. Returns {} and counts the failure, nothing else.
+
+    It deliberately leaves consecutive_failures, the circuit breaker and pending_spawns alone
+    (see _observe_claude_failure for why). A subagent's failure (agent_id set) is counted in the
+    heartbeat only; the primary's session state is not touched.
+    """
+    try:
+        tool_name, _ = _extract_tool_call(payload)
+        tool_name = tool_name or str(payload.get("tool_name") or "")
+        if tool_name:
+            heartbeat.note(failure=tool_name)
+            if not payload.get("agent_id"):
+                state = load_state(payload)
+                failures = state.get("tool_failures")
+                if not isinstance(failures, dict):
+                    failures = state["tool_failures"] = {}
+                if tool_name in failures or len(failures) < 16:
+                    failures[tool_name] = int(failures.get(tool_name) or 0) + 1
+                save_state(payload, state)
+    except Exception:
+        pass
+    return {}
+
+
 @_releases_state_locks
 def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_name, tool_args = _extract_tool_call(payload)
+    _observe_claude_failure(tool_name, payload)
     if tool_name == "SubagentHandback":
         # The transcript may not hold this call yet when SubagentStop fires, so keep the report for it.
         agent_id = str(payload.get("agent_id") or "").strip().lower()
@@ -673,14 +754,34 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _observe_stop_record(record: Any) -> None:
+    """Count one stop's pin verdict and report outcome from the record the handler just updated."""
+    try:
+        if not isinstance(record, dict):
+            return
+        if "pin_verified" in record or record.get("pinned_model"):
+            verdict = record.get("pin_verified")
+            heartbeat.note(pin="unknown" if verdict is None else ("verified" if verdict else "mismatch"))
+        if "report_ok" in record:
+            heartbeat.note(report=bool(record.get("report_ok")))
+    except Exception:
+        pass
+
+
 @_releases_state_locks
 def handle_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     if is_claude_code_payload(payload):
-        return _handle_claude_subagent_stop(payload)
+        result = _handle_claude_subagent_stop(payload)
+        if heartbeat.enabled():
+            agent_id = str(payload.get("agent_id") or "").strip().lower()
+            records = _peek_state(payload).get("subagents")
+            _observe_stop_record(records.get(agent_id) if isinstance(records, dict) and agent_id else None)
+        return result
     state = load_state(payload)
     sync_subagents(payload, state)
     if is_codex_payload(payload):
         bound = codex_subagent_stop(payload, state)
+        _observe_stop_record(state.get("subagents", {}).get(bound) if bound else None)
         _RECENT_BINDINGS.append({"agentId": payload.get("agent_id"), "boundTo": bound})
         del _RECENT_BINDINGS[:-16]
         result = codex_report_block(state, bound, payload)

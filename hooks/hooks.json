@@ -43,6 +43,17 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Agent|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use-failure || python \"${CLAUDE_PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use-failure || py -3 \"${CLAUDE_PLUGIN_ROOT}/scripts/enforce-orchestrator.py\" post-tool-use-failure || exit 0"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "*",

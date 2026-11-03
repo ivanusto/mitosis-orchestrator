@@ -98,7 +98,7 @@ _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from mitosis_hook import common, guards, handlers, models, report, routing, state  # noqa: F401,E402
+from mitosis_hook import common, guards, handlers, heartbeat, models, report, routing, state  # noqa: F401,E402
 from mitosis_hook.platforms import agy, claude, codex  # noqa: F401,E402
 from mitosis_hook.common import (  # noqa: F401,E402
     ALLOWED_PRIMARY_MODELS,
@@ -371,6 +371,7 @@ from mitosis_hook.handlers import (  # noqa: F401,E402
     _handle_workspace_guard,
     _tool_failed,
     handle_post_tool_use,
+    handle_post_tool_use_failure,
     handle_pre_invocation,
     handle_pre_tool_use,
     handle_session_start,
@@ -385,6 +386,7 @@ HANDLERS = {
     "user-prompt-submit": handle_pre_invocation,
     "pre-tool-use": handle_pre_tool_use,
     "post-tool-use": handle_post_tool_use,
+    "post-tool-use-failure": handle_post_tool_use_failure,
     "stop": handle_stop,
     "subagent-stop": handle_subagent_stop,
     "codex-notify": handle_codex_notify,
@@ -396,7 +398,7 @@ EVENT_NAME_TO_MODE = {
     "UserPromptSubmit": "user-prompt-submit",
     "PreToolUse": "pre-tool-use",
     "PostToolUse": "post-tool-use",
-    "PostToolUseFailure": "post-tool-use",
+    "PostToolUseFailure": "post-tool-use-failure",
     "Stop": "stop",
     "SubagentStop": "subagent-stop",
     "CodexNotify": "codex-notify",
@@ -415,13 +417,28 @@ def _read_stdin() -> str:
     return buffer.read().decode("utf-8-sig", "replace")
 
 
+def _heartbeat(payload, mode, error_class, replacement_chars) -> None:
+    """Persist what this hook call saw (counters only). Never raises, never prints."""
+    try:
+        if not heartbeat.enabled():
+            return
+        unhandled = handlers.unhandled_spawn_tool(payload) if mode == "pre-tool-use" else None
+        heartbeat.record_event(payload, mode, error_class=error_class,
+                               replacement_chars=replacement_chars, unhandled=unhandled)
+    except Exception:
+        pass
+
+
 def main() -> None:
     # hooks/codex-hooks.json passes --platform=codex: Codex SessionStart carries no turn_id.
     platform = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--platform=")), "")
     argv = [a for a in sys.argv if not a.startswith("--platform=")]
     mode = argv[1] if len(argv) > 1 and not argv[1].startswith("{") else None
+    stdin_error = False
+    replacement_chars = 0
     try:
         raw = _read_stdin()
+        replacement_chars = raw.count("\ufffd")
         if not raw.strip() and len(sys.argv) > 1 and sys.argv[-1].startswith("{"):
             raw = sys.argv[-1]
         payload = json.loads(raw) if raw.strip() else {}
@@ -429,6 +446,7 @@ def main() -> None:
             payload = {}
     except Exception:
         payload = {}
+        stdin_error = True
     if platform:
         payload["platform"] = platform
 
@@ -440,9 +458,11 @@ def main() -> None:
         mode = "pre-tool-use"
 
     handler = HANDLERS.get(mode)
+    error_class = "StdinParseError" if stdin_error else None
     try:
         result = handler(payload) if handler else {}
     except Exception as exc:  # never break the agent loop because of the guard
+        error_class = type(exc).__name__
         result = _no_opinion(payload) if mode in ("stop", "pre-tool-use") else {}
         sys.stderr.write(f"[mitosis-orchestrator] {mode} hook error: {exc!r}\n")
     finally:
@@ -451,6 +471,7 @@ def main() -> None:
 
     sys.stdout.write(json.dumps(result) + "\n")
     sys.stdout.flush()
+    _heartbeat(payload, mode, error_class, replacement_chars)
     _flush_otel()  # after the response and after the locks are released
 
 
