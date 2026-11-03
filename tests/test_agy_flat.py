@@ -7,8 +7,12 @@ import json
 import os
 import tempfile
 import time
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "enforce-orchestrator.py"
 spec = importlib.util.spec_from_file_location("enforce_orchestrator_agy_flat", SCRIPT)
@@ -38,6 +42,8 @@ class AgyBase(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def adir(self, cid):

@@ -1,5 +1,6 @@
 """Workspace/path guards, scout allowlist and shell/command parsing."""
 
+import ntpath
 import os
 import re
 import shlex
@@ -162,17 +163,252 @@ ABS_PATH_TOKEN_RE = re.compile(r"""(?:^|[\s=:"'(])((?:/|~/?|\$HOME/?)[A-Za-z0-9.
 DOTDOT_TOKEN_RE = re.compile(r"""(?:^|[\s=:"'(])([A-Za-z0-9._\-/]*\.\.[A-Za-z0-9._\-/]*)""")
 
 
+# Windows path handling. ntpath is used (not os.path) so the logic is testable on
+# any platform. It is only active when a root is a Windows path or os.name == "nt",
+# so a backslash in a POSIX command is never read as a path separator.
+_WIN_ABS_RE = re.compile(r"^(?:[A-Za-z]:(?:[\\/]|$)|\\\\)")
+
+# , = : end a token: each starts a new one, so C:\repo\a,C:\Windows\x checks both paths.
+_WIN_TAIL = r"""[^\s"'<>|*?;&(),=:]*"""
+
+_WIN_QUOTED_RE = re.compile(
+    r"""(["'])((?:[A-Za-z]:[\\/]|\\\\|%[A-Za-z_]\w*%|~[\\/])[^"'\n]*?)\1"""
+)
+
+# A drive letter starts a path after a non-word character, or right after a short flag
+# (-IC:\x, /IC:\x, -LC:\x). Flags of one or two letters only, so words like http: are not flags.
+_WIN_DRIVE_START = (
+    r"(?:(?<![\w\\/.:~-])[-/][A-Za-z]{1,2}(?=[A-Za-z]:)|(?<![A-Za-z0-9_]))"
+)
+
+_WIN_FLAG_PREFIX_RE = re.compile(r"[-/][A-Za-z]{1,2}(?=[A-Za-z]:)")
+
+# C:name or a bare D: resolves against that drive's own current directory: unknown target.
+# A letter right after - or / is an option (-o:, /C:"text"), not a drive.
+_WIN_DRIVE_REL_RE = re.compile(_WIN_DRIVE_START + r"(?<![-/])([A-Za-z]):(?![\\/:])(" + _WIN_TAIL + r")")
+
+_WIN_ENV_REF_RE = re.compile(r"\$\{?env:", re.IGNORECASE)
+
+_WIN_TOKEN_RE = re.compile(
+    r"(?:" + _WIN_DRIVE_START + r"[A-Za-z]:[\\/]" + _WIN_TAIL
+    + r"|(?<![\w\\/])\\\\(?:[?.]\\(?:[A-Za-z]:)?|[\w.$-]+\\[\w.$-])" + _WIN_TAIL
+    + r"|(?<![\w%])%(?:~[A-Za-z0-9$]*|[A-Za-z_]\w*%)" + _WIN_TAIL
+    + r"|(?<![\w~])~[\\/]" + _WIN_TAIL + r")"
+)
+
+_WIN_QUOTED_DOTDOT_RE = re.compile(r"""(["'])([^"'\n]*\.\.[^"'\n]*)\1""")
+
+# \Windows\x: rooted on the current drive. Unquoted only, so findstr "\.py" is left alone.
+_WIN_ROOTED_RE = re.compile(r"""(?:^|[\s>=<(])(\\(?!\\)[^\s"'<>|*?;&(),=:]+)""")
+
+# "\Windows\win.ini": a quoted rooted token whose segments all look like file names is a path.
+# A regex-looking string ("\.py", "\d+", "\s*x", "\.py$") has a metacharacter or a first
+# segment starting with "." and is left alone. Ambiguous strings such as "\w\d" look like
+# file names and may be denied: a false deny is the safe direction.
+_WIN_QUOTED_ROOTED_RE = re.compile(
+    r"""(["'])(\\(?!\\)(?:[A-Za-z0-9_~@#-][A-Za-z0-9_ .~@#-]*)(?:\\[A-Za-z0-9_~@#-][A-Za-z0-9_ .~@#-]*)*)\1"""
+)
+
+# cmd accepts cd..\x: letters glued to a leading ..
+_WIN_GLUED_DOTDOT_RE = re.compile(r"^[A-Za-z]+(?=\.\.)")
+
+_WIN_DOTDOT_RE = re.compile(r"""(?:^|[\s=:"'(])([A-Za-z0-9._\-/\\]*\.\.[A-Za-z0-9._\-/\\]*)""")
+
+_WIN_KNOWN_ENV = {
+    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "HOMEPATH", "HOMEDRIVE",
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PROGRAMFILES", "PROGRAMDATA", "PUBLIC",
+    "ALLUSERSPROFILE", "COMSPEC", "CD",
+}
+
+
+def _strip_cmd_carets(command: str) -> str:
+    """cmd's ^ escape joins tokens (C^:\\, ^C:\\, t^ype). Dropped outside double quotes only,
+    where cmd keeps it literally. ^ at end of line is a line continuation."""
+    out: List[str] = []
+    in_quote = False
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if ch == '"':
+            in_quote = not in_quote
+        elif ch == "^" and not in_quote:
+            i += 1
+            if i < len(command) and command[i] in "\r\n":
+                i += 1
+                if command[i - 1] == "\r" and i < len(command) and command[i] == "\n":
+                    i += 1
+                continue
+            if i < len(command):
+                out.append(command[i])
+                if command[i] == '"':
+                    in_quote = not in_quote
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _is_windows_path(text: Any) -> bool:
+    return bool(_WIN_ABS_RE.match(str(text)))
+
+
+def _windows_mode(roots: List[Path]) -> bool:
+    return os.name == "nt" or any(_is_windows_path(r) for r in roots)
+
+
+def _win_norm(text: str) -> str:
+    text = str(text)
+    low = text.lower()
+    if low.startswith("\\\\?\\unc\\"):
+        text = "\\\\" + text[8:]
+    elif low.startswith(("\\\\?\\", "\\\\.\\")):
+        text = text[4:]
+    text = ntpath.normpath(text)
+    if os.name == "nt":
+        try:
+            text = os.path.realpath(text)
+        except (OSError, ValueError):
+            pass
+    return ntpath.normcase(text)
+
+
+def _win_inside(target: str, roots: List[Path]) -> bool:
+    if not _is_windows_path(_win_strip(target)):
+        return False
+    t = _win_norm(target).rstrip("\\")
+    for root in roots:
+        if not _is_windows_path(root):
+            continue
+        r = _win_norm(str(root)).rstrip("\\")
+        if t == r or t.startswith(r + "\\"):
+            return True
+    return False
+
+
+def _win_strip(text: str) -> str:
+    low = text.lower()
+    if low.startswith("\\\\?\\unc\\"):
+        return "\\\\" + text[8:]
+    if low.startswith(("\\\\?\\", "\\\\.\\")):
+        return text[4:]
+    return text
+
+
+def _win_base(cwd: str, roots: List[Path]) -> str:
+    expanded_cwd = os.path.expanduser(cwd) if cwd else ""
+    if _is_windows_path(expanded_cwd):
+        return expanded_cwd
+    win_roots = [r for r in roots if _is_windows_path(r)]
+    if win_roots:
+        return str(win_roots[0])
+    return str(Path.cwd())
+
+
+def _drive_relative_is_path(drive: str, rest: str) -> bool:
+    """C:name is ambiguous with words like a:b. Treat it as a path when it looks like one."""
+    if not rest or drive.isupper() or any(c in rest for c in ".~\\/"):
+        return True
+    # lowercase word:word. On Windows an existing drive makes it a path; elsewhere it is text.
+    return os.name == "nt" and os.path.exists(drive + ":\\")
+
+
+def _win_expand(token: str, base: str = "") -> Optional[str]:
+    """Expand ~ and %VAR% in a Windows path token; None when it cannot be resolved."""
+    if token.startswith("~"):
+        return ntpath.join(os.path.expanduser("~"), token[1:].lstrip("\\/"))
+    if token.startswith("%~"):
+        return None  # batch parameter modifiers such as %~dp0: unknown value
+    m = re.match(r"%([^%]+)%(.*)$", token, re.DOTALL)
+    if not m:
+        return token
+    name, rest = m.group(1), m.group(2)
+    if rest and rest[0] not in "\\/" and name.upper() not in _WIN_KNOWN_ENV:
+        return ""  # e.g. printf '%s%s': not an environment path
+    if name.upper() == "CD" and base:
+        return base + rest
+    value = os.environ.get(name)
+    if value is None:
+        for key, val in os.environ.items():
+            if key.upper() == name.upper():
+                value = val
+                break
+    if not value:
+        return None
+    return value + rest
+
+
+def _check_windows_paths(command: str, cwd: str, roots: List[Path]) -> Tuple[bool, str, str]:
+    """Check Windows-style path tokens. Returns (ok, reason, command with checked tokens blanked)."""
+    tokens: List[str] = []
+    base = _win_base(cwd, roots)
+    if _WIN_ENV_REF_RE.search(command):
+        return False, "PowerShell $env: reference has an unknown value", command
+
+    def take(m: "re.Match[str]") -> str:
+        if m.re is _WIN_TOKEN_RE:
+            tokens.append(_WIN_FLAG_PREFIX_RE.sub("", m.group(0), count=1))
+        else:
+            tokens.append(m.group(2))
+            # a quoted string may hold several paths: "C:\repo\a,C:\Windows\x"
+            tokens.extend(
+                t.group(0) for t in _WIN_TOKEN_RE.finditer(m.group(2), 1)
+                if not t.group(0).startswith(("%",))
+            )
+        return " " * (m.end() - m.start())
+
+    command = _WIN_QUOTED_RE.sub(take, command)
+    command = _WIN_TOKEN_RE.sub(take, command)
+    for m in _WIN_DRIVE_REL_RE.finditer(command):
+        if _drive_relative_is_path(m.group(1), m.group(2)):
+            return False, f"drive-relative path {m.group(0)!r} has an unknown target", command
+    for token in tokens:
+        expanded = _win_expand(token, base)
+        if expanded == "":
+            continue
+        if expanded is None or not _win_inside(expanded, roots):
+            return False, f"path {token!r} is outside the workspace", command
+    rel: List[str] = []
+
+    def take_rel(m: "re.Match[str]") -> str:
+        rel.append(m.group(2))
+        return " " * (m.end() - m.start())
+
+    command = _WIN_QUOTED_DOTDOT_RE.sub(take_rel, command)
+    command = _WIN_QUOTED_ROOTED_RE.sub(take_rel, command)
+    for m in _WIN_ROOTED_RE.finditer(command):
+        rel.append(m.group(1))
+    for m in _WIN_DOTDOT_RE.finditer(command):
+        rel.append(m.group(1))
+        glued = _WIN_GLUED_DOTDOT_RE.sub("", m.group(1))
+        if glued != m.group(1):
+            rel.append(glued)
+    if rel:
+        for token in rel:
+            candidate = ntpath.normpath(ntpath.join(base, token))
+            if not _win_inside(candidate, roots):
+                return False, f"relative path {token!r} escapes the workspace", command
+    return True, "", command
+
+
+def _resolve_root(text: str) -> Path:
+    expanded = os.path.expanduser(str(text))
+    if os.name != "nt" and _is_windows_path(expanded):
+        return Path(ntpath.normpath(expanded))  # cannot resolve a Windows path here
+    return Path(expanded).resolve()
+
+
 def allowed_roots(payload: Dict[str, Any]) -> List[Path]:
     roots: List[Path] = []
     for wp in payload.get("workspacePaths") or []:
         try:
-            roots.append(Path(os.path.expanduser(str(wp))).resolve())
+            roots.append(_resolve_root(str(wp)))
         except OSError:
             pass
     cwd = payload.get("cwd")
     if cwd:
         try:
-            roots.append(Path(os.path.expanduser(str(cwd))).resolve())
+            roots.append(_resolve_root(str(cwd)))
         except OSError:
             pass
     proj_dir = (
@@ -183,13 +419,13 @@ def allowed_roots(payload: Dict[str, Any]) -> List[Path]:
     )
     if proj_dir:
         try:
-            roots.append(Path(os.path.expanduser(str(proj_dir))).resolve())
+            roots.append(_resolve_root(str(proj_dir)))
         except OSError:
             pass
     artifact_dir = payload.get("artifactDirectoryPath")
     if artifact_dir:
         try:
-            roots.append(Path(str(artifact_dir)).resolve())
+            roots.append(_resolve_root(str(artifact_dir)))
         except OSError:
             pass
     return roots
@@ -202,6 +438,8 @@ def _within_roots(target: Any, roots: List[Path]) -> bool:
         text = str(target)
         if text.startswith("file://"):
             text = text[len("file://"):]
+        if _windows_mode(roots) and _is_windows_path(_win_strip(os.path.expanduser(text))):
+            return _win_inside(os.path.expanduser(text), roots)
         resolved = Path(os.path.expanduser(text)).resolve()
     except (OSError, ValueError):
         return False
@@ -292,6 +530,8 @@ def scout_command_is_read_only(command: str) -> Tuple[bool, str]:
 def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tuple[bool, str]:
     """Return (ok, reason). ok is False when the command names a path outside the
     roots or matches a pattern that should always be confirmed by a human."""
+    if _windows_mode(roots):
+        command = _strip_cmd_carets(command)
     for pattern, why in (
         (ESCALATION_RE, "privilege escalation"),
         (RECURSIVE_DELETE_OF_ROOT_RE, "recursive delete of a root directory"),
@@ -301,9 +541,16 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
     ):
         if pattern.search(command):
             return False, why
+    win_mode = _windows_mode(roots)
+    if win_mode:
+        ok, why, command = _check_windows_paths(command, cwd, roots)
+        if not ok:
+            return False, why
     home = os.path.expanduser("~")
     for m in ABS_PATH_TOKEN_RE.finditer(command):
         token = m.group(1)
+        if win_mode and re.fullmatch(r"/[A-Za-z0-9]{1,2}", token):
+            continue  # cmd switch such as dir /b, not a path
         if token in ("/", "~", "~/", "$HOME", "$HOME/"):
             return False, f"path token {token!r} is outside the workspace"
         expanded = os.path.expanduser(token.replace("$HOME", home))
@@ -311,6 +558,8 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
             continue
         if not _within_roots(expanded, roots):
             return False, f"path {token!r} is outside the workspace"
+    if win_mode:
+        return True, ""
     base = Path(os.path.expanduser(cwd)).resolve() if cwd else (roots[0] if roots else Path.cwd())
     for m in DOTDOT_TOKEN_RE.finditer(command):
         candidate = (base / m.group(1)).resolve()

@@ -15,6 +15,9 @@ import urllib.parse
 from contextlib import redirect_stdout
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -53,6 +56,8 @@ class EnvCase(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def claude_tool(self, name, tool_input, **extra):

@@ -6,8 +6,12 @@ import json
 import os
 import tempfile
 import tomllib
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "enforce-orchestrator.py"
 spec = importlib.util.spec_from_file_location("enforce_orchestrator", SCRIPT)
@@ -212,6 +216,8 @@ class HookBase(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def tool(self, name, args, **extra):
@@ -1004,6 +1010,8 @@ class ClaudeHookBase(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def tool(self, name, input_args, **extra):
@@ -2044,6 +2052,7 @@ class TestMitosisMCPSandbox(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
 
     def test_scout_is_read_only(self):
         cmd = mcp.build_codex_cmd("p", "gpt-5.6-luna", role_type=mcp.SCOUT_TYPE)
@@ -2136,6 +2145,7 @@ class TestWorkerLookupDowngrade(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
         eo.routing._JUDGE_MODULE = None
 
     def _decide(self, prompt, type_name=None, **extra):

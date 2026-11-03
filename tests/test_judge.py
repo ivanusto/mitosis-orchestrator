@@ -5,8 +5,13 @@ import importlib.util
 import io
 import json
 import os
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402,F401
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
@@ -34,6 +39,7 @@ class EnvCase(unittest.TestCase):
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
 
 
 def fake_opener(body=None, exc=None, seen=None):

@@ -12,6 +12,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "enforce-orchestrator.py"
 
@@ -57,11 +60,13 @@ class CodexHooksTest(unittest.TestCase):
             if k.startswith(ENV_PREFIXES):
                 os.environ.pop(k, None)
         self.tmp = tempfile.TemporaryDirectory()
-        os.environ["TMPDIR"] = self.tmp.name
+        _support.set_temp_env(os.environ, self.tmp.name)
 
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self._env)
+        tempfile.tempdir = None
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def run_script(self, mode, payload):

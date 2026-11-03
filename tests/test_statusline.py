@@ -9,6 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _support  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "mitosis-statusline.py"
 SID = "sl-session/1"
@@ -18,9 +21,10 @@ class StatuslineTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("MITOSIS_")}
-        self.env["TMPDIR"] = self.tmp.name
+        _support.set_temp_env(self.env, self.tmp.name)
 
     def tearDown(self):
+        _support.release_state_locks()
         self.tmp.cleanup()
 
     def write_state(self, state, sid="sl-session_1"):
