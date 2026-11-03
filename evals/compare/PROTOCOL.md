@@ -8,7 +8,7 @@ Does an explicit `/mitosis-orchestrator:orchestrate` request reduce cost without
 
 ## Arms
 
-Both arms use the same model and flags: `claude -p <prompt> --model opus --effort medium --permission-mode acceptEdits --allowedTools <per-task list> --max-budget-usd 5 --output-format stream-json --verbose`, stdin from `/dev/null`, a wall timeout per run, and `--settings '{"enabledPlugins":{"mitosis-orchestrator@mitosis-orchestrator":false}}'`.
+Both arms use the same model and flags: `claude -p <prompt> --model opus --effort medium --permission-mode acceptEdits --allowedTools <per-task list> --max-budget-usd 5 --output-format stream-json --verbose --strict-mcp-config`, stdin from `/dev/null`, a wall timeout per run, and `--settings '{"enabledPlugins":{"mitosis-orchestrator@mitosis-orchestrator":false}}'`.
 
 - off: nothing else. No plugin.
 - on: the same settings, plus `--plugin-dir <frozen tree>` and the prompt prefix `/mitosis-orchestrator:orchestrate `.
@@ -59,4 +59,4 @@ The conclusion applies only to explicit `/orchestrate`, on Claude only, on one m
 
 ## Files
 
-`run.py seal | pilot | run | report`. The pilot is two runs of the fix task (one per arm, cap 1.5 USD) with checks printed as PASS, FAIL or UNKNOWN, and it stops at the first FAIL. It does not need the seal. Results go to `--out`: `runs/<task>__<arm>__r<k>/` with the raw stream, all result events, grader output and `result.json`; `ledger.jsonl`; `sessions.txt` (session ids and transcript project directories, so the transcripts can be removed later). Working directories under `--work-root` are deleted after grading unless `--keep`. Nothing outside `--work-root` and `--out` is touched.
+`run.py seal | pilot | calibrate | run | report`. `--strict-mcp-config` keeps account-level connectors out of both arms, whose tool lists would otherwise differ from run to run. `calibrate` is one unscored run of one task and arm before the seal, to size the fixtures; it refuses once SEAL.json exists, is charged to the ledger, and is never part of the scored data. The pilot is two runs of the fix task (one per arm, cap 1.5 USD) with checks printed as PASS, FAIL or UNKNOWN, and it stops at the first FAIL. It does not need the seal. Results go to `--out`: `runs/<task>__<arm>__r<k>/` with the raw stream, all result events, grader output and `result.json`; `ledger.jsonl`; `sessions.txt` (session ids and transcript project directories, so the transcripts can be removed later). Working directories under `--work-root` are deleted after grading unless `--keep`. Nothing outside `--work-root` and `--out` is touched.

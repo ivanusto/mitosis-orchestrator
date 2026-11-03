@@ -248,6 +248,8 @@ if arm == "on":
         init["slash_commands"] += ["mitosis-orchestrator:orchestrate"]
     else:
         init["agents"] += [pname + ":flash-worker:flash-worker"]
+    if cfg.get("on_plugin_warnings"):
+        init["plugin_warnings"] = cfg["on_plugin_warnings"]
     init.update(cfg.get("on_init_extra", {}))
 out = [init]
 for hook in cfg.get("hook_events", {}).get(arm, []):
@@ -537,6 +539,7 @@ class RunTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
             self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
             self.assertIn("--verbose", argv)
+            self.assertIn("--strict-mcp-config", argv)
             self.assertEqual(argv[argv.index("--settings") + 1], '{"enabledPlugins":{"mitosis-orchestrator@mitosis-orchestrator":false}}')
             tools = argv[argv.index("--allowedTools") + 1].split(",")
             want = [ln.strip() for ln in (TASKS / c["task"] / "allowed_tools.txt").read_text().splitlines() if ln.strip()]
@@ -901,6 +904,20 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(proc2.returncode, 1)
         self.assertIn("key model differs", proc2.stdout)
 
+    def test_plugin_warnings_of_the_plugin_itself_are_a_mitosis_item_but_others_fail(self):
+        ok = ['mitosis-orchestrator: Default agents/ folder is ignored because the manifest sets "agents"']
+        sb = Sandbox(self, on_plugin_warnings=ok)
+        proc = sb.cli("pilot", *sb.common())
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(self.status(proc.stdout, "init events differ only in mitosis items"), "PASS")
+        for label, warnings in (("other plugin", ok + ["other-plugin: manifest problem"]), ("unnamed", ['Default agents/ folder is ignored because the manifest sets "agents"'])):
+            with self.subTest(label):
+                sb = Sandbox(self, on_plugin_warnings=warnings)
+                proc = sb.cli("pilot", *sb.common())
+                self.assertEqual(proc.returncode, 1)
+                self.assertEqual(self.status(proc.stdout, "init events differ only in mitosis items"), "FAIL")
+                self.assertIn("plugin_warnings", proc.stdout)
+
     def test_pilot_fails_on_mitosis_hooks_in_the_off_arm(self):
         sb = Sandbox(self, hook_events={"off": ["python3 enforce-orchestrator.py pre-tool-use"]})
         proc = sb.cli("pilot", *sb.common())
@@ -928,6 +945,70 @@ class PilotTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 1, proc.stdout)
                 self.assertEqual(self.status(proc.stdout, fragment), "FAIL")
                 self.assertEqual(len(sb.calls()), 2)
+
+
+class CalibrateTests(unittest.TestCase):
+    def args(self, sb, task, arm, *extra):
+        return ["calibrate", "--task", task, "--arm", arm, "--plugin-dir", str(sb.plugin), "--work-root", str(sb.work), "--out", str(sb.out)] + list(extra)
+
+    def test_one_unscored_run_is_printed_charged_and_cleaned_up(self):
+        sb = Sandbox(self, cost=0.8)
+        proc = sb.cli(*self.args(sb, "ops", "on", "--cap", "3", "--spent-before", "2"))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        for needle in ("cost 0.8", "tool calls", "wall", "peak context 4000", "grade: pass"):
+            self.assertIn(needle, proc.stdout)
+        calls = sb.calls()
+        self.assertEqual(len(calls), 1)
+        argv = calls[0]["argv"]
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "3")
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertEqual(calls[0]["task"], "ops")
+        ledger = [json.loads(ln) for ln in (sb.out / "ledger.jsonl").read_text().splitlines()]
+        self.assertEqual([e["event"] for e in ledger], ["start", "end"])
+        self.assertEqual(ledger[0]["kind"], "calibration")
+        self.assertFalse((sb.out / "runs").exists())
+        self.assertEqual([p.name for p in sb.work.iterdir()], ["_frozen"])
+        again = sb.cli(*self.args(sb, "ops", "on"))
+        self.assertEqual(again.returncode, 0)
+        self.assertEqual(len(list((sb.out / "calibration").glob("ops__on__*"))), 2)
+
+    def test_reports_a_failed_grade_and_respects_the_budget(self):
+        sb = Sandbox(self, solve=False)
+        proc = sb.cli(*self.args(sb, "fix", "off"))
+        self.assertIn("grade: fail", proc.stdout)
+        stopped = sb.cli(*self.args(sb, "fix", "off", "--spent-before", "59"))
+        self.assertEqual(stopped.returncode, 4)
+        self.assertEqual(len(sb.calls()), 1)
+
+    def test_refuses_once_a_seal_exists(self):
+        sb = Sandbox(self)
+        sb.seal()
+        proc = sb.cli(*self.args(sb, "lookup", "off"))
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("SEAL.json exists", proc.stderr)
+        self.assertEqual(sb.calls(), [])
+
+
+class ArmParityTests(unittest.TestCase):
+    def test_arms_differ_only_by_plugin_dir_and_prefix(self):
+        self.assertEqual(cmp_run.arm_parity_problems(), [])
+        off = cmp_run.build_command("claude", "off", "fix", "P", "/f", 5.0)
+        on = cmp_run.build_command("claude", "on", "fix", "P", "/f", 5.0)
+        self.assertIn("--strict-mcp-config", off)
+        self.assertIn("--strict-mcp-config", on)
+        self.assertEqual(len(on) - len(off), 2)
+
+    def test_a_flag_on_one_arm_only_is_caught(self):
+        original = cmp_run.build_command
+
+        def skewed(claude, arm, task, prompt, plugin_dir, cap):
+            cmd = original(claude, arm, task, prompt, plugin_dir, cap)
+            return cmd + ["--verbose"] if arm == "on" else cmd
+        cmp_run.build_command = skewed
+        try:
+            self.assertTrue(cmp_run.arm_parity_problems())
+        finally:
+            cmp_run.build_command = original
 
 
 # ---------------------------------------------------------------------------------------------
@@ -975,7 +1056,7 @@ class TextRules(unittest.TestCase):
     def test_runner_has_the_four_subcommands(self):
         proc = sh([sys.executable, str(COMPARE / "run.py"), "--help"])
         self.assertEqual(proc.returncode, 0)
-        for name in ("seal", "pilot", "run", "report"):
+        for name in ("seal", "pilot", "calibrate", "run", "report"):
             self.assertIn(name, proc.stdout)
 
 
@@ -1063,6 +1144,34 @@ class LookupFixture(unittest.TestCase):
         self.assertIn("no longer matches", proc.stdout)
 
 
+ALT_ALLOCATE = '''def allocate(total, weights):
+    from fractions import Fraction
+    if not weights:
+        raise ValueError("allocate needs at least one weight")
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        raise ValueError("weights must be non-negative and not all zero")
+    sign = -1 if total < 0 else 1
+    exact = [Fraction(abs(total) * w, sum(weights)) for w in weights]
+    parts = [int(x) for x in exact]
+    spare = abs(total) - sum(parts)
+    ranked = sorted(range(len(parts)), key=lambda i: (-(exact[i] - parts[i]), i))
+    for i in ranked[:spare]:
+        parts[i] += 1
+    return [sign * p for p in parts]'''
+
+NON_MIRRORING_ALLOCATE = '''def allocate(total, weights):
+    if not weights:
+        raise ValueError("allocate needs at least one weight")
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        raise ValueError("weights must be non-negative and not all zero")
+    ws = sum(weights)
+    shares = [total * w // ws for w in weights]
+    leftover = total - sum(shares)
+    order = sorted(range(len(weights)), key=lambda i: (-((total * weights[i]) % ws), i))
+    for i in order[:leftover]:
+        shares[i] += 1
+    return shares'''
+
 FIX_PARTS = {"A": "money.py", "B": "shipping.py", "C": "fulfilment.py"}
 
 
@@ -1115,6 +1224,39 @@ class FixFixture(unittest.TestCase):
         self.assertEqual(self.both(full), (0, 0))
         proc = grade("fix", full)
         self.assertEqual(proc.returncode, 0, proc.stdout)
+
+    def test_hidden_requirements_are_all_documented_or_pinned_by_visible_tests(self):
+        money_src = (TASKS / "fix" / "template" / "shop" / "money.py").read_text()
+        doc = money_src.split("def allocate")[1].split('"""')[1]
+        self.assertIn("negative total", doc)
+        self.assertIn("sign flipped", doc)
+        self.assertIn("add up to total exactly", doc)
+        self.assertIn("earlier parts", money_src.split("def split_evenly")[1].split('"""')[1])
+        shipping_src = (TASKS / "fix" / "template" / "shop" / "shipping.py").read_text()
+        self.assertIn("heaviest parcel in grams that fits the tier", shipping_src)
+        visible = "\n".join(p.read_text() for p in (TASKS / "fix" / "template" / "tests").glob("test_*.py"))
+        for pinned in ("[145, 331, 24]", "[34, 33, 33]", "largest_remainders", "(5000, 5000, 1295)", "[209, 476, 110]", "-1563"):
+            self.assertIn(pinned, visible)
+
+    def test_a_fix_that_follows_every_documented_requirement_passes_hidden(self):
+        alt = ALT_ALLOCATE
+        work = self.fresh("BC")
+        text = (work / "shop" / "money.py").read_text()
+        a = text.index("def allocate")
+        b = text.index("def split_evenly")
+        (work / "shop" / "money.py").write_text(text[:a] + alt + "\n\n" + text[b:])
+        self.assertEqual(self.both(work), (0, 0))
+
+    def test_a_largest_remainder_fix_that_does_not_mirror_negatives_fails_exactly_the_two_documented_hidden_tests(self):
+        work = self.fresh("BC")
+        text = (work / "shop" / "money.py").read_text()
+        a = text.index("def allocate")
+        b = text.index("def split_evenly")
+        (work / "shop" / "money.py").write_text(text[:a] + NON_MIRRORING_ALLOCATE + "\n\n" + text[b:])
+        self.assertEqual(self.suite(work, work / "tests").returncode, 0)
+        out = self.suite(work, TASKS / "fix" / "hidden").stderr
+        failed = sorted(set(re.findall(r"^FAIL: (\w+)", out, re.M)))
+        self.assertEqual(failed, ["test_installments_and_refund_splits_elsewhere", "test_negative_totals_mirror_positive_ones"])
 
     def test_no_proper_subset_of_the_three_fixes_is_enough(self):
         for fixes in ("A", "B", "C", "AB", "AC", "BC"):

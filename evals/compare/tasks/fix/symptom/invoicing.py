@@ -71,7 +71,10 @@ class InvoiceBook:
 
 
 def installments(total_cents, count):
-    """Split an invoice total into equal monthly payments; earlier ones are a cent larger if needed."""
+    """Split an invoice total into equal monthly payments; earlier ones are a cent larger if needed.
+
+    A negative total (a credit note) splits the same way with the sign flipped.
+    """
     return money.split_evenly(total_cents, count)
 
 

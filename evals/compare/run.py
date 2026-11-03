@@ -4,6 +4,7 @@
     run.py seal  [--seed N] [--plugin-dir DIR]
     run.py pilot --plugin-dir DIR --work-root DIR --out DIR [--spent-before USD]
     run.py run   --plugin-dir DIR --work-root DIR --out DIR [--spent-before USD] [--keep] [--resume]
+    run.py calibrate --task T --arm A [--cap 3] --work-root DIR --out DIR   (unscored, only before the seal)
     run.py report --out DIR
 
 See PROTOCOL.md for the pre-registered design and the verdict rule. Python 3.8, standard library only.
@@ -349,10 +350,30 @@ def build_command(claude, arm, task, prompt, plugin_dir, cap):
         "--max-budget-usd", "%g" % cap,
         "--output-format", "stream-json", "--verbose",
         "--settings", SETTINGS_JSON,
+        "--strict-mcp-config",
     ]
     if arm == "on":
         cmd += ["--plugin-dir", str(plugin_dir)]
     return cmd
+
+
+def arm_parity_problems(plugin_dir="/frozen"):
+    """The two arms must differ only by the plugin directory flag and the prompt prefix."""
+    problems = []
+    for task in TASKS:
+        off = build_command("claude", "off", task, "PROMPT", plugin_dir, RUN_CAP_USD)
+        on = build_command("claude", "on", task, "PROMPT", plugin_dir, RUN_CAP_USD)
+        stripped = list(on)
+        if "--plugin-dir" in stripped:
+            i = stripped.index("--plugin-dir")
+            del stripped[i:i + 2]
+        stripped[2] = stripped[2].replace(PROMPT_PREFIX, "", 1)
+        if stripped != off:
+            problems.append("%s: arms differ beyond --plugin-dir and the prompt prefix" % task)
+        for flag in ("--strict-mcp-config", "--settings", "--model", "--effort", "--permission-mode", "--allowedTools"):
+            if flag not in off or flag not in on:
+                problems.append("%s: %s missing from an arm" % (task, flag))
+    return problems
 
 
 def make_tree_writable(root):
@@ -665,6 +686,9 @@ def common_setup(args, need_seal):
             raise Refused("fixtures differ from SEAL.json:\n  " + "\n  ".join(problems[:20]))
         if args.seed is not None and args.seed != seal["seed"]:
             raise Refused("--seed %d differs from the sealed seed %d" % (args.seed, seal["seed"]))
+    problems = arm_parity_problems()
+    if problems:
+        raise Refused("arm parity check failed: " + "; ".join(problems))
     work_root = Path(os.path.abspath(args.work_root))
     out = Path(os.path.abspath(args.out))
     if "/worktrees/" in (os.path.realpath(str(work_root)) + "/"):
@@ -751,7 +775,7 @@ def cmd_run(args):
 # ---------------------------------------------------------------------------------------------
 
 INIT_VOLATILE = ("session_id", "uuid", "cwd", "timestamp", "memory_paths", "messaging_socket_path", "original_cwd")
-INIT_MITOSIS_LISTS = ("plugins", "agents", "skills", "slash_commands")
+INIT_MITOSIS_LISTS = ("plugins", "agents", "skills", "slash_commands", "plugin_warnings")
 
 
 def _items(value):
@@ -1002,6 +1026,32 @@ def cmd_pilot(args):
 
 
 # ---------------------------------------------------------------------------------------------
+# calibrate: one unscored run of a task before sealing, to see how big it is
+# ---------------------------------------------------------------------------------------------
+
+def cmd_calibrate(args):
+    if SEAL_PATH.is_file():
+        raise Refused("SEAL.json exists: calibration is only for unsealed fixtures, so it cannot be used to preview sealed ones")
+    ctx = common_setup(args, need_seal=False)
+    folder = ctx.out / "calibration"
+    n = len(list(folder.glob("%s__%s__*" % (args.task, args.arm)))) + 1 if folder.is_dir() else 1
+    cell_id = "calib__%s__%s__%d" % (args.task, args.arm, n)
+    try:
+        res = execute(ctx, "calibration", args.task, args.arm, cell_id, folder / ("%s__%s__%d" % (args.task, args.arm, n)), args.cap)
+    except BudgetStop as exc:
+        print("stopped cleanly: " + str(exc))
+        return 4
+    print("calibration %s %s (cap %.2f, not scored)" % (args.task, args.arm, args.cap))
+    print("  cost %.4f (cli %s, transcript %s)" % (res["charged"], res["cli_cost"], res["transcript_cost"]))
+    print("  tool calls %d, agent calls %d, wall %.0f s, peak context %d tokens" % (res["tool_calls"], res["agent_calls"], res["wall_s"], res["peak_context_tokens"]))
+    print("  grade: %s (exit %d)%s%s" % ("pass" if res["grade_exit"] == 0 else "fail", res["grade_exit"],
+                                        ", hit the cap" if res["capped"] else "", ", timed out" if res["timed_out"] else ""))
+    if res["leak_suspect"]:
+        print("  leak suspect: %s" % res["leak_hits"][:2])
+    return 0
+
+
+# ---------------------------------------------------------------------------------------------
 # report
 # ---------------------------------------------------------------------------------------------
 
@@ -1103,6 +1153,17 @@ def build_parser():
         else:
             p.add_argument("--resume", action="store_true", help="continue unrun cells; finished cells are never rerun")
             p.add_argument("--max-runs", type=int, help="run at most N scored runs in this invocation")
+    p = sub.add_parser("calibrate", help="one unscored run of one task and arm; refused once SEAL.json exists")
+    p.add_argument("--task", required=True, choices=TASKS)
+    p.add_argument("--arm", required=True, choices=ARMS)
+    p.add_argument("--cap", type=float, default=3.0)
+    p.add_argument("--plugin-dir", default=str(REPO), help="plugin repository to export for the on arm (default: this repository)")
+    p.add_argument("--work-root", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--spent-before", type=float, default=0.0)
+    p.add_argument("--keep", action="store_true")
+    p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
+    p.add_argument("--claude", default="claude")
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
     return ap
@@ -1111,7 +1172,7 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
-        return {"seal": cmd_seal, "pilot": cmd_pilot, "run": cmd_run, "report": cmd_report}[args.command](args)
+        return {"seal": cmd_seal, "pilot": cmd_pilot, "run": cmd_run, "calibrate": cmd_calibrate, "report": cmd_report}[args.command](args)
     except Refused as exc:
         print("refused: " + str(exc), file=sys.stderr)
         return 2

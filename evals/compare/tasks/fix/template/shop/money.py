@@ -40,8 +40,8 @@ def percent(cents, bps):
 def allocate(total, weights):
     """Split total cents in proportion to weights so that the parts add up to total exactly.
 
-    Every part gets the floor of its exact share; the cents left over are handed out one
-    each, starting from the first part.
+    A negative total (a refund or credit) splits exactly like its positive amount, with the
+    sign flipped on every part.
     """
     if not weights:
         raise ValueError("allocate needs at least one weight")
@@ -56,6 +56,7 @@ def allocate(total, weights):
 
 
 def split_evenly(total, parts):
+    """Split total into equal parts; any extra cents go to the earlier parts (negative totals: see allocate)."""
     if parts <= 0:
         raise ValueError("parts must be positive")
     return allocate(total, [1] * parts)
