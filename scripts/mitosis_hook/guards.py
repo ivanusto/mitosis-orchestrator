@@ -814,6 +814,10 @@ def _scout_simple_command_denied(words: List[_ScoutWord], strict_windows: bool) 
     words = words[index:]
     if not words:
         return "assignment without a command"
+    if any(word.plain and word.value == "[[" for word in words):
+        # busybox sh reads || and && after this word as plain arguments, so the commands this scanner
+        # split apart would be one command there, and its options would go unchecked.
+        return f"the word [[, {_SCOUT_QUOTE_HINT}"
     head = words[0]
     prog = head.value
     if head.glob_at >= 0:

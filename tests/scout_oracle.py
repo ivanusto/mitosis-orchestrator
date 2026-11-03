@@ -277,7 +277,8 @@ def _word_ok(word: Tuple[str, int, bool], arg: str, home: str) -> bool:
             glob_at += len(home) - 1
     if glob_at >= 0:
         # [^x] negates in bash and zsh; zsh reads **/ as zero or more directories.
-        variants = {value, value.replace("[^", "[!"), value.replace("**/", "")}
+        negated = value.replace("[^", "[!")
+        variants = {value, negated, value.replace("**/", ""), negated.replace("**/", "")}
         return any(fnmatch.fnmatchcase(arg, v) for v in variants)
     return arg == value
 

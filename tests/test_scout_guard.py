@@ -104,6 +104,8 @@ DENIED = (
     ("comment-quote", "ls #'\nrm x #'"),
     ("backslash-newline-split", "r\\\nm x"),
     ("function-def", "ls () ( rm x ); ls"),
+    ("busybox-double-bracket-or", "rg x [[ || cat --pre=./evil"),
+    ("busybox-double-bracket-and", "rg x [[ && cat --pre=./evil"),
     ("heredoc-subst", "cat <<EOF\n$(rm x)\nEOF"),
     ("carriage-return", "ls\rrm x"),
     ("empty", ""),
