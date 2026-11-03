@@ -32,6 +32,7 @@ from .guards import (
     WRITE_TOOL_RE,
     _extract_apply_patch_files,
     _parse_codex_exec,
+    _windows_mode,
     _within_roots,
     allowed_roots,
     command_stays_in_workspace,
@@ -379,7 +380,10 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
         if tool_name in ("Bash", "shell", "exec_command", "local_shell"):
             cmd = str(_get(args, "command", "cmd", default="") or "")
-            ok, why = scout_command_is_read_only(cmd)
+            # Codex on Windows may run PowerShell or cmd. A Claude scout's only shell is Bash (Git Bash there).
+            ok, why = scout_command_is_read_only(
+                cmd, strict_windows=is_codex_hook_payload(payload) and _windows_mode(allowed_roots(payload))
+            )
             if not ok:
                 return _deny(
                     f"[Mitosis Orchestrator] {agent_type} runs read-only commands only ({why}). "

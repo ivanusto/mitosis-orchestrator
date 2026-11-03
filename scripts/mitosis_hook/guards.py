@@ -452,8 +452,8 @@ def _within_roots(target: Any, roots: List[Path]) -> bool:
     return False
 
 
-# Commands a Claude Code scout may run through Bash. Anything else (and any
-# output redirection) is denied, so a read-only scout stays read-only.
+# Commands a scout may run through its shell tool. This is a text check, not a sandbox: it denies
+# whatever it cannot read for certain, so a false deny is expected and a false allow is a bug.
 SCOUT_READ_ONLY_COMMANDS = {
     "ls", "cat", "head", "tail", "wc", "rg", "grep", "egrep", "fgrep", "find", "stat", "file",
     "du", "df", "pwd", "which", "tree", "sort", "cut", "jq", "basename",
@@ -461,16 +461,25 @@ SCOUT_READ_ONLY_COMMANDS = {
     "sha256sum", "uptime",
 }
 
+# Programs where an option that a glob expands to cannot run anything or write a file.
+_SCOUT_ANY_GLOB_COMMANDS = {
+    "ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "stat", "du", "cut", "basename",
+    "dirname", "realpath", "readlink", "echo", "nl", "cmp", "md5sum", "sha256sum",
+}
+
+_SCOUT_ENV_PREFIXES = {"LC_ALL", "LANG", "TZ", "NO_COLOR"}
+_SCOUT_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9_./:+-]*$")
+
 # System inspection. The first non-flag word of systemctl must be one of these; no word means list-units.
 SCOUT_SYSTEMCTL_SUBCOMMANDS = {
     "status", "show", "cat", "is-active", "is-enabled", "is-failed", "is-system-running", "get-default",
     "list-units", "list-unit-files", "list-timers", "list-sockets", "list-jobs", "list-dependencies",
 }
-_SCOUT_SYSTEMCTL_FORBIDDEN_RE = re.compile(r"^(?:-H|-M|--host\b|--machine\b)")  # would reach another machine
-# journalctl: following never ends, and these flags change the journal or the machine.
-_SCOUT_JOURNALCTL_FORBIDDEN_RE = re.compile(
-    r"^(?:--follow\b|--vacuum-|--rotate\b|--flush\b|--sync\b|--relinquish-var\b|--smart-relinquish-var\b|"
-    r"--setup-keys\b|--update-catalog\b|--cursor-file\b|-[A-Za-z]*f)"
+# An allowlist, with values attached by =: a spaced value (-t status stop) would read as the subcommand.
+_SCOUT_SYSTEMCTL_FLAG_RE = re.compile(
+    r"^(?:--failed|--no-pager|--no-legend|--user|--system|--all|-a|--full|-l|--plain|--value|--quiet|-q|"
+    r"--reverse|--before|--after|-n[0-9]+|--lines=[0-9]+|"
+    r"--(?:type|state|property|output|legend)=[A-Za-z0-9_.,:-]*)$"
 )
 
 
@@ -479,74 +488,368 @@ SCOUT_GIT_SUBCOMMANDS = {
     "grep", "describe", "shortlog", "reflog", "remote", "tag", "config",
 }
 
+_SCOUT_GIT_GLOBAL_FLAGS = {"--no-pager", "-P", "--no-optional-locks"}
+_SCOUT_GIT_DIFF_OPTIONS = {"--output", "--ext-diff", "--remerge-diff"}  # writes, runs a program, writes objects
+_SCOUT_GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
+_SCOUT_GIT_REMOTE_FLAGS = {"-v", "--verbose", "--all", "--push"}
+_SCOUT_FIND_FORBIDDEN = ("-delete", "-exec", "-ok", "-fprint", "-fls")
 
+# Options that run a program, write a file or change state. See _scout_option_hit for how they match.
 SCOUT_FORBIDDEN_ARGS = {
-    "find": {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"},
-    "sort": {"-o", "--output"},
-    "tree": {"-o"},
-    "diff": {"--output"},
-    "log": {"--output"},
-    "show": {"--output"},
-    "branch": {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy", "--set-upstream-to", "-u"},
-    "tag": {"-d", "--delete", "-a", "-s", "-f"},
-    "remote": {"add", "remove", "rm", "rename", "set-url", "prune", "set-head"},
-    "config": {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e", "--global", "--system"},
-    "reflog": {"delete", "expire"},
+    "sort": {"-o", "-T", "--output", "--compress-program", "--temporary-directory"},
+    "tree": {"-o", "-R"},
+    "file": {"-C", "--compile", "-p", "--preserve-date"},
+    "tail": {"-f", "-F", "--follow"},  # never ends
+    "date": {"-s", "--set"},
+    "rg": {"-z", "--search-zip", "--pre", "--pre-glob", "--hostname-bin"},
+    "diff": {"-l", "--paginate", "--output"},
+    "journalctl": {
+        "-f", "--follow", "--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate", "--flush", "--sync",
+        "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog", "--cursor-file",
+        "-M", "--machine", "--image", "--force",
+    },
+}
+
+# The same, for git subcommands. Options before the subcommand have their own allowlist above.
+SCOUT_GIT_FORBIDDEN_ARGS = {
+    "log": _SCOUT_GIT_DIFF_OPTIONS,
+    "show": _SCOUT_GIT_DIFF_OPTIONS,
+    "diff": _SCOUT_GIT_DIFF_OPTIONS,
+    "shortlog": _SCOUT_GIT_DIFF_OPTIONS,
+    "blame": _SCOUT_GIT_DIFF_OPTIONS,
+    "reflog": _SCOUT_GIT_DIFF_OPTIONS,
+    "grep": {"-O", "--open-files-in-pager", "--ext-grep"},
+    "branch": {
+        "-d", "-D", "-m", "-M", "-c", "-C", "-u", "-f", "-t", "--delete", "--move", "--copy", "--force", "--track",
+        "--no-track", "--set-upstream", "--set-upstream-to", "--unset-upstream", "--edit-description", "--create-reflog",
+    },
+    "tag": {
+        "-d", "-a", "-s", "-f", "-m", "-F", "-e", "-u", "-v", "--delete", "--annotate", "--sign", "--no-sign", "--force",
+        "--message", "--file", "--edit", "--local-user", "--verify", "--trailer", "--cleanup", "--create-reflog",
+    },
+    "config": {
+        "-e", "--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section",
+        "--edit", "--global", "--system",
+    },
 }
 
 
-_SCOUT_SEGMENT_SPLIT_RE = re.compile(r"\|\||&&|[|;\n]")
+def _scout_option_hit(word: str, forbidden: Any) -> bool:
+    """True when word is a forbidden option: --out and --output=x for --output (getopt accepts
+    abbreviations), -uo and -ofile for -o. Letters of an attached value also count: a false deny."""
+    if word.startswith("--"):
+        name = word[2:].split("=", 1)[0]
+        return bool(name) and any(f.startswith("--" + name) for f in forbidden)
+    if word.startswith("-") and len(word) > 1:
+        return any("-" + letter in forbidden for letter in word[1:])
+    return False
 
 
-_SCOUT_HARMLESS_REDIRECT_RE = re.compile(r"\d?>\s*/dev/null|2>&1")
+_SCOUT_SCAN_WORD_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:=,+@%^"
+)
+_SCOUT_SCAN_GLOB_CHARS = frozenset("*?[]")
+_SCOUT_SCAN_DQ_ESCAPES = frozenset('"\\$`')
+_SCOUT_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_SCOUT_HARMLESS_REDIRECT_RE = re.compile(r"(?:[12]?>[ \t]*/dev/null|2>&1)(?=[ \t\n;|&]|\Z)")
+_SCOUT_QUOTE_HINT = "use single quotes for a literal"
 
 
-def scout_command_is_read_only(command: str) -> Tuple[bool, str]:
-    """Check a scout's Bash command against the read-only allowlist."""
-    cleaned = _SCOUT_HARMLESS_REDIRECT_RE.sub(" ", command)
-    if re.search(r"[<>`]|\$\(", cleaned):
-        return False, "redirection or command substitution"
-    for segment in _SCOUT_SEGMENT_SPLIT_RE.split(cleaned):
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            return False, "unparseable command"
-        while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
-            words = words[1:]
-        if not words:
+class _ScoutWord:
+    """One shell word: value after quote removal, index of its first unquoted glob character
+    (-1 for none), and plain, which is True when no part of it was quoted or escaped."""
+
+    __slots__ = ("value", "glob_at", "plain")
+
+    def __init__(self) -> None:
+        self.value = ""
+        self.glob_at = -1
+        self.plain = True
+
+
+def _scout_scan(command: str) -> Tuple[List[List[_ScoutWord]], str]:
+    """Split a command line into simple commands of words, or return why it cannot be read.
+
+    Allows only what bash, dash, busybox sh and zsh read the same way. Anything that expands, groups
+    or redirects is denied, not modelled: `$` and backticks outside single quotes, parentheses, braces,
+    comments, here-documents, a lone `&`. Comments and $'...' matter most: without them a quote the
+    shell does not see could hide a command from this scanner."""
+    if _SCOUT_CONTROL_RE.search(command):
+        return [], "control character"
+    segments: List[List[_ScoutWord]] = []
+    current: List[_ScoutWord] = []
+    word: Optional[_ScoutWord] = None
+    pending = ""  # the operator before the current segment
+    redirected = False  # a harmless redirect in the current segment; alone on a line zsh runs cat for it
+    i = 0
+    n = len(command)
+
+    while i < n:
+        ch = command[i]
+        if ch in " \t":
+            if word is not None:
+                current.append(word)
+                word = None
+            i += 1
             continue
-        prog = os.path.basename(words[0])
-        if prog == "git":
-            sub = next((w for w in words[1:] if not w.startswith("-")), "")
-            if sub not in SCOUT_GIT_SUBCOMMANDS:
-                return False, f"git {sub or '(none)'} is not read-only"
-            if sub == "config" and not any(w in ("--get", "--get-all", "--list", "-l", "--get-regexp") for w in words):
-                return False, "git config without --get/--list"
-            bad = {w for w in words[2:] for f in SCOUT_FORBIDDEN_ARGS.get(sub, set())
-                   if w == f or (f.startswith("--") and w.startswith(f + "="))}
-            if sub == "branch" and len([w for w in words[2:] if not w.startswith("-")]) > 0 and not bad:
-                bad = {"<create>"}
-            if sub == "tag" and len([w for w in words[2:] if not w.startswith("-")]) > 0 and "-l" not in words and "--list" not in words:
-                bad = bad or {"<create>"}
-            if bad:
-                return False, f"git {sub} {sorted(bad)[0]} changes the repository"
+        if ch == "\n" or ch == ";" or ch == "|" or ch == "&":
+            if ch == "&" and command[i:i + 2] != "&&":
+                return [], "background or redirect with &"
+            if ch == "|" and command[i:i + 2] == "|&":
+                return [], "pipe with |&"
+            op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else ch
+            if word is not None:
+                current.append(word)
+                word = None
+            if current:
+                segments.append(current)
+                current = []
+                pending = op
+            elif redirected:
+                return [], "redirect without a command"
+            elif op != "\n":
+                return [], f"empty command before {op}"
+            redirected = False
+            i += len(op)
             continue
-        if prog == "systemctl":
-            sub = next((w for w in words[1:] if not w.startswith("-")), "")
-            if sub and sub not in SCOUT_SYSTEMCTL_SUBCOMMANDS:
-                return False, f"systemctl {sub} is not read-only"
-            if any(_SCOUT_SYSTEMCTL_FORBIDDEN_RE.match(w) for w in words[1:]):
-                return False, "systemctl on another machine"
+        if ch == ">" or ch.isdigit():
+            # Only outside a word: ls2>/dev/null is a program named ls2 on one shell and ls on another.
+            if word is None:
+                m = _SCOUT_HARMLESS_REDIRECT_RE.match(command, i)
+                if m:
+                    redirected = True
+                    i = m.end()
+                    continue
+            if ch == ">":
+                return [], "redirection"
+        if ch == "'":
+            end = command.find("'", i + 1)
+            if end < 0:
+                return [], "unterminated single quote"
+            body = command[i + 1:end]
+            if "\n" in body:
+                return [], "newline inside quotes"
+            if word is None:
+                word = _ScoutWord()
+            word.value += body
+            word.plain = False
+            i = end + 1
             continue
-        if prog == "journalctl":
-            if any(_SCOUT_JOURNALCTL_FORBIDDEN_RE.match(w) for w in words[1:]):
-                return False, "journalctl that follows or changes the journal"
+        if ch == '"':
+            if word is None:
+                word = _ScoutWord()
+            word.plain = False
+            i += 1
+            while True:
+                if i >= n:
+                    return [], "unterminated double quote"
+                c = command[i]
+                if c == '"':
+                    i += 1
+                    break
+                if c in "$`!":
+                    return [], f"{c} inside double quotes, {_SCOUT_QUOTE_HINT}"
+                if c == "\n":
+                    return [], "newline inside quotes"
+                if c == "\\":
+                    if i + 1 >= n or command[i + 1] == "\n":
+                        return [], "backslash before a line end"
+                    if not command[i - 1].isascii():
+                        # A multibyte locale can read the byte before \ and the \ as one character.
+                        return [], f"non-ASCII text before a backslash, {_SCOUT_QUOTE_HINT}"
+                    if command[i + 1] in _SCOUT_SCAN_DQ_ESCAPES:
+                        word.value += command[i + 1]
+                        i += 2
+                    else:
+                        word.value += c
+                        i += 1
+                    continue
+                word.value += c
+                i += 1
             continue
-        if prog not in SCOUT_READ_ONLY_COMMANDS:
-            return False, f"'{prog}' is not on the scout allowlist"
-        forbidden = SCOUT_FORBIDDEN_ARGS.get(prog, set())
-        if any(w in forbidden or any(w.startswith(f) for f in forbidden if f.startswith("--")) for w in words[1:]):
-            return False, f"'{prog}' with a writing option"
+        if ch == "\\":
+            nxt = command[i + 1] if i + 1 < n else ""
+            if not nxt or not nxt.isascii() or not nxt.isprintable():
+                return [], "backslash before a line end or non-ASCII text"
+            if word is None:
+                word = _ScoutWord()
+            word.value += nxt
+            word.plain = False
+            i += 2
+            continue
+        if ch in _SCOUT_SCAN_GLOB_CHARS:
+            if word is None:
+                word = _ScoutWord()
+            if word.glob_at < 0:
+                word.glob_at = len(word.value)
+            word.value += ch
+            i += 1
+            continue
+        if ch == "~":
+            at_start = word is None
+            if at_start and command[i + 1:i + 2] not in ("", "/", " ", "\t", "\n", ";", "|", "&"):
+                return [], f"~name expansion, {_SCOUT_QUOTE_HINT}"
+            if not at_start and word.value[-1:] in ("=", ":"):
+                return [], f"tilde after = or :, {_SCOUT_QUOTE_HINT}"
+            if word is None:
+                word = _ScoutWord()
+            word.value += ch
+            i += 1
+            continue
+        if ch in _SCOUT_SCAN_WORD_CHARS:
+            if ch == "=" and word is None:
+                return [], f"word that starts with =, {_SCOUT_QUOTE_HINT}"
+            if word is None:
+                word = _ScoutWord()
+            word.value += ch
+            i += 1
+            continue
+        if ch == "$" or ch == "`":
+            return [], f"variable or command substitution, {_SCOUT_QUOTE_HINT}"
+        if ch == "#":
+            return [], "comment, remove it"
+        if ch == "<":
+            return [], "input redirection or process substitution"
+        if ch in "(){}":
+            return [], f"grouping or brace expansion, {_SCOUT_QUOTE_HINT}"
+        return [], f"character {ch!r} outside quotes, {_SCOUT_QUOTE_HINT}"
+
+    if word is not None:
+        current.append(word)
+    if current:
+        segments.append(current)
+    elif redirected:
+        return [], "redirect without a command"
+    elif pending in ("|", "||", "&&"):
+        return [], f"nothing after {pending}"
+    if not segments:
+        return [], "empty command"
+    return segments, ""
+
+
+def _scout_git_denied(args: List[str]) -> str:
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if word in _SCOUT_GIT_GLOBAL_FLAGS:
+            i += 1
+        elif word == "-C" and i + 1 < len(args) and not args[i + 1].startswith("-"):
+            i += 2
+        elif word.startswith("-"):
+            return f"git global option {word} is not allowed"
+        else:
+            break
+    if i >= len(args):
+        return "git (none) is not read-only"
+    sub = args[i]
+    rest = args[i + 1:]
+    if sub not in SCOUT_GIT_SUBCOMMANDS:
+        return f"git {sub} is not read-only"
+    positional = [w for w in rest if not w.startswith("-")]
+    if sub == "config" and not (rest and rest[0] in _SCOUT_GIT_CONFIG_READS):
+        return "git config must start with --get or --list"
+    if sub == "remote":
+        if positional and positional[0] != "get-url":
+            return f"git remote {positional[0]} is not read-only"
+        if any(w.startswith("-") and w not in _SCOUT_GIT_REMOTE_FLAGS for w in rest):
+            return "git remote option is not read-only"
+    if sub == "reflog" and positional and positional[0] not in ("show", "exists"):
+        return "git reflog needs show or exists"
+    if any(_scout_option_hit(w, ("--help",)) for w in rest):
+        return "git --help starts man, use -h"
+    forbidden = SCOUT_GIT_FORBIDDEN_ARGS.get(sub, ())
+    hit = next((w for w in rest if _scout_option_hit(w, forbidden)), "")
+    if hit:
+        return f"git {sub} {hit} changes the repository or runs a program"
+    if sub == "branch" and positional:
+        return "git branch with a name creates a branch"
+    if sub == "tag" and positional and "-l" not in rest and "--list" not in rest:
+        return "git tag with a name creates a tag"
+    return ""
+
+
+def _scout_systemctl_denied(args: List[str]) -> str:
+    sub = next((w for w in args if not w.startswith("-")), "")
+    if sub and sub not in SCOUT_SYSTEMCTL_SUBCOMMANDS:
+        return f"systemctl {sub} is not read-only"
+    bad = next((w for w in args if w.startswith("-") and not _SCOUT_SYSTEMCTL_FLAG_RE.match(w)), "")
+    return f"systemctl option {bad} is not allowed, attach values with =" if bad else ""
+
+
+def _scout_date_denied(args: List[str]) -> str:
+    """date MMDDhhmm sets the clock with no option at all, so only +FORMAT may stand alone."""
+    skip = False
+    for word in args:
+        if skip:
+            skip = False
+        elif word in ("-d", "--date", "-r", "--reference", "-f", "--file"):
+            skip = True
+        elif not word.startswith(("-", "+")):
+            return f"date {word} sets the clock"
+    return ""
+
+
+def _scout_simple_command_denied(words: List[_ScoutWord], strict_windows: bool) -> str:
+    index = 0
+    while index < len(words) and words[index].plain and "=" in words[index].value:
+        name, _, value = words[index].value.partition("=")
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name) is None:
+            break
+        if strict_windows:
+            return "assignment is not allowed on this shell"
+        if name not in _SCOUT_ENV_PREFIXES or not _SCOUT_ENV_VALUE_RE.match(value):
+            return f"variable {name} is not allowed before a command"
+        index += 1
+    words = words[index:]
+    if not words:
+        return "assignment without a command"
+    head = words[0]
+    prog = head.value
+    if head.glob_at >= 0:
+        return "glob in the program name"
+    if prog != "git" and prog != "systemctl" and prog != "journalctl" and prog not in SCOUT_READ_ONLY_COMMANDS:
+        return f"'{prog}' is not on the scout allowlist, a program with a path is not allowed either"
+    for word in words[1:]:
+        if word.glob_at >= 0 and prog not in _SCOUT_ANY_GLOB_COMMANDS:
+            prefix = word.value[:word.glob_at]
+            if not prefix or prefix.startswith("-"):
+                return f"a glob could expand to an option of {prog}, start it with ./ or {_SCOUT_QUOTE_HINT}"
+    args = [word.value for word in words[1:]]
+    if prog == "git":
+        return _scout_git_denied(args)
+    if prog == "systemctl":
+        return _scout_systemctl_denied(args)
+    if prog == "find":
+        bad = next((w for w in args if w.startswith(_SCOUT_FIND_FORBIDDEN)), "")
+        return f"'find' with {bad}" if bad else ""
+    bad = next((w for w in args if _scout_option_hit(w, SCOUT_FORBIDDEN_ARGS.get(prog, ()))), "")
+    if bad:
+        return f"'{prog}' with {bad} writes a file, runs a program or changes state"
+    return _scout_date_denied(args) if prog == "date" else ""
+
+
+# Codex on Windows may run PowerShell or cmd, where quotes and backslashes differ from POSIX
+# ('a&b' is not a quote on cmd, \" is not an escape on PowerShell). Nothing that differs is accepted.
+_SCOUT_STRICT_WINDOWS_RE = re.compile(r"^[A-Za-z0-9_./:=+| \t-]+$")
+
+
+def scout_command_is_read_only(command: str, strict_windows: bool = False) -> Tuple[bool, str]:
+    """Check a scout's shell command against the read-only allowlist. Returns (ok, reason)."""
+    command = command.strip(" \t\n")
+    if not command:
+        return False, "empty command"
+    if strict_windows:
+        if not _SCOUT_STRICT_WINDOWS_RE.match(command):
+            return False, "quotes, backslashes, redirects and globs are not allowed on this shell"
+        if any(w.startswith("/") for w in command.split()):
+            return False, "a word that starts with / is not allowed on this shell"
+    segments, why = _scout_scan(command)
+    if why:
+        return False, why
+    for words in segments:
+        why = _scout_simple_command_denied(words, strict_windows)
+        if why:
+            return False, why
     return True, ""
 
 

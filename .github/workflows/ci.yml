@@ -21,6 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Shells for the scout guard oracle (zsh, busybox)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh busybox-static
       - name: Unit tests, routing eval and packaging checks
         run: python -m unittest discover -s tests -v
       - name: Routing confusion matrix

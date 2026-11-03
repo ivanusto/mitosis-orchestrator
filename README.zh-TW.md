@@ -204,7 +204,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉），並為缺少 `REPORT FORMAT` 區塊的提示詞自動補上（`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。 |
 | `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。Codex 不讓 hook 讀訊息時（0.163 傳的是加密字串），改依呼叫指定的 `agent_type` 決定，訊息原樣保留；沒指定角色的呼叫一律綁到 `worker`。 |
 | `PreToolUse` · `send_message`（agy / Codex）· `SendMessage`（Claude Code）· `followup_task`（Codex） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令；Codex 的 `followup_task` 另外比照新任務分類。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識，Codex 端以 `spawn_agent` 時登記的 `task_name` 辨識。hook 讀不到內容的 Codex 追加指令，送給偵察子代理一律拒絕，請改開新的 explorer 或交給 worker。 |
-| `PreToolUse` · 偵察子代理自己的工具（Claude Code / Codex） | `flash-lite-scout` 與 Codex `explorer` 不論提示詞怎麼寫，都不能用 `Write` / `Edit` / `apply_patch`，shell 只能跑白名單內的唯讀指令。 |
+| `PreToolUse` · 偵察子代理自己的工具（Claude Code / Codex） | `flash-lite-scout` 與 Codex `explorer` 不論提示詞怎麼寫，都不能用 `Write` / `Edit` / `apply_patch`，shell 指令也要通過唯讀白名單。這項檢查讀的是指令文字，讀不準就拒絕，並不是沙盒（見 [SECURITY.md](./SECURITY.md)）。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
 | `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |
