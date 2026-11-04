@@ -101,7 +101,7 @@ _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from mitosis_hook import common, guards, handlers, heartbeat, models, report, routing, state  # noqa: F401,E402
+from mitosis_hook import capture, common, guards, handlers, heartbeat, models, report, routing, state  # noqa: F401,E402
 from mitosis_hook.platforms import agy, claude, codex  # noqa: F401,E402
 from mitosis_hook.common import (  # noqa: F401,E402
     ALLOWED_PRIMARY_MODELS,
@@ -470,6 +470,7 @@ def main() -> None:
 
     handler = HANDLERS.get(mode)
     error_class = "StdinParseError" if stdin_error else None
+    capture_snapshot = capture.snapshot(payload)
     try:
         result = handler(payload) if handler else {}
     except Exception as exc:  # never break the agent loop because of the guard
@@ -479,6 +480,7 @@ def main() -> None:
     finally:
         _release_state_locks()
     _debug_log(payload, mode, result)
+    capture.write(capture_snapshot, mode, result)
 
     sys.stdout.write(json.dumps(result) + "\n")
     sys.stdout.flush()
