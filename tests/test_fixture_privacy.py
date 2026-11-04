@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stderr
 from pathlib import Path
 
@@ -366,13 +367,11 @@ class TestSanitizer(unittest.TestCase):
         self.assertNotIn("hunter2", text)
 
     def test_local_user_and_host_names_are_removed_from_allowlisted_values(self):
-        names = local_names()
-        if not names:
-            self.skipTest("no user or host name could be read")
-        ident = re.sub(r"[^A-Za-z_]", "_", names[0])
-        out, text = self.run_one({"model": "model-" + names[0], "agent_type": names[0], "tool_name": ident})
+        # A fixed name: a runner's host name such as ip-10-1-2-3 changes per run and is not a valid tool name.
+        with mock.patch.object(san, "_local_names", return_value=["secretbox"]):
+            out, text = self.run_one({"model": "model-secretbox", "agent_type": "secretbox", "tool_name": "secretbox"})
         self.assertEqual((out[1]["payload"]["model"], out[1]["payload"]["agent_type"], out[1]["payload"]["tool_name"]), ("__STR__", "__STR__", "__STR__"))
-        self.assertNotIn(names[0], text.lower())
+        self.assertNotIn("secretbox", text.lower())
 
     def test_every_s1_and_s2_survivor_is_removed_and_the_output_passes_the_gate(self):
         for label, line in S1_SURVIVORS + S2_SURVIVORS + S3_SURVIVORS:
