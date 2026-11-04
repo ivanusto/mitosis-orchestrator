@@ -340,7 +340,7 @@ INFO_KINDS = {"alias_shadow", "not-found", "syntax"}
 def probe_aliases(shell: PsShell, box: Sandbox, names: Sequence[str]) -> Dict[str, Dict[str, str]]:
     """name -> {type, source} as Get-Command resolves it with only the stubs on PATH."""
     script = ("foreach ($n in @(%s)) { $c = Get-Command $n -ErrorAction SilentlyContinue | Select-Object -First 1; "
-              "if ($c) { \"$n`t$($c.CommandType)`t$($c.Source)`t$($c.ResolvedCommandName)\" } else { \"$n`tNone`t\" } }"
+              "if ($c) { \"$n`t$($c.CommandType)`t$($c.Source)`t$($c.Definition)\" } else { \"$n`tNone`t\" } }"
               % ",".join("'%s'" % n for n in names))
     res = box.run(shell, script)
     out: Dict[str, Dict[str, str]] = {}
