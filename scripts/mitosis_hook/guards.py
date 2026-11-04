@@ -489,8 +489,20 @@ SCOUT_GIT_SUBCOMMANDS = {
 }
 
 _SCOUT_GIT_GLOBAL_FLAGS = {"--no-pager", "-P", "--no-optional-locks"}
-_SCOUT_GIT_DIFF_OPTIONS = {"--output", "--ext-diff", "--remerge-diff"}  # writes, runs a program, writes objects
-_SCOUT_GIT_CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
+# Writes, runs a program or writes objects. --diff-merges=remerge is --remerge-diff by another name, and
+# --show-signature starts gpg (--show-sig is an abbreviation, so _scout_option_hit catches it).
+_SCOUT_GIT_DIFF_OPTIONS = {"--output", "--ext-diff", "--remerge-diff", "--diff-merges", "--show-signature"}
+# Read modes of git config and how many operands each takes (name and value-pattern, or none).
+_SCOUT_GIT_CONFIG_READS = {"--get": 2, "--get-all": 2, "--get-regexp": 2, "--list": 0, "-l": 0}
+# A format placeholder that starts gpg: %G? %GG %GS ... and %(signature) %(signature:grade) ...
+_SCOUT_GIT_GPG_PLACEHOLDERS = ("%G", "%(signature")
+_SCOUT_GIT_GPG_SUBCOMMANDS = {"log", "show", "shortlog", "reflog", "branch", "tag"}
+# Options that take no value and cannot change the mode, so they may stand before --list / -l. A value
+# option there (--format, --sort, --contains) would swallow the next word, and --list with it.
+_SCOUT_GIT_BRANCH_LEAD = {"-a", "-r", "-v", "-vv", "-i", "-q", "--all", "--remotes", "--verbose", "--ignore-case", "--quiet"}
+_SCOUT_GIT_TAG_LEAD = {"-i", "--ignore-case"}
+# The only --no-* words a listing may carry: --no-list cancels the list mode, and --no-l is an abbreviation.
+_SCOUT_GIT_LIST_NEGATIONS = {"--no-merged", "--no-contains", "--no-color", "--no-column", "--no-abbrev"}
 _SCOUT_GIT_REMOTE_FLAGS = {"-v", "--verbose", "--all", "--push"}
 _SCOUT_FIND_FORBIDDEN = ("-delete", "-rm", "-exec", "-ok", "-fprint", "-fls")  # -rm: bfs, which runs as find in Claude Code
 
@@ -503,7 +515,9 @@ _SCOUT_UGREP_FORBIDDEN = {
 SCOUT_FORBIDDEN_ARGS = {
     "sort": {"-o", "-T", "--output", "--compress-program", "--temporary-directory"},
     "tree": {"-o", "-R"},
-    "file": {"-C", "--compile", "-p", "--preserve-date"},
+    # -z runs external decompressors, and -S (--no-sandbox) switches off the seccomp filter that stops them.
+    "file": {"-C", "--compile", "-p", "--preserve-date", "-z", "-Z", "-S", "--uncompress", "--uncompress-noreport",
+             "--no-sandbox"},
     "tail": {"-f", "-F", "--follow"},  # never ends
     "date": {"-s", "--set"},
     "rg": {"-z", "--search-zip", "--pre", "--pre-glob", "--hostname-bin"},
@@ -546,7 +560,10 @@ SCOUT_GIT_FORBIDDEN_ARGS = {
 
 def _scout_option_hit(word: str, forbidden: Any) -> bool:
     """True when word is a forbidden option: --out and --output=x for --output (getopt accepts
-    abbreviations), -uo and -ofile for -o. Letters of an attached value also count: a false deny."""
+    abbreviations), -uo and -ofile for -o. Letters of an attached value also count: a false deny.
+    ugrep spells --config as ---[FILE], so with that table every word that starts with --- counts."""
+    if word.startswith("---") and "--config" in forbidden:
+        return True
     if word.startswith("--"):
         name = word[2:].split("=", 1)[0]
         return bool(name) and any(f.startswith("--" + name) for f in forbidden)
@@ -737,13 +754,35 @@ def _scout_scan(command: str) -> Tuple[List[List[_ScoutWord]], str]:
     return segments, ""
 
 
-def _scout_git_denied(args: List[str]) -> str:
+def _scout_git_listing_denied(sub: str, rest: List[str]) -> str:
+    """git branch / git tag with a name: the name is a pattern only when list mode is certain. The first
+    word after the no-value flags must be --list (tag also -l), and no --no-* may follow except the filters
+    in _SCOUT_GIT_LIST_NEGATIONS, since --no-list cancels the mode and --format --list would swallow it."""
+    lead = _SCOUT_GIT_BRANCH_LEAD if sub == "branch" else _SCOUT_GIT_TAG_LEAD
+    listing = ("--list",) if sub == "branch" else ("-l", "--list")
+    i = 0
+    while i < len(rest) and (rest[i] in lead or (sub == "tag" and re.match(r"^-n[0-9]*$", rest[i]))):
+        i += 1
+    if i >= len(rest) or rest[i] not in listing:
+        return (f"git {sub} with a name creates one unless --list comes first: "
+                f"write git {sub} {'--list' if sub == 'branch' else '-l'} PATTERN, with no option before it that takes a value")
+    bad = next((w for w in rest[i + 1:] if w.startswith("--no") and w not in _SCOUT_GIT_LIST_NEGATIONS), "")
+    if bad:
+        return f"git {sub} {bad} can cancel the list mode, drop it"
+    return ""
+
+
+def _scout_git_denied(args: List[str], globs: Optional[List[bool]] = None) -> str:
+    """globs[i] is True when args[i] has an unquoted glob character."""
+    globs = list(globs or []) + [False] * len(args)
     i = 0
     while i < len(args):
         word = args[i]
         if word in _SCOUT_GIT_GLOBAL_FLAGS:
             i += 1
         elif word == "-C" and i + 1 < len(args) and not args[i + 1].startswith("-"):
+            if globs[i + 1]:
+                return "a glob after git -C can expand to a directory and a subcommand, name the directory or quote it"
             i += 2
         elif word.startswith("-"):
             return f"git global option {word} is not allowed"
@@ -753,11 +792,20 @@ def _scout_git_denied(args: List[str]) -> str:
         return "git (none) is not read-only"
     sub = args[i]
     rest = args[i + 1:]
+    if globs[i]:
+        return "a glob in the git subcommand is not allowed"
     if sub not in SCOUT_GIT_SUBCOMMANDS:
         return f"git {sub} is not read-only"
     positional = [w for w in rest if not w.startswith("-")]
-    if sub == "config" and not (rest and rest[0] in _SCOUT_GIT_CONFIG_READS):
-        return "git config must start with --get or --list"
+    if sub == "config":
+        if not (rest and rest[0] in _SCOUT_GIT_CONFIG_READS):
+            return "git config must start with --get, --get-all, --get-regexp or --list"
+        negated = next((w for w in rest if w.startswith("--no")), "")
+        if negated:
+            return f"git config {negated} can cancel the read mode and turn the command into a write, drop it"
+        if len(positional) > _SCOUT_GIT_CONFIG_READS[rest[0]]:
+            return (f"git config {rest[0]} takes at most {_SCOUT_GIT_CONFIG_READS[rest[0]]} operand(s), "
+                    "attach option values with = (--file=PATH)")
     if sub == "remote":
         if positional and positional[0] != "get-url":
             return f"git remote {positional[0]} is not read-only"
@@ -771,11 +819,13 @@ def _scout_git_denied(args: List[str]) -> str:
     hit = next((w for w in rest if _scout_option_hit(w, forbidden)), "")
     if hit:
         return f"git {sub} {hit} changes the repository or runs a program"
+    if sub in _SCOUT_GIT_GPG_SUBCOMMANDS:
+        gpg = next((w for w in rest if any(p in w for p in _SCOUT_GIT_GPG_PLACEHOLDERS)), "")
+        if gpg:
+            return f"{gpg!r} makes git {sub} start gpg: drop %G.. / %(signature..) from the format"
     # Only --list: -l meant --create-reflog before git 2.20, so `git branch -l x` created a branch there.
-    if sub == "branch" and positional and "--list" not in rest:
-        return "git branch with a name creates a branch"
-    if sub == "tag" and positional and "-l" not in rest and "--list" not in rest:
-        return "git tag with a name creates a tag"
+    if sub in ("branch", "tag") and positional:
+        return _scout_git_listing_denied(sub, rest)
     return ""
 
 
@@ -787,12 +837,16 @@ def _scout_systemctl_denied(args: List[str]) -> str:
     return f"systemctl option {bad} is not allowed, attach values with =" if bad else ""
 
 
-def _scout_date_denied(args: List[str]) -> str:
-    """date MMDDhhmm sets the clock with no option at all, so only +FORMAT may stand alone."""
+def _scout_date_denied(args: List[str], globs: Optional[List[bool]] = None) -> str:
+    """date MMDDhhmm sets the clock with no option at all, so only +FORMAT may stand alone. A glob after
+    an option that takes a value could expand to that value and a bare MMDDhhmm, so it is denied."""
+    globs = list(globs or []) + [False] * len(args)
     skip = False
-    for word in args:
+    for index, word in enumerate(args):
         if skip:
             skip = False
+            if globs[index]:
+                return "a glob after a date option can expand to more than one word, name the file or quote it"
         elif word in ("-d", "--date", "-r", "--reference", "-f", "--file"):
             skip = True
         elif not word.startswith(("-", "+")):
@@ -831,7 +885,7 @@ def _scout_simple_command_denied(words: List[_ScoutWord], strict_windows: bool) 
                 return f"a glob could expand to an option of {prog}, start it with ./ or {_SCOUT_QUOTE_HINT}"
     args = [word.value for word in words[1:]]
     if prog == "git":
-        return _scout_git_denied(args)
+        return _scout_git_denied(args, [word.glob_at >= 0 for word in words[1:]])
     if prog == "systemctl":
         return _scout_systemctl_denied(args)
     if prog == "find":
@@ -840,7 +894,7 @@ def _scout_simple_command_denied(words: List[_ScoutWord], strict_windows: bool) 
     bad = next((w for w in args if _scout_option_hit(w, SCOUT_FORBIDDEN_ARGS.get(prog, ()))), "")
     if bad:
         return f"'{prog}' with {bad} writes a file, runs a program or changes state"
-    return _scout_date_denied(args) if prog == "date" else ""
+    return _scout_date_denied(args, [word.glob_at >= 0 for word in words[1:]]) if prog == "date" else ""
 
 
 # Codex on Windows may run PowerShell or cmd, where quotes and backslashes differ from POSIX

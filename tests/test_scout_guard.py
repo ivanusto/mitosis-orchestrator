@@ -63,6 +63,23 @@ ALLOWED = (
     'diff -ru a b',
     'rg "\\$HOME" .',
     'NO_COLOR=1 git log -1',
+    "git branch -a --list 'feat/*'",
+    "git branch --list --no-merged main",
+    "git branch --no-merged",
+    "git tag -n5 -l 'v1.*'",
+    "git tag -i -l 'v*'",
+    "git config --get a.b c",
+    "git config --get-regexp '^remote'",
+    "git config --list --show-origin",
+    "git config --list --file=.git/config",
+    "git log --format=%h -3",
+    "git log --diff-filter=A --name-only",
+    "git log --stat -3",
+    "git -C src log -1",
+    "file -b x.gz",
+    "file -i -L x",
+    "grep -e foo f",
+    "grep -n -- 'a' f",
 )
 
 DENIED = (
@@ -164,6 +181,49 @@ DENIED = (
     # Claude Code runs find as bfs, where -rm deletes like -delete (census, wrapper mode: false allows).
     ('bfs-rm', 'find . -rm'),
     ('bfs-rm-first', 'find -rm ./evil .'),
+    # White-box review of c887e99: 28 cases in 7 causes (tests/whitebox/ in the v2.5.0 shots).
+    ('wb-git-config-no-get-set', 'git config --get --no-get user.name evil'),
+    ('wb-git-config-no-get-fsmonitor', 'git config --get --no-get core.fsmonitor ./evil'),
+    ('wb-git-config-no-get-file', 'git config --get --no-get --file ./any.cfg a.b c'),
+    ('wb-git-config-no-list', 'git config --list --no-list a.b c'),
+    ('wb-git-config-l-no-list', 'git config -l --no-list a.b c'),
+    ('wb-git-config-no-get-all', 'git config --get-all --no-get-all a.b c'),
+    ('wb-git-config-no-get-regexp', 'git config --get-regexp --no-get-regexp a.b c'),
+    ('wb-git-branch-no-list', 'git branch --list --no-list newb'),
+    ('wb-git-branch-format-swallows-list', 'git branch --format --list newb'),
+    ('wb-git-tag-format-swallows-list', 'git tag --format --list newt'),
+    ('wb-git-tag-format-swallows-l', 'git tag --format -l newt'),
+    ('wb-git-log-show-signature', 'git log --show-signature'),
+    ('wb-git-show-show-signature', 'git show --show-signature HEAD'),
+    ('wb-git-log-show-sig-abbrev', 'git log --show-sig'),
+    ('wb-git-reflog-show-signature', 'git reflog show --show-signature'),
+    ('wb-git-log-format-G', "git log --format='%G?'"),
+    ('wb-git-show-format-GG', 'git show --format=%GG'),
+    ('wb-git-branch-format-signature', "git branch --format='%(signature)'"),
+    ('wb-git-log-diff-merges-remerge', 'git log --diff-merges=remerge'),
+    ('wb-git-log-diff-merges-r', 'git log --diff-merges=r'),
+    ('wb-git-show-diff-merges-spaced', 'git show --diff-merges remerge'),
+    ('wb-file-z', 'file -z x.Z'),
+    ('wb-file-zS', 'file -zS x.Z'),
+    ('wb-file-no-sandbox-uncompress', 'file --no-sandbox --uncompress x.Z'),
+    ('wb-file-Z', 'file -Z x.Z'),
+    ('wb-ugrep-config-triple-dash', 'grep ---./evil x .'),
+    ('wb-ugrep-config-default', 'egrep --- x .'),
+    ('wb-git-C-glob-subcommand', 'git -C r* log'),
+    ('wb-sib-date-glob-value', 'date -d 0*'),
+    ('wb-sib-config-three-operands', 'git config --get a b c'),
+    ('wb-sib-config-list-operand', 'git config --list x'),
+    ('wb-sib-config-negated-other', 'git config --get --no-includes a.b'),
+    ('wb-sib-config-set-first', 'git config a.b c'),
+    ('wb-sib-branch-no-list-abbrev', 'git branch --list --no-l newb'),
+    ('wb-sib-branch-valued-option-first', 'git branch --contains --list newb'),
+    ('wb-sib-tag-no-list', 'git tag -l --no-list newt'),
+    ('wb-sib-tag-sort-first', 'git tag --sort -l newt'),
+    ('wb-sib-signature-abbrev', 'git log --show-sig'),
+    ('wb-sib-signature-atom-colon', "git tag --format='%(signature:grade)' -l"),
+    ('wb-sib-file-uncompress-abbrev', 'file --uncomp x.Z'),
+    ('wb-sib-file-no-sandbox-abbrev', 'file --no-sand x'),
+    ('wb-sib-git-C-glob-dir', 'git -C ./r* log'),
 )
 
 STRICT_ALLOWED = ("rg foo src | head -5",)
@@ -371,6 +431,79 @@ class TestOracleSafeDefaults(unittest.TestCase):
         o = scout_oracle.Oracle(scout_oracle.load_guard(ROOT), [shell], child_as_gib=4)
         self.addCleanup(o.close)
         self.assertEqual(o.run_command("echo a | cat"), [])  # shells start under the limit
+
+
+def _git_version():
+    import re
+    import subprocess
+    if not shutil.which("git"):
+        return None
+    out = subprocess.run(["git", "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode()
+    m = re.search(r"(\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+@unittest.skipIf(os.name == "nt", "needs a POSIX shell")
+@unittest.skipIf(_git_version() is None, "git is not installed")
+class TestRealGitWrites(unittest.TestCase):
+    """The three commands the white-box review confirmed against git 2.43.0 write to the repository when
+    run. They are run here in a throwaway repo, then the guard must deny them. git status refreshing
+    .git/index is known and allowed on purpose (documented in SECURITY.md); it is not tested here."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="scout-realgit-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = os.path.join(self.tmp, "repo")
+        os.mkdir(self.repo)
+        self.env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": self.tmp, "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "LC_ALL": "C"}
+        self.git("init", "-q")
+        Path(self.repo, "f").write_text("x\n", encoding="utf-8")
+        self.git("add", "f")
+        self.git("commit", "-q", "-m", "one")
+
+    def git(self, *args):
+        import subprocess
+        return subprocess.run(["git"] + list(args), cwd=self.repo, env=self.env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+
+    def sh(self, command):
+        import subprocess
+        return subprocess.run(["/bin/sh", "-c", command], cwd=self.repo, env=self.env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+
+    def test_config_no_get_writes_the_config(self):
+        cmd = "git config --get --no-get core.scoutprobe val"
+        self.assertFalse(eo.scout_command_is_read_only(cmd)[0])
+        self.sh(cmd)
+        if self.git("config", "--get", "core.scoutprobe").stdout.strip() != b"val":
+            self.skipTest("this git (%s) ignores --no-get after --get" % (_git_version(),))
+        self.assertEqual(self.git("config", "--get", "core.scoutprobe").stdout.strip(), b"val")
+
+    def test_branch_no_list_creates_a_branch(self):
+        cmd = "git branch --list --no-list scoutbranch"
+        self.assertFalse(eo.scout_command_is_read_only(cmd)[0])
+        self.sh(cmd)
+        if self.git("rev-parse", "--verify", "-q", "refs/heads/scoutbranch").returncode != 0:
+            self.skipTest("this git (%s) did not create the branch" % (_git_version(),))
+
+    def test_tag_format_swallows_list_and_creates_a_tag(self):
+        cmd = "git tag --format --list scouttag"
+        self.assertFalse(eo.scout_command_is_read_only(cmd)[0])
+        self.sh(cmd)
+        if self.git("rev-parse", "--verify", "-q", "refs/tags/scouttag").returncode != 0:
+            self.skipTest("this git (%s) did not create the tag" % (_git_version(),))
+
+    def test_legitimate_listing_changes_nothing(self):
+        for cmd in ("git branch --list 'sc*'", "git tag -l 'sc*'", "git config --get core.scoutprobe"):
+            self.assertTrue(eo.scout_command_is_read_only(cmd)[0], cmd)
+            before = sorted(os.listdir(os.path.join(self.repo, ".git", "refs", "heads")))
+            self.sh(cmd)
+            self.assertEqual(sorted(os.listdir(os.path.join(self.repo, ".git", "refs", "heads"))), before)
+        self.assertEqual(self.git("tag").stdout, b"")
+        self.assertEqual(self.git("config", "--get", "core.scoutprobe").returncode, 1)
 
 
 if __name__ == "__main__":
