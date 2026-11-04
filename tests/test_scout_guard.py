@@ -356,6 +356,16 @@ class TestScoutHook(EnvCase):
         self.assertEqual(self.claude("rg -n 'a|b' .", cwd="C:\\repo"), {})
         self.assertEqual(self.decision(self.claude("ls & rm x", cwd="C:\\repo")), "deny")
 
+    def test_strict_denies_a_word_powershell_would_split(self):
+        # pwsh 7.6.9: `a -o.x` gives -o and .x, `a --o.x` stays one argument.
+        for cmd in ("sort -o.x", "grep -e.y a", "uname -split./x --", "du -or.. log", "tail a -Value.", "ls|grep -e.y", "grep -- -Name:x", "ls -a:b"):
+            with self.subTest(cmd=cmd):
+                self.assertFalse(eo.scout_command_is_read_only(cmd, strict_windows=True)[0])
+        for cmd in ("ls a.txt", "ls ./b.c", "git log -n 3", "rg foo src/a.py"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(eo.scout_command_is_read_only(cmd, strict_windows=True)[0])
+        self.assertTrue(eo.scout_command_is_read_only("grep -e.y a")[0])
+
     def test_codex_explorer_with_windows_cwd_is_strict(self):
         self.assertEqual(self.codex("rg foo src | head -5", "C:\\repo"), {})
         self.assertEqual(self.decision(self.codex("rg 'a|b' .", "C:\\repo")), "deny")

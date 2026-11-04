@@ -947,6 +947,10 @@ def scout_command_is_read_only(command: str, strict_windows: bool = False) -> Tu
             return False, "quotes, backslashes, redirects and globs are not allowed on this shell"
         if any(w.startswith("/") for w in command.split()):
             return False, "a word that starts with / is not allowed on this shell"
+        # PowerShell passes -o.x as two arguments, -o and .x, and after -- also -o:x as -o: and x (7.6.9), so
+        # the words read here would not be the words the program gets. --o.x stays one argument.
+        if any(w.startswith("-") and not w.startswith("--") and ("." in w or ":" in w) for w in command.split()):
+            return False, "PowerShell splits a word like -x.y or -x:y into two arguments, write them apart"
     segments, why = _scout_scan(command)
     if why:
         return False, why
