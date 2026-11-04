@@ -122,6 +122,28 @@ class CodexWorkdir(unittest.TestCase):
         self.assertEqual((r.get("hookSpecificOutput") or {}).get("permissionDecision"), "ask")
 
 
+class WindowsDirectoryChanges(unittest.TestCase):
+    """Windows mode comes from the roots, so this runs on any host. Claude Code uses Git Bash on Windows."""
+
+    ROOT = "C:\\w"
+    CWD = "C:\\w\\sub"
+
+    def ok(self, command):
+        return guards.command_stays_in_workspace(command, self.CWD, [Path(self.ROOT)])[0]
+
+    def test_refused(self):
+        for command in ("git -C .. -C .. clean -fdx", "make -C .. -C .. clean", "tar -C .. -C .. -xf a.tar", "env -C .. rm ../x",
+                        "popd && rm ../x", "cd && rm -rf proj", "cd `pwd` && ls", "cd .. && del ..\\x", "cd /d .. && del ..\\x", "cd ..; cd ..; type a",
+                        "python3 -c \"import os;os.chdir('..');os.remove('../x')\""):
+            with self.subTest(command=command):
+                self.assertFalse(self.ok(command))
+
+    def test_still_passes(self):
+        for command in ("cd .. && type README.md", "git -C sub status", "git log v1..v2", "type ..\\a"):
+            with self.subTest(command=command):
+                self.assertTrue(self.ok(command))
+
+
 class StepsAfterCd(unittest.TestCase):
     """From a subfolder each .. stays inside, read from cwd, but the shell has already moved."""
 
@@ -146,7 +168,8 @@ class StepsAfterCd(unittest.TestCase):
 
     def test_cd_inside_the_workspace_still_passes(self):
         self.assertTrue(self.ok("cd .. && cat README.md"))
-        self.assertTrue(self.ok("cd deep && cat ../a"))
+        if os.name != "nt":  # Windows refuses any .. after a directory change: it does not add up the steps
+            self.assertTrue(self.ok("cd deep && cat ../a"))
 
     def test_without_cd_each_path_stands_alone(self):
         self.assertTrue(self.ok("cat ../a ../b"))

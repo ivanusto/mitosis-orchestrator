@@ -80,7 +80,7 @@ def scan_tree(directory):
         if path.is_file():
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 for label in scan(line):
-                    findings.append("%s:%d: %s" % (path.relative_to(directory), number, label))
+                    findings.append("%s:%d: %s" % (path.relative_to(directory).as_posix(), number, label))
     return findings
 
 

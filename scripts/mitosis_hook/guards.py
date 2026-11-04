@@ -981,6 +981,8 @@ _WIN_CHDIR_RE = re.compile(r"(?<![\w.-])(?:cd|chdir|pushd|set-location|sl)(?![\w
 _WIN_CHDIR_TARGET_RE = re.compile(
     r"(?<![\w.-])(?:cd|chdir|pushd|set-location|sl)(?![\w-])(?:\s+/d)?(?:\s*(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+))?", re.I
 )
+_WIN_CD_PARENT_RE = re.compile(r"(?<![\w.-])(?:cd|chdir|pushd|set-location|sl)(?:\s+/d)?\s+[\"']?\.\.", re.I)
+_DASH_C_PARENT_RE = re.compile(r"(?:^|\s)(?:-C|--directory|--chdir|--cwd)(?:\s+|=)[\"']?\S*\.\.")
 _WIN_DOTDOT_SEGMENT_RE = re.compile(r"(?:^|[\\/\s\"'=:(,])\.\.[\\/]|[\\/]\.\.(?:[\\/\s\"')]|$)")
 # Reasons that start with this come from a guess about the command text, not from a path that was seen to
 # escape. Codex turns "ask" into a denial, so for Codex these give no opinion instead.
@@ -1018,8 +1020,10 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
         ok, why, command = _check_windows_paths(command, cwd, roots)
         if not ok:
             return False, why
-        if _WIN_CHDIR_RE.search(original) and _WIN_DOTDOT_SEGMENT_RE.search(_WIN_CHDIR_TARGET_RE.sub(" ", original)):
-            return False, HEURISTIC_REFUSAL_PREFIX + "a directory change with a .. segment may leave the workspace"
+        if _WIN_CHDIR_RE.search(original) or _CHANGES_DIR_RE.search(original):
+            if (_WIN_DOTDOT_SEGMENT_RE.search(_WIN_CHDIR_TARGET_RE.sub(" ", original)) or _DASH_C_PARENT_RE.search(original)
+                    or len(_WIN_CD_PARENT_RE.findall(original)) >= 2):
+                return False, HEURISTIC_REFUSAL_PREFIX + "a directory change with a .. segment may leave the workspace"
     home = os.path.expanduser("~")
     for m in ABS_PATH_TOKEN_RE.finditer(command):
         token = m.group(1)
@@ -1032,11 +1036,12 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
             continue
         if not _within_roots(expanded, roots):
             return False, f"path {token!r} is outside the workspace"
-    if win_mode:
-        return True, ""
+    # Windows mode too: Claude Code runs Git Bash there, where these forms behave as they do on POSIX.
     unknown = _directory_change_unknown(command)
     if unknown:
         return False, HEURISTIC_REFUSAL_PREFIX + unknown
+    if win_mode:
+        return True, ""
     base = Path(os.path.expanduser(cwd)).resolve() if cwd else (roots[0] if roots else Path.cwd())
     levels_up = 0
     for m in DOTDOT_TOKEN_RE.finditer(command):
