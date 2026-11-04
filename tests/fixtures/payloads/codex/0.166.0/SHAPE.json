@@ -1,0 +1,427 @@
+{
+  "cli_version": "0.166.0",
+  "modes": {
+    "post-tool-use": {
+      "Bash": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.command": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_response": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      },
+      "collaborationspawn_agent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.agent_type": [
+          "str"
+        ],
+        "payload.tool_input.message": [
+          "str"
+        ],
+        "payload.tool_input.task_name": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_response": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-invocation": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.prompt": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-tool-use": {
+      "Bash": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.command": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.hookSpecificOutput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.hookEventName": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecision": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecisionReason": [
+          "str"
+        ]
+      },
+      "collaborationspawn_agent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.agent_type": [
+          "str"
+        ],
+        "payload.tool_input.message": [
+          "str"
+        ],
+        "payload.tool_input.task_name": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.hookSpecificOutput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.hookEventName": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecision": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecisionReason": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.updatedInput.agent_type": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.message": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.task_name": [
+          "str"
+        ]
+      }
+    },
+    "session-start": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.source": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.hookSpecificOutput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.additionalContext": [
+          "str"
+        ],
+        "result.hookSpecificOutput.hookEventName": [
+          "str"
+        ]
+      }
+    },
+    "stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.last_assistant_message": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.stop_hook_active": [
+          "bool"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "subagent-stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_transcript_path": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.last_assistant_message": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.platform": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.stop_hook_active": [
+          "bool"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "payload.turn_id": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    }
+  },
+  "platform": "codex",
+  "scenarios": [
+    "scout-denied",
+    "spawn-worker-scout",
+    "workdir-guard"
+  ],
+  "shape_version": 1
+}
