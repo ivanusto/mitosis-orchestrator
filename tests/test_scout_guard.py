@@ -227,6 +227,55 @@ DENIED = (
     ('wb-sib-git-C-glob-dir', 'git -C ./r* log'),
 )
 
+# git branch [lead flags] --merged|--contains [REV]: the only shape that takes a revision without --list.
+BRANCH_REV_ALLOWED = (
+    "git branch --merged",
+    "git branch --contains",
+    "git branch --merged main",
+    "git branch --contains main",
+    "git branch --merged origin/main",
+    "git branch --contains v1.2.3^",
+    "git branch --contains HEAD~2",
+    "git branch -a --merged main",
+    "git branch -r -v --contains other",
+    "git branch -vv --all --ignore-case --merged main",
+    "git -C sub branch --merged main",
+    "git --no-pager branch --contains main",
+)
+BRANCH_REV_NEAR_MISSES = (
+    "git branch --merged main newb",
+    "git branch --contains main newb",
+    "git branch newb --merged main",
+    "git branch --merged main --no-list",
+    "git branch --no-list --merged main x",
+    "git branch -m --merged main",
+    "git branch -d --merged main",
+    "git branch -f --contains main x",
+    "git branch --merged --contains main",
+    "git branch --merged -- main",
+    "git branch --merged main --format=%G?",
+    "git branch --contains %(signature)",
+    "git branch --merged r*",
+    "git branch --merged 'r*'",
+    "git branch --merged 'a?'",
+    "git branch --merged '[ab]'",
+    "git branch --merge main",
+    "git branch --contain main",
+    "git branch --merged=main",
+    "git branch --contains=main",
+    "git branch --merged -f",
+    "git branch --merged 'a b'",
+    "git branch --merged '%H'",
+    "git branch --merged 'a{b,c}'",
+    "git branch --merged main --list x",
+    "git branch --format x --merged main",
+    "git branch --sort x --merged main y",
+    "git branch --no-merged main x",
+    "git branch --no-contains main x",
+    "git branch -C --merged main",
+    "git -C 'r*' branch --merged main x",
+)
+
 STRICT_ALLOWED = ("rg foo src | head -5",)
 STRICT_DENIED = (
     "rg 'a|b' .",
@@ -255,6 +304,23 @@ class TestScoutTables(unittest.TestCase):
             ok, why = eo.scout_command_is_read_only(cmd)
             if not ok:
                 self.assertTrue(why, cmd)
+
+    def test_branch_rev_allowed(self):
+        for cmd in BRANCH_REV_ALLOWED:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(eo.scout_command_is_read_only(cmd), (True, ""))
+
+    def test_branch_rev_near_misses_denied(self):
+        for cmd in BRANCH_REV_NEAR_MISSES:
+            with self.subTest(cmd=cmd):
+                ok, why = eo.scout_command_is_read_only(cmd)
+                self.assertFalse(ok, "false allow: %r" % cmd)
+                self.assertTrue(why, cmd)
+
+    def test_branch_no_merged_stays_as_before(self):
+        self.assertTrue(eo.scout_command_is_read_only("git branch --no-merged")[0])
+        self.assertFalse(eo.scout_command_is_read_only("git branch --no-merged main")[0])
+        self.assertTrue(eo.scout_command_is_read_only("git branch --list --no-merged main")[0])
 
     def test_strict_windows(self):
         for cmd in STRICT_ALLOWED:
@@ -599,6 +665,39 @@ class TestRealGitWrites(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(os.path.join(self.repo, ".git", "refs", "heads"))), before)
         self.assertEqual(self.git("tag").stdout, b"")
         self.assertEqual(self.git("config", "--get", "core.scoutprobe").returncode, 1)
+
+    def test_branch_rev_shapes_change_nothing_and_near_misses_are_denied(self):
+        import subprocess
+        self.git("branch", "other")
+        Path(self.repo, "rx").write_text("", encoding="utf-8")
+
+        def snapshot():
+            refs = self.git("for-each-ref").stdout
+            names = []
+            for root, dirs, files in os.walk(os.path.join(self.repo, ".git")):
+                names.extend(os.path.relpath(os.path.join(root, n), self.repo) for n in dirs + files)
+            return refs, sorted(names)
+
+        for cmd in BRANCH_REV_ALLOWED[:9]:
+            with self.subTest(allowed=cmd):
+                self.assertTrue(eo.scout_command_is_read_only(cmd)[0], cmd)
+                before = snapshot()
+                self.sh(cmd)
+                self.assertEqual(snapshot(), before)
+        for cmd in BRANCH_REV_NEAR_MISSES:
+            with self.subTest(near_miss=cmd):
+                self.assertFalse(eo.scout_command_is_read_only(cmd)[0], cmd)
+        # Whether or not this git writes, the guard has denied the near misses above; this checks the claim
+        # about git itself for the ones that run without a quote.
+        for cmd in BRANCH_REV_NEAR_MISSES:
+            if "'" in cmd or "-C" in cmd.split()[1:2]:
+                continue
+            with self.subTest(real_git=cmd):
+                before = snapshot()
+                self.sh(cmd)
+                if snapshot() != before:
+                    self.skipTest("this git (%s) writes for %r; the guard denies it" % (_git_version(), cmd))
+                subprocess.run(["git", "--version"], stdout=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

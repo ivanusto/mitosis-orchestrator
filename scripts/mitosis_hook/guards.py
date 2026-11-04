@@ -512,6 +512,11 @@ _SCOUT_GIT_GPG_SUBCOMMANDS = {"log", "show", "shortlog", "reflog", "branch", "ta
 # option there (--format, --sort, --contains) would swallow the next word, and --list with it.
 _SCOUT_GIT_BRANCH_LEAD = {"-a", "-r", "-v", "-vv", "-i", "-q", "--all", "--remotes", "--verbose", "--ignore-case", "--quiet"}
 _SCOUT_GIT_TAG_LEAD = {"-i", "--ignore-case"}
+# git branch [lead flags] --merged|--contains [REV]: the one listing shape that takes a revision without --list.
+# Full spelling only (no --merge, no --merged=REV), the option is the last or second to last word, and REV is a
+# single plain word: no leading -, glob, $, backtick, % or brace.
+_SCOUT_GIT_BRANCH_REV_OPTIONS = ("--merged", "--contains")
+_SCOUT_GIT_BRANCH_REV_RE = re.compile(r"^[A-Za-z0-9_./@^~][A-Za-z0-9_./@^~+-]*$")
 # The only --no-* words a listing may carry: --no-list cancels the list mode, and --no-l is an abbreviation.
 _SCOUT_GIT_LIST_NEGATIONS = {"--no-merged", "--no-contains", "--no-color", "--no-column", "--no-abbrev"}
 _SCOUT_GIT_REMOTE_FLAGS = {"-v", "--verbose", "--all", "--push"}
@@ -765,6 +770,19 @@ def _scout_scan(command: str) -> Tuple[List[List[_ScoutWord]], str]:
     return segments, ""
 
 
+def _scout_git_branch_rev_listing(rest: List[str], globs: List[bool]) -> bool:
+    """True only for: lead flags, then --merged or --contains, then at most one plain REV, nothing else."""
+    i = 0
+    while i < len(rest) and rest[i] in _SCOUT_GIT_BRANCH_LEAD:
+        i += 1
+    if i >= len(rest) or rest[i] not in _SCOUT_GIT_BRANCH_REV_OPTIONS:
+        return False
+    tail = rest[i + 1:]
+    if not tail:
+        return True
+    return len(tail) == 1 and not globs[i + 1] and bool(_SCOUT_GIT_BRANCH_REV_RE.match(tail[0]))
+
+
 def _scout_git_listing_denied(sub: str, rest: List[str]) -> str:
     """git branch / git tag with a name: the name is a pattern only when list mode is certain. The first
     word after the no-value flags must be --list (tag also -l), and no --no-* may follow except the filters
@@ -834,8 +852,14 @@ def _scout_git_denied(args: List[str], globs: Optional[List[bool]] = None) -> st
         gpg = next((w for w in rest if any(p in w for p in _SCOUT_GIT_GPG_PLACEHOLDERS)), "")
         if gpg:
             return f"{gpg!r} makes git {sub} start gpg: drop %G.. / %(signature..) from the format"
+    if sub == "branch":
+        eq = next((w for w in rest if w.startswith(tuple(o + "=" for o in _SCOUT_GIT_BRANCH_REV_OPTIONS))), "")
+        if eq:
+            return f"git branch {eq.split('=')[0]}=REV is not allowed, write {eq.split('=')[0]} REV"
     # Only --list: -l meant --create-reflog before git 2.20, so `git branch -l x` created a branch there.
     if sub in ("branch", "tag") and positional:
+        if sub == "branch" and _scout_git_branch_rev_listing(rest, globs[i + 1:]):
+            return ""
         return _scout_git_listing_denied(sub, rest)
     return ""
 
