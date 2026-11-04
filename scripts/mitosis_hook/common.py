@@ -174,6 +174,8 @@ MUTATION_TOOLS = {
     "MultiEdit",
     "NotebookEdit",
     "write_file",
+    "edit_file",
+    "create_file",
     "apply_patch",
 }
 

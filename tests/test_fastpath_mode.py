@@ -169,6 +169,15 @@ class TestAgy(Base):
         out2 = eo.handle_pre_invocation(self.agy("x", {}, inv=3))
         self.assertNotIn("injectSteps", out2)
 
+    def test_agy_150_tool_names_and_path_key_count(self):
+        # agy 1.5.0 sends write_file and edit_file with Path, not TargetFile.
+        for i, (tool, args) in enumerate((("write_file", {"Path": "a.py", "Content": "x"}),
+                                          ("edit_file", {"Path": "b.py", "Replacement": "x"}))):
+            args = dict(args, Path=str(self.ws / args["Path"]))
+            eo.handle_pre_tool_use(self.agy(tool, args, inv=0))
+            state = eo.load_state(self.agy("x", {}))
+            self.assertEqual(len(state["turn_edited_files"]), i + 1, tool)
+
     def test_budget_survives_invocation_1_2_and_resets_on_0(self):
         os.environ["AGY_MITOSIS_MAX_DIRECT_EDITS"] = "1"
         eo.handle_pre_tool_use(self.agy("write_to_file", self.agy_edit(0), inv=0))

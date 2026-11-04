@@ -468,6 +468,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                         or args.get("TargetFile")
                         or args.get("AbsolutePath")
                         or args.get("FilePath")
+                        or args.get("Path")  # agy 1.5.0 write_file and edit_file
                         or ""
                     )
                     artifact_dir = payload.get("artifactDirectoryPath")
