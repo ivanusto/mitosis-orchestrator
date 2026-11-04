@@ -178,6 +178,9 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("agent_id"):
         return {}
     state = load_state(payload)
+    if is_codex_hook_payload(payload) and payload.get("cwd") and isinstance(payload["cwd"], str):
+        # Codex reports a command's workdir as the PreToolUse cwd; the turn cwd is only seen here.
+        state["codex_turn_cwd"] = payload["cwd"]
     agy = _is_agy_payload(payload)
     inv = payload.get("invocationNum", 0)
     # agy fires PreInvocation on every model call; its invocationNum returns to 0 on a new user turn.
@@ -251,13 +254,29 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"injectSteps": agy_steps + [{"ephemeralMessage": warn_text}]}
 
 
+def _turn_cwd_payload(payload: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """For a primary Codex hook call, a payload copy whose cwd is the stored turn cwd.
+
+    Codex puts the command's resolved workdir in the PreToolUse cwd, so roots and the worktree test
+    must use the turn cwd. Subagents and payloads without a stored turn cwd come back unchanged.
+    """
+    if not is_codex_hook_payload(payload) or payload.get("agent_id"):
+        return payload
+    if state is None:
+        state = _peek_state(payload)
+    turn_cwd = (state or {}).get("codex_turn_cwd")
+    if not turn_cwd or not isinstance(turn_cwd, str):
+        return payload
+    return {**payload, "cwd": turn_cwd}
+
+
 def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     # Opt-in: the plugin ships with the scope guard off. Set AGY_MITOSIS_AUTO_ALLOW=1 (or CLAUDE_MITOSIS_AUTO_ALLOW=1 / CODEX_MITOSIS_AUTO_ALLOW=1)
     # to let project-scoped file and command tools skip the permission prompt.
     # When unset or for tools without path arguments, pass through without a verdict.
     if not _env_flag("CODEX_MITOSIS_AUTO_ALLOW", "CLAUDE_MITOSIS_AUTO_ALLOW", "AGY_MITOSIS_AUTO_ALLOW", "AGY_ARGON_AUTO_ALLOW"):
         return _no_opinion(payload)
-    roots = allowed_roots(payload)
+    roots = allowed_roots(_turn_cwd_payload(payload))
     if not roots:
         return _no_opinion(payload)
 
@@ -408,7 +427,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     advice: Optional[str] = None
     # Primary agent guards (context hygiene and fast-path budget)
-    if is_primary_agent(payload, state):
+    if is_primary_agent(_turn_cwd_payload(payload, state), state):
         # Context hygiene: block direct reads of raw logs or transcripts by primary agent
         if not _env_flag("CODEX_MITOSIS_ALLOW_DIRECT_LOGS", "CLAUDE_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_MITOSIS_ALLOW_DIRECT_LOGS", "AGY_ARGON_ALLOW_DIRECT_LOGS") and tool_name in READ_TOOLS:
             target = str(

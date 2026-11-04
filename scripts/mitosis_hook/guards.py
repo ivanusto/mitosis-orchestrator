@@ -966,6 +966,9 @@ def scout_command_is_read_only(command: str, strict_windows: bool = False) -> Tu
     return True, ""
 
 
+_CHANGES_DIR_RE = re.compile(r"(?:^|[\s;&|(])(?:cd|pushd)(?:\s|$)")
+
+
 def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tuple[bool, str]:
     """Return (ok, reason). ok is False when the command names a path outside the
     roots or matches a pattern that should always be confirmed by a human."""
@@ -1000,10 +1003,20 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
     if win_mode:
         return True, ""
     base = Path(os.path.expanduser(cwd)).resolve() if cwd else (roots[0] if roots else Path.cwd())
+    levels_up = 0
     for m in DOTDOT_TOKEN_RE.finditer(command):
         candidate = (base / m.group(1)).resolve()
         if not _within_roots(str(candidate), roots):
             return False, f"relative path {m.group(1)!r} escapes the workspace"
+        levels_up += m.group(1).split("/").count("..")
+    # From a subfolder, `cd .. && rm ../x` passes above: each .. is read from cwd, but the shell moved.
+    # Without following every cd, assume the steps add up. This can ask needlessly and is never looser.
+    if levels_up and _CHANGES_DIR_RE.search(command):
+        candidate = base
+        for _ in range(levels_up):
+            candidate = candidate.parent
+        if not _within_roots(str(candidate), roots):
+            return False, "relative paths after a directory change may escape the workspace"
     return True, ""
 
 
