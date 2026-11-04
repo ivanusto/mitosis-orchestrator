@@ -138,7 +138,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.6.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -374,6 +374,20 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 
 ---
 
+## 2.7.0 有什麼變動
+
+**更新後請做。** Codex 請跑 `python3 scripts/setup-codex.py`，再開 Codex 接受 hook review 並執行 doctor。少了 setup 這一步，子代理會留在舊模型。Claude Code 請開新工作階段。
+
+- **Codex 預設釘定：** worker 改 `gpt-6.1-terra`，scout 改 `gpt-6-luna`。沒有做對照，因此不做品質或成本主張。回退方式見上方「退回先前的模型」。
+- **agy 斷路器現在真的有作用，預設只提醒。** 先前它不可能觸發。`*_MITOSIS_CIRCUIT_BREAKER_MODE=enforce` 才會拒絕。Claude Code 與 Codex 從未計入真實失敗，這點沒有改變。
+- **agy headless 寫檔：** print 模式不理會 hook 的 `permissionOverrides`，所以 `*_MITOSIS_AUTO_ALLOW` 無法放行 headless 的 `write_file`，請改用 `--mode accept-edits`。
+- **真實 payload fixtures** 與 `scripts/payload-shape.py`，可在 CLI 更新時看出格式變動，步驟見 `CONTRIBUTING.md`。
+- **Explore 釘定已量測：** 36 次封存的查詢實跑，兩組都答對 90/90，費用中位數是繼承組的 51%。兩組都碰到滿分上限，提示詞也強制委派，所以這不是通用的節省幅度，詳見 `evals/builtin-pin/RESULTS.md`。預設維持關閉。
+
+完整內容見 [CHANGELOG.md](./CHANGELOG.md)。
+
+---
+
 ## 2.6.0 有什麼變動
 
 **更新後。** 主核每回合改超過 3 個檔案或改檔後跑測試，不再被拒絕，改為每種情況每回合提醒一次。要恢復拒絕，請設 `*_MITOSIS_FASTPATH_MODE=enforce`。Codex 請開啟一次並接受 hook review。Claude Code 請開新的 session。詳見 [CHANGELOG.md](./CHANGELOG.md)。
@@ -469,7 +483,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.1-sol` | 啟用自動綁定時的目標模型（依平台預設）。 |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | 設為 `1` 可關閉所有非尖端主模型的警告。 |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | 設為 `0` 時 Claude Code 端完全不改寫 `Agent` 呼叫。 |
-| `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | 設為 `1` 時，另外釘定未指定模型的 Claude Code 內建 agent：`Explore` 使用 scout 的模型與 effort，`general-purpose` 當作未指定型別的呼叫處理。`Plan` 與其他內建型別不動。改用較便宜的模型對這些內建 agent 的品質影響尚未量測，也不宣稱能省錢。在一台機器上，2026-10-23 至 2026-11-04 期間，未釘定的內建 agent 約占子代理花費的 30%。開啟後 `Explore` 以 haiku 執行，但不會取得 scout 的 Bash 白名單（`handlers.py:375-376`），其停止事件不會阻擋也不會升級；SendMessage 守衛仍然適用。`Explore` 的唯讀限制來自 Claude Code 自身對該 agent 的工具清單，並非本外掛。未釘定的花費一律會回報（`mitosis-cost-report.py --fleet` 在列上標示 `unpinned`；doctor 在 `claude.heartbeat.builtin` 顯示內建 agent 停止次數）。 |
+| `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | 設為 `1` 時，另外釘定未指定模型的 Claude Code 內建 agent：`Explore` 使用 scout 的模型與 effort，`general-purpose` 當作未指定型別的呼叫處理。`Plan` 與其他內建型別不動。`Explore` 在 36 次封存的查詢實跑中兩組都答對 90/90，費用中位數是繼承組的 51%，但兩組都碰到滿分上限，提示詞也強制委派，所以不宣稱通用的節省幅度，詳見 [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md)。`general-purpose` 未量測。在一台機器上，2026-10-23 至 2026-11-04 期間，未釘定的內建 agent 約占子代理花費的 30%。開啟後 `Explore` 以 haiku 執行，但不會取得 scout 的 Bash 白名單，其停止事件不會阻擋也不會升級；SendMessage 守衛仍然適用。`Explore` 的唯讀限制來自 Claude Code 自身對該 agent 的工具清單，並非本外掛。未釘定的花費一律會回報（`mitosis-cost-report.py --fleet` 在列上標示 `unpinned`；doctor 在 `claude.heartbeat.builtin` 顯示內建 agent 停止次數）。 |
 | `CLAUDE_MITOSIS_SCOUT_MODEL` · `CLAUDE_MITOSIS_WORKER_MODEL` | `haiku` · `sonnet` | Claude Code 各階層釘定的模型（`haiku`、`sonnet`、`opus`、`fable`）；不合法的值會退回預設。 |
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | 設為 `0` 時 Claude Code 端不再為釘定的 `Agent` 呼叫加上 `effort`（模型仍會釘定）。 |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code 各階層釘定的 effort（`low`、`medium`、`high`、`xhigh`、`max`）；呼叫端自帶的合法 `effort` 優先。 |
@@ -485,6 +499,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時停用快捷修改預算（等同 `*_MITOSIS_FASTPATH_MODE=off`，且不追蹤）。 |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | 設為 `0` 時，不再比對釘定的模型與子代理實際執行的模型。 |
+| `MITOSIS_CAPTURE_PAYLOADS` | 未設定 | 錄製原始 hook payload 的絕對路徑目錄，用來建立測試 fixture。**檔案內含你的提示詞與路徑**，詳見 `SECURITY.md`。 |
 | `MITOSIS_HEARTBEAT` | `1` | 設為 `0` 時不再寫入 `heartbeat-<platform>.json`。 |
 | `MITOSIS_HEARTBEAT_DIR` | 使用者快取目錄 | heartbeat 檔案的目錄。 |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | 設為 `0` 時停用熔斷機制，優先於模式設定。 |

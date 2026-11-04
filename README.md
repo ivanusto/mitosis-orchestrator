@@ -138,7 +138,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.6.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -368,6 +368,20 @@ The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets eac
 
 ---
 
+## What changed in 2.7.0
+
+**After updating.** On Codex, run `python3 scripts/setup-codex.py`, then open Codex, accept the hook review and run the doctor. Without the setup step, children stay on the old models. On Claude Code, start a new session.
+
+- **Codex default pins:** worker `gpt-6.1-terra`, scout `gpt-6-luna`. No quality or cost claim: no comparison was made. See "Going back to the previous models" above.
+- **agy's circuit breaker now works and advises by default.** It could never fire before. `*_MITOSIS_CIRCUIT_BREAKER_MODE=enforce` denies. On Claude Code and Codex it has never counted a real failure, and that has not changed.
+- **agy headless writes:** print mode ignores a hook's `permissionOverrides`, so `*_MITOSIS_AUTO_ALLOW` does not let a headless `write_file` through. Use `--mode accept-edits`.
+- **Real payload fixtures** and `scripts/payload-shape.py` show what changed when a CLI updates. See `CONTRIBUTING.md`.
+- **Explore pinning measured** on 36 sealed lookup runs: 90 of 90 correct in both arms, median cost 51% of inheriting. Both arms hit the ceiling and the prompt forces delegation, so this is not a general saving: see `evals/builtin-pin/RESULTS.md`. The default stays off.
+
+Full list in [CHANGELOG.md](./CHANGELOG.md).
+
+---
+
 ## What changed in 2.6.0
 
 **After updating.** The primary is no longer blocked for editing more than 3 files in a turn or for running tests after an edit: it gets one piece of advice per kind per turn. Set `*_MITOSIS_FASTPATH_MODE=enforce` to get the denials back. On Codex, open Codex once and accept the hook review. On Claude Code, start a new session. Details: [CHANGELOG.md](./CHANGELOG.md).
@@ -463,7 +477,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.1-sol` | Target frontier model name when pinning (per platform default shown). |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | Set to `1` to silence all primary-model warnings. |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | Set to `0` to stop rewriting `Agent` calls in Claude Code entirely. |
-| `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | Set to `1` to also pin Claude Code built-in agents without an explicit model: `Explore` gets the scout model and effort, `general-purpose` is routed like an untyped call. `Plan` and other built-ins are untouched. The quality impact of a cheaper model on these built-ins has not been measured and no saving is claimed. On one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. With the flag on, `Explore` runs on haiku but does NOT get the scout Bash allowlist (`handlers.py:375-376`), and its stops do not block or escalate; the SendMessage guard does apply. `Explore`'s read-only limit comes from Claude Code's own tool list for that agent, not from this plugin. Unpinned spend is always reported (`mitosis-cost-report.py --fleet` marks rows `unpinned`; the doctor shows built-in stop counts in `claude.heartbeat.builtin`). |
+| `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | Set to `1` to also pin Claude Code built-in agents without an explicit model: `Explore` gets the scout model and effort, `general-purpose` is routed like an untyped call. `Plan` and other built-ins are untouched. On 36 sealed lookup runs `Explore` scored 90 of 90 in both arms at 51% of the median cost, but both arms hit the ceiling and the prompt forced delegation, so no general saving is claimed: see [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md). `general-purpose` was not measured. On one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. With the flag on, `Explore` runs on haiku but does NOT get the scout Bash allowlist, and its stops do not block or escalate; the SendMessage guard does apply. `Explore`'s read-only limit comes from Claude Code's own tool list for that agent, not from this plugin. Unpinned spend is always reported (`mitosis-cost-report.py --fleet` marks rows `unpinned`; the doctor shows built-in stop counts in `claude.heartbeat.builtin`). |
 | `CLAUDE_MITOSIS_SCOUT_MODEL` · `CLAUDE_MITOSIS_WORKER_MODEL` | `haiku` · `sonnet` | Claude Code model pinned per tier (`haiku`, `sonnet`, `opus`, `fable`); invalid values fall back to the default. |
 | `CLAUDE_MITOSIS_PIN_EFFORT` | `1` | Set to `0` to stop adding `effort` to pinned `Agent` calls in Claude Code (models are still pinned). |
 | `CLAUDE_MITOSIS_SCOUT_EFFORT` · `CLAUDE_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Claude Code effort pinned per tier (`low`, `medium`, `high`, `xhigh`, `max`); a valid `effort` passed by the caller wins. |
@@ -479,6 +493,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to turn the fast-path budget off (same as `*_MITOSIS_FASTPATH_MODE=off`, no tracking). |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | Set to `0` to stop comparing the pinned model with the model the subagent actually ran on. |
+| `MITOSIS_CAPTURE_PAYLOADS` | unset | Absolute directory for raw hook payloads, used to build test fixtures. **The file holds your prompts and paths**: see `SECURITY.md`. |
 | `MITOSIS_HEARTBEAT` | `1` | Set to `0` to stop writing `heartbeat-<platform>.json`. |
 | `MITOSIS_HEARTBEAT_DIR` | user cache dir | Directory for the heartbeat files. |
 | `*_MITOSIS_CIRCUIT_BREAKER` | `1` | Set to `0` to disable the circuit breaker. Wins over the mode. |

@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.7.0 - 2026-11-04
+
+**After updating, do this.** On Codex, run `python3 scripts/setup-codex.py`, because the models live in the role files: without it, children stay on the old models and doctor warns. Then open Codex once, accept the hook review, and run `python3 scripts/mitosis-doctor.py`. On Claude Code, start a new session.
+
+### Behaviour changes
+- **Codex default pins changed:** worker `gpt-5.6-terra` to `gpt-6.1-terra`, scout `gpt-5.6-luna` to `gpt-6-luna`. No comparison was made, so no quality or cost claim is made. To go back, run `CODEX_MITOSIS_WORKER_MODEL=gpt-5.6-terra CODEX_MITOSIS_SCOUT_MODEL=gpt-5.6-luna python3 scripts/setup-codex.py` and keep both variables exported for Codex.
+- **agy: the circuit breaker now works, and advises by default.** It counts across the user turn and adds one note per turn. `*_MITOSIS_CIRCUIT_BREAKER_MODE=enforce` denies after 2 failures in a row until the next turn, and `off` disables it. `*_MITOSIS_CIRCUIT_BREAKER=0` still means off. The variable with the current platform's prefix applies, so `CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE` has no effect on agy.
+- **`*_MITOSIS_CIRCUIT_BREAKER=0` and mode `enforce` on Claude Code and Codex:** nothing changes in practice. The breaker has never counted a real failure on these two platforms, because their payloads carry no field it reads. Earlier documents implied otherwise.
+- **`CODEX_MITOSIS_AUTO_ALLOW=1`:** a command whose working directory is outside the directory the turn started in is now denied. A false denial is gone: from a subfolder, `cat ../README.md` inside the repo no longer counts as an escape.
+- **`*_MITOSIS_AUTO_ALLOW=1` on Claude Code and agy asks in more cases:** a directory change combined with `..`, a `cd` with no target, `cd -`, a target with `$` or a backtick, `popd`, `chdir` and `-C ..`. It may ask needlessly. On Codex these give no verdict rather than a denial.
+- **Codex `pin_verified` also compares effort,** so it can now say that a child looks inherited, and it stays unset when the primary already matches the pin exactly and the two cannot be told apart. A primary on another model gets no new mismatch.
+- **The Claude hooks file is now `hooks/claude-hooks.json`,** declared in `.claude-plugin/plugin.json`.
+
+### Added
+- Real hook payloads as test fixtures, in `tests/fixtures/payloads/`, sanitized by `scripts/sanitize-payloads.py` and replayed through the handlers on real counters. `tests/test_fixture_privacy.py` scans them. `scripts/payload-shape.py diff` shows added, removed and retyped keys between two CLI versions. `CONTRIBUTING.md` has the steps. Reason: 2.6 found two edit budgets whose fake-payload tests passed while the real count was 0.
+- `MITOSIS_CAPTURE_PAYLOADS=<absolute dir>`, off by default, records raw hook payloads for that flow. The file holds your prompts and paths: see `SECURITY.md`.
+- Doctor rows `codex.worker_same_as_primary` (info) and `codex.pinned_models` (a warning when Codex's own model list does not contain a pinned model). When a CLI is newer than the verified one, the info row names the fixtures to compare with, and the exit code stays as it was.
+- Heartbeat counter `breaker`: advised, denied, neutral.
+- `evals/builtin-pin/`: a sealed experiment on `CLAUDE_MITOSIS_PIN_BUILTINS` (see below).
+
+### Fixed
+- **agy: the breaker could never fire.** It was reset at every model call, and agy 1.5.0 sends `error: ""` and no result for a command that exits non-zero, so it never saw a failed command at all. The exit code is now read from the transcript at the next model call, which is when the step is written. A read-only command that exits 0 or 1, a `cd x && grep` with no match and predicates such as `test -f` neither count nor clear the streak, and neither does a subagent call. Hooks do not run inside agy subagents, so a worker's own test loop is not counted.
+- **Codex: the hook's `cwd` is the command's working directory,** not the turn's. A `workdir=/etc` counted as inside the workspace, and a `/worktrees/` workdir made the primary look like a subagent and skip its checks. Roots and the primary check now use the turn's directory from `UserPromptSubmit`.
+- **`agy plugin validate --strict` passes.** It warned that `hooks/hooks.json` is never loaded.
+- Doctor: a relative `--root` failed every offline probe; a malformed model cache or an oversized manifest value could crash it.
+- Corrected a code comment that claimed `permissionOverrides` satisfy agy's headless permission check (see below).
+
+### Found, not fixable here
+- **agy 1.5.0 print mode ignores a hook's `permissionOverrides`.** A `write_file` in a home folder is denied with the exact rule sent, under decision `allow` and under `ask`, while the same rule in `--settings` works. `**`, `*` and a bare `write_file` do not match. `--mode accept-edits` works everywhere tested. A real path under `/tmp` writes without either; `/var/tmp` and `/dev/shm` do not. 14 runs plus 1. Interactive mode was not tested.
+- `*_MITOSIS_AUTO_ALLOW` is a convenience that reads command text, not a security boundary. Shell syntax such as `cat ../"../x"`, brace expansion, globs and symlinks can still get past it.
+
+### Measured: pinning the built-in Explore agent
+- `CLAUDE_MITOSIS_PIN_BUILTINS=1` (Explore on haiku at low effort) against Explore inheriting opus at medium, on 36 sealed lookup runs: 90 of 90 correct in both arms, median 0.2162 against 0.4213 USD per run, 51.3%, cheaper in 18 of 18 pairs, none invalid. Outcome under the sealed rule: SUPPORTED.
+- **Read the limits in `evals/builtin-pin/RESULTS.md`.** Both arms hit the ceiling, so the questions could not show a quality difference. The prompt forces one Explore call in every run, so a real session saves less. The default stays off, as fixed before the runs.
+
+### Not changed
+- `routing.py` is unchanged, so no new routing holdout was written.
+- agy's `lastUserInput`, `terminationBehavior`, `errorMessage` and Codex's `SubagentStart`, `PreCompact`, `PostCompact`, `PermissionRequest` are not used: none of them fixes a real problem here.
+
+### Verification
+- See the release notes for live runs on each CLI. Breaker on real agy 1.5.0: advice once, denial on the third step in enforce, no count for `grep` exit 1, no clearing by a subagent, reset on a new turn. New Claude hooks file on Claude Code 2.1.318: each event fired once, with `CLAUDE_PLUGIN_ROOT` set.
+- White-box review with reproduced probes before release. The oracle and census were not rerun locally, and `guards.py` scout rules did not change.
+
 ## 2.6.0 - 2026-11-04
 
 **After updating, do this.** On Codex, open Codex once and accept the hook review, then run `python3 scripts/mitosis-doctor.py`. On Claude Code, start a new session. **To keep the old blocking behaviour, set `*_MITOSIS_FASTPATH_MODE=enforce`.**

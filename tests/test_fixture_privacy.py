@@ -184,7 +184,7 @@ S1_SURVIVORS = (
     ("status sentence", _line({"tool_response": {"status": "Alice Wang fired 2026-11-04"}})),
     ("results source", _line({"tool_response": {"results": [{"source": "Acme Q3 layoffs plan.docx", "type": "doc"}]}})),
     ("model sentence", _line({"model": "Acme payroll export 0912345678"})),
-    ("source address", _line({"source": "192.168.1.141:8100"})),
+    ("source address", _line({"source": "203.0.113.7:8100"})),
     ("type hex", _line({"type": "01a15f9118624122a482edb5acadc197"})),
     ("status jwt", _line({"status": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc"})),
     ("tool name sentence", _line({"toolCall": {"name": "Acme payroll 0912345678"}})),
@@ -383,7 +383,7 @@ class TestSanitizer(unittest.TestCase):
 
     def test_free_text_in_name_keys_becomes_a_placeholder(self):
         out, text = self.run_one({
-            "status": "Alice Wang fired 2026-11-04", "model": "Acme payroll export 0912345678", "source": "192.168.1.141:8100",
+            "status": "Alice Wang fired 2026-11-04", "model": "Acme payroll export 0912345678", "source": "203.0.113.7:8100",
             "type": "01a15f9118624122a482edb5acadc197", "toolCall": {"name": "Acme payroll 0912345678"},
         }, {"decision": "Plan for Alice"})
         self.assertEqual(out[1]["payload"], {"status": "__STR__", "model": "__STR__", "source": "__STR__", "type": "__STR__", "toolCall": {"name": "__STR__"}})
