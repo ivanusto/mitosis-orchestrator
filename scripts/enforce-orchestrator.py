@@ -319,6 +319,7 @@ from mitosis_hook.guards import (  # noqa: F401,E402
     _REDIRECT_RE,
     _SCOUT_HARMLESS_REDIRECT_RE,
     _agent_call_bodies,
+    _codex_nonposix_shell_reachable,
     _extract_apply_patch_files,
     _iter_strings,
     _parse_codex_exec,

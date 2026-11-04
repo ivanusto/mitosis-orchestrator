@@ -4,6 +4,7 @@ import ntpath
 import os
 import re
 import shlex
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -255,6 +256,16 @@ def _is_windows_path(text: Any) -> bool:
 
 def _windows_mode(roots: List[Path]) -> bool:
     return os.name == "nt" or any(_is_windows_path(r) for r in roots)
+
+
+def _codex_nonposix_shell_reachable() -> bool:
+    """True when a Codex exec_command could be given a PowerShell. The tool takes a `shell` argument that the
+    hook payload does not carry, so on a POSIX host with pwsh a scout can get PowerShell parsing while the
+    POSIX rules read the text. Strict when the check itself fails."""
+    try:
+        return bool(shutil.which("pwsh") or shutil.which("powershell") or os.path.exists("/usr/local/bin/pwsh"))
+    except Exception:
+        return True
 
 
 def _win_norm(text: str) -> str:

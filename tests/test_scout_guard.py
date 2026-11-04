@@ -10,6 +10,7 @@ import shutil
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scout_limits  # noqa: E402
@@ -296,8 +297,58 @@ class TestScoutHook(EnvCase):
 
     @unittest.skipIf(os.name == "nt", "os.name selects the strict rules on Windows whatever the cwd")
     def test_codex_explorer_with_posix_cwd_uses_posix_rules(self):
-        self.assertEqual(self.codex("rg -n 'a|b' .", str(self.project)), {})
-        self.assertEqual(self.decision(self.codex("ls & rm x", str(self.project))), "deny")
+        with self.which_only():
+            self.assertEqual(self.codex("rg -n 'a|b' .", str(self.project)), {})
+            self.assertEqual(self.decision(self.codex("ls & rm x", str(self.project))), "deny")
+
+    PWSH_TRICK = "echo \\' '; rm x; #'"
+
+    @staticmethod
+    def which_only(*names):
+        """shutil.which finds only these programs, and /usr/local/bin/pwsh exists only when 'pwsh-path' is named."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def cm():
+            real_exists = os.path.exists
+            with mock.patch("mitosis_hook.guards.shutil.which", side_effect=lambda n, *a, **k: "/x/" + n if n in names else None), \
+                    mock.patch("mitosis_hook.guards.os.path.exists",
+                               side_effect=lambda p: "pwsh-path" in names if p == "/usr/local/bin/pwsh" else real_exists(p)):
+                yield
+        return cm()
+
+    def test_nonposix_shell_reachable_checks_which_and_the_fixed_path(self):
+        reachable = eo.guards._codex_nonposix_shell_reachable
+        with self.which_only():
+            self.assertFalse(reachable())
+        for names in (("pwsh",), ("powershell",), ("pwsh-path",)):
+            with self.which_only(*names):
+                self.assertTrue(reachable(), names)
+        with mock.patch("mitosis_hook.guards.shutil.which", side_effect=OSError("boom")):
+            self.assertTrue(reachable(), "a failing check must be strict")
+
+    @unittest.skipIf(os.name == "nt", "os.name selects the strict rules on Windows whatever the cwd")
+    def test_codex_explorer_with_pwsh_on_a_posix_host_is_strict(self):
+        self.assertEqual(eo.scout_command_is_read_only(self.PWSH_TRICK), (True, ""), "POSIX rules let this through")
+        with self.which_only("pwsh"):
+            self.assertEqual(self.codex("rg foo src | head -5", str(self.project)), {})
+            for cmd in (self.PWSH_TRICK, "rg -n 'a|b' .", "ls; rm x"):
+                result = self.codex(cmd, str(self.project))
+                self.assertEqual(self.decision(result), "deny", cmd)
+            reason = self.codex("rg 'a|b' .", str(self.project))["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("PowerShell", reason)
+
+    @unittest.skipIf(os.name == "nt", "os.name selects the strict rules on Windows whatever the cwd")
+    def test_codex_explorer_without_pwsh_keeps_posix_rules(self):
+        with self.which_only():
+            self.assertEqual(self.codex("rg -n 'a|b' .", str(self.project)), {})
+            reason = self.codex("ls & rm x", str(self.project))["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertNotIn("PowerShell", reason)
+
+    def test_claude_scout_keeps_posix_rules_even_with_pwsh(self):
+        with self.which_only("pwsh", "powershell", "pwsh-path"):
+            self.assertEqual(self.claude("rg -n 'a|b' ."), {})
+            self.assertEqual(self.decision(self.claude("ls & rm x")), "deny")
 
     def test_worker_is_unaffected(self):
         self.assertEqual(self.claude("ls & rm x", agent_type=self.WORKER), {})

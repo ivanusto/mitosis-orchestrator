@@ -32,6 +32,7 @@ from .guards import (
     WRITE_TOOL_RE,
     _extract_apply_patch_files,
     _parse_codex_exec,
+    _codex_nonposix_shell_reachable,
     _windows_mode,
     _within_roots,
     allowed_roots,
@@ -381,10 +382,16 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
         if tool_name in ("Bash", "shell", "exec_command", "local_shell"):
             cmd = str(_get(args, "command", "cmd", default="") or "")
-            # Codex on Windows may run PowerShell or cmd. A Claude scout's only shell is Bash (Git Bash there).
-            ok, why = scout_command_is_read_only(
-                cmd, strict_windows=is_codex_hook_payload(payload) and _windows_mode(allowed_roots(payload))
-            )
+            # Codex on Windows may run PowerShell or cmd. A Claude scout's only shell is Bash or zsh. Codex's
+            # exec_command lets the model pick the shell, so a POSIX host with pwsh gets the strict rules too.
+            codex = is_codex_hook_payload(payload)
+            on_windows = codex and _windows_mode(allowed_roots(payload))
+            via_pwsh = codex and not on_windows and _codex_nonposix_shell_reachable()
+            ok, why = scout_command_is_read_only(cmd, strict_windows=bool(on_windows or via_pwsh))
+            if not ok and via_pwsh:
+                why += (". This host has PowerShell, which Codex may pick for exec_command and which parses quotes and "
+                        "backslashes differently, so quotes, backslashes, redirects, globs and ; & are refused: "
+                        "use plain words and | only")
             if not ok:
                 return _deny(
                     f"[Mitosis Orchestrator] {agent_type} runs read-only commands only ({why}). "
