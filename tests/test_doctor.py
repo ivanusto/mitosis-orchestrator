@@ -591,6 +591,18 @@ class TestStatic(DoctorCase):
         self.assertEqual(self.status(checks, "claude.files"), "OK")
         self.assertEqual(self.status(checks, "claude.probe.scout"), "OK")
 
+    def test_claude_manifest_hooks_path_too_long_for_the_os_falls_back(self):
+        tree = self.fx.claude_tree
+        (tree / "hooks" / "claude-hooks.json").rename(tree / "hooks" / "hooks.json")
+        manifest = tree / ".claude-plugin" / "plugin.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["hooks"] = "x" * 5000
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        rc, out, err = self.fx.run("--json", "--platform", "claude")
+        self.assertNotIn("Traceback", err)
+        checks = {c["id"]: c for c in json.loads(out)["checks"]}
+        self.assertIn("claude.files", checks)  # Linux falls back and says OK; Windows may just call the path missing
+
     def test_stale_version_warns(self):
         p = self.fx.home / ".claude" / "plugins" / "installed_plugins.json"
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -670,6 +682,57 @@ class TestStatic(DoctorCase):
         self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
         (self.fx.home / ".codex" / "models_cache.json").write_text('{"models": "x"}', encoding="utf-8")
         self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
+
+    def _cache_text(self, text):
+        (self.fx.home / ".codex" / "models_cache.json").write_text(text, encoding="utf-8")
+
+    def test_codex_models_cache_with_unusable_slugs_adds_no_row_and_no_traceback(self):
+        for text in ('{"models":[{"slug":["x"]}]}', '{"models":[]}', '{"models":[1,"a",null]}', '{"models":[{"slug":5},{"slug":""}]}'):
+            self._cache_text(text)
+            rc, out, err = self.fx.run("--json", "--platform", "codex")
+            self.assertNotIn("Traceback", err, text)
+            checks = {c["id"]: c for c in json.loads(out)["checks"]}
+            self.assertNotIn("codex.pinned_models", checks, text)
+            self.assertEqual(rc, 0, text)
+
+    def test_codex_models_cache_unusable_slug_next_to_a_real_list_still_warns(self):
+        m = models()["codex"]
+        self._cache_text(json.dumps({"models": [{"slug": ["x"]}, {"slug": m["scout"]["model"]}]}))
+        row = self.fx.checks("--platform", "codex")["codex.pinned_models"]
+        self.assertEqual(row["status"], "WARN")
+        self.assertIn(m["worker"]["model"], row["message"])
+
+    def test_codex_nothing_pinned_adds_no_pinned_models_row(self):
+        self._models_cache(["other"])
+        (self.fx.codex_tree / "spec" / "models.toml").write_text("codex = 5\n", encoding="utf-8")
+        self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
+
+    def test_pin_row_lists_only_what_it_checked(self):
+        class Rows:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, *row):
+                self.rows.append(row)
+
+        rows = Rows()
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "models_cache.json").write_text(json.dumps({"models": [{"slug": "w1"}]}), encoding="utf-8")
+            doctor.check_codex_pinned_models(rows, "codex", {}, Path(tmp), {"codex": {"worker": {"model": "w1"}}})
+            self.assertEqual([(r[1], r[2]) for r in rows.rows], [("pinned_models", "OK")])
+            self.assertIn("w1", rows.rows[0][3])
+            self.assertNotIn("scout", rows.rows[0][3])
+            rows.rows.clear()
+            doctor.check_codex_pinned_models(rows, "codex", {}, Path(tmp), None)
+            doctor.check_codex_pinned_models(rows, "codex", {}, Path(tmp), {"codex": 5})
+            self.assertEqual(rows.rows, [])
+
+    def test_pin_mismatch_text_covers_inherited_children_too(self):
+        self.fx.heartbeat("codex", pin={"verified": 0, "mismatch": 2, "unknown": 0})
+        row = self.fx.checks("--platform", "codex")["codex.heartbeat.pin"]
+        self.assertEqual(row["status"], "WARN")
+        self.assertIn("inherited", row["message"])
+        self.assertNotIn("ran on another model", row["message"])
 
     def test_codex_missing_role_file(self):
         (self.fx.home / ".codex" / "agents" / "worker.toml").unlink()

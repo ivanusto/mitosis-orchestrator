@@ -402,6 +402,10 @@ def claude_hooks_rel(root: Path) -> str:
         if rel.startswith("./"):
             rel = rel[2:]
         if rel and not rel.startswith("/") and ".." not in rel.split("/"):
+            try:
+                (root / rel).is_file()  # a name the OS rejects (too long) raises on some Python versions
+            except (OSError, ValueError):
+                return "hooks/hooks.json"
             return rel
     return "hooks/hooks.json"
 
@@ -610,7 +614,7 @@ def check_heartbeat(ctx: Ctx, platform: str, installed: Optional[str]) -> None:
         ctx.add(platform, "heartbeat.stdin", OK, "no stdin decoding damage recorded")
     mismatch = dig(data, "pin", "mismatch")
     if isinstance(mismatch, int) and mismatch > 0:
-        ctx.add(platform, "heartbeat.pin", WARN, "%d pin mismatch(es) recorded: a subagent ran on another model than pinned" % mismatch)
+        ctx.add(platform, "heartbeat.pin", WARN, "%d pin mismatch(es) recorded: a subagent did not run on the pinned model (another model, or one that looks inherited from the parent)" % mismatch)
     else:
         ctx.add(platform, "heartbeat.pin", OK, "no pin mismatch recorded")
     seen = data.get("plugin_version")
@@ -1063,19 +1067,24 @@ def check_codex_pinned_models(ctx: Ctx, p: str, cfg: Any, xdir: Path, models: Op
     if worker and isinstance(primary, str) and primary == worker:
         ctx.add(p, "worker_same_as_primary", OK,
                 "the primary model is also the worker model (`%s`): the worker differs from the primary only by reasoning effort" % safe(worker))
+    pinned = [m for m in (scout, worker) if m]
+    if not pinned:
+        return  # nothing is pinned, so there is nothing to look for
     cache, cerr = load_json(xdir / "models_cache.json")
     listed = cache.get("models") if cerr is None and isinstance(cache, dict) else None
     if not isinstance(listed, list):
         return
-    slugs = {m.get("slug") for m in listed if isinstance(m, dict)}
-    absent = [m for m in (scout, worker) if m and m not in slugs]
+    slugs = {m["slug"] for m in listed if isinstance(m, dict) and isinstance(m.get("slug"), str) and m["slug"]}
+    if not slugs:
+        return  # an empty list, or one with no usable slug, says nothing about the pin
+    absent = [m for m in pinned if m not in slugs]
     if absent:
         ctx.add(p, "pinned_models", WARN,
                 "pinned model(s) not in Codex's models_cache.json: %s. To go back to the earlier models run "
                 "`CODEX_MITOSIS_WORKER_MODEL=gpt-5.6-terra CODEX_MITOSIS_SCOUT_MODEL=gpt-5.6-luna python3 scripts/setup-codex.py` "
                 "and keep both variables exported for Codex" % ", ".join("`%s`" % safe(m) for m in absent))
     else:
-        ctx.add(p, "pinned_models", OK, "the pinned scout and worker models are listed in models_cache.json")
+        ctx.add(p, "pinned_models", OK, "the pinned model(s) %s are listed in models_cache.json" % ", ".join("`%s`" % safe(m) for m in pinned))
 
 
 def check_codex(ctx: Ctx) -> None:

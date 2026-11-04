@@ -11,10 +11,11 @@ _TAIL_BYTES = 1024 * 1024
 _SYNTHETIC = "<synthetic>"  # Claude Code's marker for messages no model produced
 
 
-def _tail_records(path: Any) -> Iterator[Dict[str, Any]]:
-    """JSON objects from the last _TAIL_BYTES of a JSONL file, oldest first. Empty on any problem."""
+def _read_records(path: Any) -> Tuple[List[Dict[str, Any]], bool]:
+    """(records, whole): JSON objects from the last _TAIL_BYTES of a JSONL file, oldest first, and whether
+    that window is the whole file. Empty and False on any problem."""
     if not isinstance(path, str) or not path:
-        return
+        return [], False
     try:
         with open(path, "rb") as fh:
             fh.seek(0, 2)
@@ -23,10 +24,11 @@ def _tail_records(path: Any) -> Iterator[Dict[str, Any]]:
             fh.seek(start)
             data = fh.read(_TAIL_BYTES)
     except OSError:
-        return
+        return [], False
     lines = data.split(b"\n")
     if start > 0:
         lines = lines[1:]  # the first line was cut by the seek
+    records: List[Dict[str, Any]] = []
     for line in lines:
         if not line.strip():
             continue
@@ -35,7 +37,13 @@ def _tail_records(path: Any) -> Iterator[Dict[str, Any]]:
         except ValueError:
             continue
         if isinstance(record, dict):
-            yield record
+            records.append(record)
+    return records, start == 0
+
+
+def _tail_records(path: Any) -> Iterator[Dict[str, Any]]:
+    """JSON objects from the last _TAIL_BYTES of a JSONL file, oldest first. Empty on any problem."""
+    return iter(_read_records(path)[0])
 
 
 def claude_transcript_models(path: Any) -> List[str]:
@@ -92,11 +100,15 @@ def codex_rollout_turns(path: Any) -> Tuple[Optional[Tuple[str, str]], Optional[
     A child rollout starts with a copy of its parent's turn_context, so with two or more records the
     first one is the parent's and the last is the child's. Effort is "" when the record has none
     (field name `effort`), and a record without a model is skipped.
+
+    Only the last _TAIL_BYTES are read. When the file is longer, the first record seen is not known to be
+    the parent's copy, so `first` is None: the parent rule needs the whole file.
     """
     first: Optional[Tuple[str, str]] = None
     last: Optional[Tuple[str, str]] = None
     count = 0
-    for record in _tail_records(path):
+    records, whole = _read_records(path)
+    for record in records:
         if record.get("type") != "turn_context":
             continue
         payload = record.get("payload")
@@ -111,6 +123,8 @@ def codex_rollout_turns(path: Any) -> Tuple[Optional[Tuple[str, str]], Optional[
             first = turn
         last = turn
         count += 1
+    if not whole:
+        first = None
     return first, last, count
 
 
@@ -135,6 +149,7 @@ def record_pin_verdict(record: Dict[str, Any], expected: Any, models: List[str])
     verdict, actual = pin_verdict(expected, models)
     if verdict is not None or "pin_verified" not in record:
         record["pin_verified"] = verdict
+        record.pop("pin_note", None)  # a note belongs to the verdict it explained
         if actual:
             record["actual_model"] = actual
     return verdict
@@ -149,7 +164,8 @@ def record_codex_pin_verdict(record: Dict[str, Any], expected_model: Any, expect
     an effort on both sides, a child that differs from the parent in (model, effort) was set by the
     pin; one equal to the parent and not to the expected effort inherited; one equal to both cannot
     be told apart (None). Effort never turns a model match into a mismatch except in that inherited
-    case. Without a known parent or without effort the verdict is the model-only one.
+    case. Without a known parent (a rollout longer than the window read gives first=None) or without
+    effort the verdict is the model-only one.
     """
     first, last, count = turns
     models = [last[0]] if last else []

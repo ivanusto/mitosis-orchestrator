@@ -596,6 +596,52 @@ class CodexPinTest(_EnvBase):
         self.assertEqual(pv.codex_rollout_turns("/nonexistent"), (None, None, 0))
         self.assertEqual(pv.codex_rollout_models(path), ["b"])
 
+    def big_rollout(self, records_before, records_after):
+        """parent copy, a line larger than the window, then the child's own turn_contexts."""
+        pad = {"type": "event_msg", "pad": "x" * (pv._TAIL_BYTES + 100000)}
+
+        def ctx(model, effort):
+            return {"type": "turn_context", "payload": {"model": model, "effort": effort}}
+
+        path = self.jsonl([ctx(*c) for c in records_before] + [pad] + [ctx(*c) for c in records_after], "big-rollout.jsonl")
+        self.assertGreater(Path(path).stat().st_size, pv._TAIL_BYTES)
+        return path
+
+    def test_25_cut_window_does_not_look_inherited_and_keeps_earlier_true(self):
+        path = self.big_rollout([(OLD_M, "high")], [(WORKER_M, "high"), (WORKER_M, "high")])
+        turns = pv.codex_rollout_turns(path)
+        self.assertEqual((turns[0], turns[1], turns[2]), (None, (WORKER_M, "high"), 2))
+        rec = {"pin_verified": True, "actual_model": WORKER_M}
+        self.assertIs(pv.record_codex_pin_verdict(rec, WORKER_M, "medium", turns), True)
+        self.assertIs(rec["pin_verified"], True)
+        self.assertNotIn("pin_note", rec)
+
+    def test_25b_cut_window_first_stop_is_model_only_not_unknown(self):
+        path = self.big_rollout([(OLD_M, "high")], [(WORKER_M, "medium"), (WORKER_M, "medium")])
+        rec = {}
+        self.assertIs(pv.record_codex_pin_verdict(rec, WORKER_M, "medium", pv.codex_rollout_turns(path)), True)
+        self.assertIs(rec["pin_verified"], True)
+
+    def test_25c_whole_file_keeps_the_parent_rule(self):
+        path = self.jsonl([{"type": "turn_context", "payload": {"model": WORKER_M, "effort": "high"}},
+                           {"type": "turn_context", "payload": {"model": WORKER_M, "effort": "high"}}])
+        rec = {}
+        self.assertIs(pv.record_codex_pin_verdict(rec, WORKER_M, "medium", pv.codex_rollout_turns(path)), False)
+        self.assertIn("inherited", rec["pin_note"])
+
+    def test_26_a_later_stop_on_another_model_clears_the_stale_note(self):
+        rec = {}
+        pv.record_codex_pin_verdict(rec, WORKER_M, "medium", ((WORKER_M, "high"), (WORKER_M, "high"), 2))
+        self.assertIn("inherited", rec["pin_note"])
+        pv.record_codex_pin_verdict(rec, WORKER_M, "medium", ((OLD_M, "high"), (OLD_M, "high"), 2))
+        self.assertIs(rec["pin_verified"], False)
+        self.assertEqual(rec["actual_model"], OLD_M)
+        self.assertNotIn("pin_note", rec)
+        claude = {"pin_verified": False, "pin_note": "looks inherited: stale"}
+        pv.record_pin_verdict(claude, "haiku", [HAIKU])
+        self.assertIs(claude["pin_verified"], True)
+        self.assertNotIn("pin_note", claude)
+
     def test_24_unknown_is_counted_as_unknown_in_heartbeat(self):
         from mitosis_hook import handlers
         seen = []
