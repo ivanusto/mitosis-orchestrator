@@ -559,6 +559,30 @@ def check_heartbeat(ctx: Ctx, platform: str, installed: Optional[str]) -> None:
         ctx.add(platform, "heartbeat.age", UNKNOWN, "no hook event for %s (over %d days): cannot tell if it still works" % (age_text(now - last), HEARTBEAT_STALE_DAYS))
     else:
         ctx.add(platform, "heartbeat.age", OK, "last hook event %s ago" % age_text(now - last))
+    check_report_rejections(ctx, platform, data)
+
+
+def _class_counts(value: Any) -> List[Tuple[str, int]]:
+    """(class name, count) pairs from a heartbeat map. Names must look like identifiers: nothing else is shown."""
+    if not isinstance(value, dict):
+        return []
+    out = [(k, v) for k, v in value.items()
+           if isinstance(k, str) and _CLASS_RE.match(k) and isinstance(v, int) and not isinstance(v, bool) and v > 0]
+    return sorted(out)[:12]
+
+
+def check_report_rejections(ctx: Ctx, platform: str, data: Dict[str, Any]) -> None:
+    """Informational: why subagent reports were rejected, by class name only. Never a warning by itself,
+    because a rejected report is the gate working (and one that was fixed counts again)."""
+    parts = []
+    for label, key in (("scout", "report_bad_scout"), ("worker", "report_bad_worker")):
+        pairs = _class_counts(data.get(key))
+        if pairs:
+            parts.append("%s: %s" % (label, ", ".join("%s=%d" % (safe(k, 48), n) for k, n in pairs)))
+    if parts:
+        ctx.add(platform, "heartbeat.report", OK, "info: subagent reports rejected by class: " + "; ".join(parts))
+    else:
+        ctx.add(platform, "heartbeat.report", OK, "info: no rejected subagent report recorded")
 
 
 # --------------------------------------------------------------------------- Codex hook trust (offline)
@@ -916,6 +940,22 @@ def newest_version_dir(base: Path) -> Optional[Path]:
     return dirs[-1] if dirs else None
 
 
+def check_scout_shell_rules(ctx: Ctx, platform: str) -> None:
+    """Informational. Which rule set the hook applies to a Codex scout's shell command: Codex's exec_command
+    lets the model pick the shell, so a host where pwsh or powershell exists gets the strict rules, which
+    refuse quotes, backslashes, redirects, globs and ; &. Same test as guards._codex_nonposix_shell_reachable."""
+    try:
+        found = shutil.which("pwsh") or shutil.which("powershell") or ("/usr/local/bin/pwsh" if os.path.exists("/usr/local/bin/pwsh") else None)
+    except Exception:
+        found = "unknown (the check failed)"
+    if os.name == "nt":
+        ctx.add(platform, "scout_shell_rules", OK, "info: strict (Windows host): scout commands may not use quotes, backslashes, redirects, globs, ; or &")
+    elif found:
+        ctx.add(platform, "scout_shell_rules", OK, "info: strict (PowerShell reachable: %s): scout commands may not use quotes, backslashes, redirects, globs, ; or &" % safe(os.path.basename(str(found)), 40))
+    else:
+        ctx.add(platform, "scout_shell_rules", OK, "info: posix (no pwsh or powershell found)")
+
+
 def check_codex(ctx: Ctx) -> None:
     p = "codex"
     env_home = os.environ.get("CODEX_HOME")
@@ -979,6 +1019,7 @@ def check_codex(ctx: Ctx) -> None:
         else:
             ctx.add(p, "role." + role, WARN, "model differs from spec/models.toml (expected `%s`); fine if you chose it" % safe(want))
     offline_probe(ctx, p, root)
+    check_scout_shell_rules(ctx, p)
     check_heartbeat(ctx, p, version)
 
 

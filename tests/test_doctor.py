@@ -297,6 +297,31 @@ class TestHeartbeat(DoctorCase):
         self.assertIn("2h", checks["claude.heartbeat.error"]["message"])
         self.assertEqual(self.fx.last_rc, 1)
 
+    def test_report_rejection_row_is_informational_and_names_classes_only(self):
+        self.fx.heartbeat("claude", report_bad_scout={"missing_status": 2, "not an id!": 5, "bad_value": "x"},
+                          report_bad_worker={"no_log_uri": 1}, free_text={"secret": MARKER})
+        rc, out, _ = self.fx.run("--platform", "claude")
+        checks = self.fx.checks("--platform", "claude")
+        row = checks["claude.heartbeat.report"]
+        self.assertEqual(row["status"], "OK")
+        self.assertIn("scout: missing_status=2", row["message"])
+        self.assertIn("worker: no_log_uri=1", row["message"])
+        self.assertNotIn("not an id", row["message"])
+        self.assertNotIn("bad_value", row["message"])
+        self.assertNotIn(MARKER, out + row["message"])
+        self.assertEqual(self.fx.last_rc, 0, "a rejected report alone must not raise the exit code")
+
+    def test_report_rejection_row_without_counts(self):
+        checks = self.fx.checks("--platform", "claude")
+        self.assertEqual(checks["claude.heartbeat.report"]["status"], "OK")
+        self.assertIn("no rejected", checks["claude.heartbeat.report"]["message"])
+
+    def test_report_rejection_row_ignores_junk_shapes(self):
+        self.fx.heartbeat("claude", report_bad_scout=["x"], report_bad_worker={"a": -3, "b": True})
+        checks = self.fx.checks("--platform", "claude")
+        self.assertEqual(checks["claude.heartbeat.report"]["status"], "OK")
+        self.assertIn("no rejected", checks["claude.heartbeat.report"]["message"])
+
     def test_old_heartbeat_is_unknown(self):
         self.fx.heartbeat("claude", last_event_at=int(time.time()) - 15 * 86400)
         checks = self.fx.checks("--platform", "claude")
@@ -305,6 +330,27 @@ class TestHeartbeat(DoctorCase):
     def test_corrupt_heartbeat_is_unknown(self):
         (self.fx.hb_dir / "heartbeat-claude.json").write_text("{not json", encoding="utf-8")
         self.assertEqual(self.status(self.fx.checks("--platform", "claude"), "claude.heartbeat"), "UNKNOWN")
+
+
+class TestCodexScoutShellRules(DoctorCase):
+    @unittest.skipIf(os.name == "nt", "PATH shims are POSIX here")
+    def test_row_says_posix_without_pwsh_and_strict_with_it(self):
+        only_bin = str(self.fx.bin)
+        checks = self.fx.checks("--platform", "codex", path=only_bin)
+        row = checks["codex.scout_shell_rules"]
+        if os.path.exists("/usr/local/bin/pwsh"):
+            self.skipTest("a real /usr/local/bin/pwsh exists on this host")
+        self.assertEqual(row["status"], "OK")
+        self.assertIn("posix", row["message"])
+        shim = self.fx.bin / "pwsh"
+        shim.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+        checks = self.fx.checks("--platform", "codex", path=only_bin)
+        self.assertIn("strict", checks["codex.scout_shell_rules"]["message"])
+        self.assertEqual(checks["codex.scout_shell_rules"]["status"], "OK")
+
+    def test_claude_has_no_such_row(self):
+        self.assertNotIn("claude.scout_shell_rules", self.fx.checks("--platform", "claude"))
 
 
 class TestStatic(DoctorCase):
