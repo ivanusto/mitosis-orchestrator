@@ -100,33 +100,115 @@ class TestCommittedFixtures(unittest.TestCase):
                     self.assertEqual(sorted(json.loads(line)), ["mode", "payload", "result"])
 
     def test_values_are_placeholders_or_allowlisted(self):
-        """Every string in a fixture is a placeholder, an enum-like name or a canned command. Nothing else."""
-        free = re.compile(r"^(__[A-Z]+[0-9]*__(/__NAME__|/[A-Za-z0-9_.-]+)*|Exit code \d+(\n__TEXT__)?|Process exited with code \d+(\n__TEXT__)?)$")
-
-        def strings(node, key=""):
-            if isinstance(node, dict):
-                for k, v in node.items():
-                    yield from strings(v, k)
-            elif isinstance(node, list):
-                for item in node:
-                    yield from strings(item, key)
-            elif isinstance(node, str):
-                yield key, node
-
+        """Every key and string in a fixture passes the sanitizer's own per-key rules. Nothing else survives."""
         for path in FIXTURES.glob("*/*/*.jsonl"):
             lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()[1:]]
-            for line in lines:
-                for key, text in strings(line):
-                    if key in san.NAME_KEYS or key == "name" or key == "mode":
-                        ok = bool(san.NAME_RE.match(text))
-                    elif key in san.COMMAND_KEYS:
-                        ok = text in san.CANNED_COMMANDS or free.match(text) or text.startswith("*** Begin Patch")
-                    elif text.startswith("{"):
-                        ok = "__TEXT__" in text or "__ID" in text or "timed_out" in text
-                    else:
-                        ok = text == "" or text == san.FAKE_OPAQUE or free.match(text)
-                    with self.subTest(fixture=path.name, key=key):
-                        self.assertTrue(ok, "unexpected value under %r" % key)
+            for number, line in enumerate(lines, 2):
+                with self.subTest(fixture=path.name, line=number):
+                    self.assertEqual(violations(line), [])
+
+
+def key_ok(name, free):
+    if san.KEY_PLACEHOLDER_RE.match(name):
+        return True
+    if free:
+        return name in san.FREE_KEYS
+    return name in san.KNOWN_KEYS or bool(san.PLAIN_KEY_RE.match(name))
+
+
+def string_ok(key, text):
+    """The sanitizer's own rule for this key, imported from it; keys without a rule must hold a placeholder."""
+    verdict = san.rule_allows(key, text)
+    if verdict is not None:
+        return verdict
+    if text == "" or text == san.FAKE_OPAQUE:
+        return True
+    if key in san.COMMAND_KEYS and (text in san.CANNED_COMMANDS or text.startswith("*** Begin Patch")):
+        return True
+    head = san.EXIT_PREFIX_RE.match(text)
+    if head and text[head.end():] in ("", "\n__TEXT__"):
+        return True
+    return bool(re.match(r"^__[A-Z]+(?:_[A-Z]+)*[0-9]*__(/__NAME__|/[A-Za-z0-9_.-]+)*$", text))
+
+
+def violations(node, key="", parent="", free=False):
+    """What in one fixture line breaks the sanitizer's rules: key names, string values, ints, floats.
+    A JSON string is parsed and every value inside it is checked, so a __TEXT__ sibling hides nothing."""
+    found = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if not key_ok(k, free):
+                found.append("key %r" % k)
+            found += violations(v, k, key, san.child_is_free(k, node, key, free))
+    elif isinstance(node, list):
+        for item in node:
+            found += violations(item, key, parent, free)
+    elif isinstance(node, bool) or node is None:
+        pass
+    elif isinstance(node, int):
+        limit = san.INT_MAX if key in san.INT_KEYS else san.SMALL_INT
+        if abs(node) > limit:
+            found.append("int under %r" % key)
+    elif isinstance(node, float):
+        if node != 0.0:
+            found.append("float under %r" % key)
+    elif isinstance(node, str):
+        inner = None
+        if node.lstrip()[:1] in ("{", "[") and san.rule_allows(key, node) is None:
+            try:
+                inner = json.loads(node)
+            except ValueError:
+                inner = None
+        if isinstance(inner, (dict, list)):
+            found += violations(inner, key, parent, free or key == "tool_response")
+        elif not string_ok(key, node):
+            found.append("value under %r" % key)
+    return found
+
+
+def tree_violations(directory):
+    found = []
+    for path in sorted(Path(directory).rglob("*.jsonl")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            obj = json.loads(line)
+            if "_meta" not in obj:
+                found += ["%s:%d: %s" % (path.relative_to(directory).as_posix(), number, v) for v in violations(obj)]
+    return found
+
+
+def _line(payload=None, result=None):
+    return {"mode": "stop", "payload": payload or {}, "result": result or {}}
+
+
+S1_SURVIVORS = (
+    ("status sentence", _line({"tool_response": {"status": "Alice Wang fired 2026-11-04"}})),
+    ("results source", _line({"tool_response": {"results": [{"source": "Acme Q3 layoffs plan.docx", "type": "doc"}]}})),
+    ("model sentence", _line({"model": "Acme payroll export 0912345678"})),
+    ("source address", _line({"source": "192.168.1.141:8100"})),
+    ("type hex", _line({"type": "01a15f9118624122a482edb5acadc197"})),
+    ("status jwt", _line({"status": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc"})),
+    ("tool name sentence", _line({"toolCall": {"name": "Acme payroll 0912345678"}})),
+    ("mcp tool name", _line({"toolCall": {"name": "mcp__acme-payroll__get_salary"}})),
+    ("role and type name", _line({"toolCall": {"name": "invoke_subagent", "args": {"Role": "Auditor of Acme payroll fraud", "TypeName": "Acme-private-agent"}}})),
+    ("json string status", _line({"tool_response": "{\"status\":\"Alice Wang fired\"}"})),
+    ("result decision", _line(result={"decision": "Plan for Alice"})),
+    ("short opaque model", _line({"model": "gAAAAABq2ZqgkxWOcFgr1V5_lfPD"})),
+)
+S2_SURVIVORS = (
+    ("tool_response key", _line({"tool_response": {"hunter2-acme-payroll": 1}})),
+    ("filenames key", _line({"tool_response": {"filenames": {"customer_list_2026.xlsx": {"size": 1}}}})),
+    ("host key", _line({"hosts": {"db-prod-01.acme.local": 1}})),
+    ("slack key", _line({"d": {"xoxb-1234567-abcdefg": 1}})),
+    ("github key", _line({"d": {"github_pat_11ABCDEFG0abcdef": 1}})),
+    ("google key", _line({"d": {"AIzaSyD-abcdefghijklmnopqrstuv": 1}})),
+    ("env key", _line({"env": {"Alice_Wang_passport": "x"}})),
+    ("id key", _line({"id": {"hunter2-acme-payroll": 1}})),
+)
+S3_SURVIVORS = (
+    ("big timeout", _line({"timeout_ms": 912345678})),
+    ("exit digits", _line({"error": "Exit code 0912345678\nhello"})),
+    ("float", _line({"x": 3.14})),
+)
 
 
 class TestTheGateCanFail(unittest.TestCase):
@@ -143,6 +225,33 @@ class TestTheGateCanFail(unittest.TestCase):
         for label, line in self.PLANTED.items():
             with self.subTest(planted=label):
                 self.assertIn(label, scan(line))
+
+    def test_value_and_key_survivors_are_caught_by_the_allowlist_gate(self):
+        for label, line in S1_SURVIVORS + S2_SURVIVORS + S3_SURVIVORS:
+            with self.subTest(planted=label):
+                self.assertTrue(violations(line), "the gate accepted %s" % label)
+
+    def test_a_planted_survivor_in_a_fixture_file_fails_the_tree_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "p" / "1"
+            good.mkdir(parents=True)
+            clean = {"mode": "stop", "payload": {"model": "gpt-5.6-terra", "cwd": "__WS__"}, "result": {}}
+            bad = {"mode": "stop", "payload": {"model": "Acme payroll export 0912345678"}, "result": {}}
+            target = good / "ok.jsonl"
+            target.write_text('{"_meta": {}}\n' + json.dumps(clean) + "\n", encoding="utf-8")
+            self.assertEqual(tree_violations(tmp), [])
+            with open(str(target), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(bad) + "\n")
+            self.assertEqual(tree_violations(tmp), ["p/1/ok.jsonl:3: value under 'model'"])
+
+    def test_json_string_with_a_text_sibling_is_still_checked(self):
+        line = {"mode": "stop", "payload": {"tool_response": '{"message":"__TEXT__","status":"Alice Wang fired"}'}, "result": {}}
+        self.assertEqual(violations(line), ["value under 'status'"])
+
+    def test_sanitizer_exit_headers_pass_the_gate(self):
+        for text in ("Command exited with code 2.\n__TEXT__", "exit status 2\n__TEXT__", "Exit code 2", "Process exited with code 1\n__TEXT__"):
+            self.assertEqual(violations({"payload": {"error": text}}), [], text)
+        self.assertTrue(violations({"payload": {"error": "Exit code 0912345678\nhello"}}))
 
     def test_fake_token_and_placeholders_pass(self):
         self.assertEqual(scan('{"message": "%s", "cwd": "__WS__/a.txt", "session_id": "__ID1__"}' % san.FAKE_OPAQUE), [])
@@ -245,7 +354,7 @@ class TestSanitizer(unittest.TestCase):
         self.assertEqual(san.OPAQUE_MESSAGE_RE.pattern, codex.OPAQUE_MESSAGE_RE.pattern)
         self.assertTrue(codex.OPAQUE_MESSAGE_RE.match(san.FAKE_OPAQUE))
         self.assertTrue(codex._is_opaque_message(san.FAKE_OPAQUE))
-        out, text = self.run_one({"tool_input": {"message": self.SECRETS[5], "other": self.SECRETS[5]}})
+        out, text = self.run_one({"tool_name": "collaborationspawn_agent", "tool_input": {"message": self.SECRETS[5], "other": self.SECRETS[5]}})
         self.assertEqual(out[1]["payload"]["tool_input"]["message"], san.FAKE_OPAQUE)
         self.assertEqual(out[1]["payload"]["tool_input"]["other"], san.FAKE_OPAQUE)
         self.assertNotIn(self.SECRETS[5], text)
@@ -260,9 +369,66 @@ class TestSanitizer(unittest.TestCase):
         names = local_names()
         if not names:
             self.skipTest("no user or host name could be read")
-        out, text = self.run_one({"model": "model-" + names[0], "agent_type": names[0]})
-        self.assertEqual((out[1]["payload"]["model"], out[1]["payload"]["agent_type"]), ("__STR__", "__STR__"))
+        ident = re.sub(r"[^A-Za-z_]", "_", names[0])
+        out, text = self.run_one({"model": "model-" + names[0], "agent_type": names[0], "tool_name": ident})
+        self.assertEqual((out[1]["payload"]["model"], out[1]["payload"]["agent_type"], out[1]["payload"]["tool_name"]), ("__STR__", "__STR__", "__STR__"))
         self.assertNotIn(names[0], text.lower())
+
+    def test_every_s1_and_s2_survivor_is_removed_and_the_output_passes_the_gate(self):
+        for label, line in S1_SURVIVORS + S2_SURVIVORS + S3_SURVIVORS:
+            with self.subTest(case=label):
+                out = san.sanitize_lines([line], self.META)
+                self.assertEqual(violations(out[1]), [], json.dumps(out[1]))
+                self.assertEqual(scan(json.dumps(out)), [])
+
+    def test_free_text_in_name_keys_becomes_a_placeholder(self):
+        out, text = self.run_one({
+            "status": "Alice Wang fired 2026-11-04", "model": "Acme payroll export 0912345678", "source": "192.168.1.141:8100",
+            "type": "01a15f9118624122a482edb5acadc197", "toolCall": {"name": "Acme payroll 0912345678"},
+        }, {"decision": "Plan for Alice"})
+        self.assertEqual(out[1]["payload"], {"status": "__STR__", "model": "__STR__", "source": "__STR__", "type": "__STR__", "toolCall": {"name": "__STR__"}})
+        self.assertEqual(out[1]["result"], {"decision": "__STR__"})
+        for word in ("Alice", "Acme", "0912345678", "192.168"):
+            self.assertNotIn(word, text)
+
+    def test_mcp_tool_names_collapse_and_unknown_tool_args_hide_their_keys(self):
+        out, text = self.run_one({
+            "tool_name": "mcp__acme-payroll__get_salary", "tool_input": {"employee_name": "x", "Alice_Wang_passport": "y"},
+            "toolCall": {"name": "mcp__x__y", "args": {"customer_list": "z"}},
+        })
+        body = out[1]["payload"]
+        self.assertEqual(body["tool_name"], "__MCP_TOOL__")
+        self.assertEqual(body["toolCall"]["name"], "__MCP_TOOL__")
+        self.assertEqual(body["tool_input"], {"__KEY1__": "__STR__", "__KEY2__": "__STR__"})
+        self.assertEqual(body["toolCall"]["args"], {"__KEY3__": "__STR__"})
+        self.assertNotIn("payroll", text)
+
+    def test_role_survives_only_when_canned(self):
+        out, _ = self.run_one({"toolCall": {"name": "invoke_subagent", "args": {"Role": "Reconnaissance Scout", "TypeName": "flash-lite-scout", "Model": "flash_lite"}}})
+        self.assertEqual(out[1]["payload"]["toolCall"]["args"], {"Role": "Reconnaissance Scout", "TypeName": "flash-lite-scout", "Model": "flash_lite"})
+        out, _ = self.run_one({"toolCall": {"name": "invoke_subagent", "args": {"Role": "Auditor of Acme payroll fraud"}}})
+        self.assertEqual(out[1]["payload"]["toolCall"]["args"], {"Role": "__STR__"})
+
+    def test_model_names_of_known_families_survive(self):
+        for name in ("haiku", "gpt-5.6-terra", "claude-haiku-5-5", "claude-haiku-4-5-20251001", "gemini-3.8-flash-low", "flash_lite", "o3-mini", "Gemini 4 Argon (High)"):
+            self.assertTrue(san.model_ok(name), name)
+        for name in ("Acme payroll export", "gpt-0912345678", "gpt 5 Alice", "gAAAAABq2ZqgkxWOcFgr1V5", "", "claude-acme-payroll"):
+            self.assertFalse(san.model_ok(name), name)
+
+    def test_json_string_in_tool_response_gets_the_same_rules(self):
+        out, text = self.run_one({"tool_response": '{"status":"Alice Wang fired","filenames":{"customer_list_2026.xlsx":1},"timed_out":false}'})
+        self.assertEqual(json.loads(out[1]["payload"]["tool_response"]), {"status": "__STR__", "__KEY1__": {"__KEY2__": 0}, "timed_out": False})
+        self.assertNotIn("Alice", text)
+
+    def test_new_top_level_key_from_a_cli_stays_visible_but_odd_names_do_not(self):
+        out, _ = self.run_one({"brandNewField": 1, "snake_case_field": "x", "weird-key": 1, "dotted.key": 1, "k2026": 1, "a" * 41: 1})
+        self.assertEqual(sorted(out[1]["payload"]), ["__KEY1__", "__KEY2__", "__KEY3__", "__KEY4__", "brandNewField", "snake_case_field"])
+
+    def test_s3_numbers(self):
+        out, _ = self.run_one({"timeout_ms": 912345678, "duration_ms": 9999999, "x": 912345678, "error": "Exit code 0912345678\nhello"})
+        self.assertEqual(out[1]["payload"], {"timeout_ms": 0, "duration_ms": 9999999, "x": 0, "error": "__TEXT__"})
+        out, _ = self.run_one({"error": "Command exited with code 2.\nboom", "tool_response": "exit status 2\nboom"})
+        self.assertEqual(out[1]["payload"], {"error": "Command exited with code 2.\n__TEXT__", "tool_response": "exit status 2\n__TEXT__"})
 
     def test_meta_line_is_first_without_date_or_host(self):
         meta = dict(self.META, provenance="older CLI, not 0.166")
@@ -282,6 +448,15 @@ class TestSanitizer(unittest.TestCase):
             self.assertEqual(lines[1]["payload"], {"cwd": "__WS__", "last_assistant_message": "__TEXT__", "session_id": "__ID1__"})
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(san.main([str(Path(tmp) / "missing"), str(dest), "--platform", "p", "--cli-version", "1", "--scenario", "s"]), 2)
+
+
+class TestToolArgsWithoutAToolName(unittest.TestCase):
+    def test_key_names_are_renamed(self):
+        meta = {"platform": "agy", "cli_version": "1", "scenario": "x"}
+        line = {"mode": "pre-tool-use", "payload": {"tool_input": {"AcmePayrollSecret": "x", "Alice": {"bob": "z"}}}, "result": {}}
+        text = json.dumps(san.sanitize_lines([line], meta))
+        for name in ("AcmePayrollSecret", "Alice", "bob"):
+            self.assertNotIn(name, text)
 
 
 if __name__ == "__main__":

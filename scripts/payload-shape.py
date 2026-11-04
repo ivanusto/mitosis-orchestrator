@@ -5,9 +5,13 @@
     payload-shape.py diff A B           compare two SHAPE.json files or version directories
 
 A shape lists, for each mode and tool, the sorted key paths of the payload and of the hook result and
-the value types seen at each path ("[]" marks list items). Values never enter it. diff prints added,
+the value types seen at each path ("[]" marks list items). Values never enter it, but key names and tool
+names do (a tool name is the label of its group; every key is a path segment), which is the point: a key
+a new CLI adds shows up in the diff. Run it only on sanitized fixtures, where every key and tool name has
+passed scripts/sanitize-payloads.py. diff prints added,
 removed and type-changed paths per mode and tool, and exits 0 whatever it finds: it reports a change,
-it does not judge it. Exit 2 means bad input (a missing directory, a file that is not a shape).
+it does not judge it. Exit 2 and a one-line message mean bad input (a missing or unwritable directory, a .jsonl that is not a
+file or not JSON, a file that is not a shape).
 Zero dependencies; Python 3.8+.
 """
 
@@ -65,9 +69,10 @@ def _meta_of(directory: str) -> Dict[str, Any]:
             with open(os.path.join(directory, name), "r", encoding="utf-8") as fh:
                 first = fh.readline()
             try:
-                meta = json.loads(first).get("_meta")
+                head = json.loads(first)
             except ValueError:
-                meta = None
+                head = None
+            meta = head.get("_meta") if isinstance(head, dict) else None
             if isinstance(meta, dict):
                 return {k: meta[k] for k in ("platform", "cli_version") if k in meta}
     return {}
@@ -81,6 +86,8 @@ def build_shape(directory: str) -> Dict[str, Any]:
     for name in sorted(os.listdir(directory)):
         if not name.endswith(".jsonl"):
             continue
+        if not os.path.isfile(os.path.join(directory, name)):
+            raise ValueError("%s is not a file" % name)
         scenarios.append(name[:-len(".jsonl")])
         with open(os.path.join(directory, name), "r", encoding="utf-8") as fh:
             for number, text in enumerate(fh, 1):
@@ -121,9 +128,25 @@ def load_shape(location: str) -> Dict[str, Any]:
             shape = json.load(fh)
     except (OSError, ValueError) as exc:
         raise ValueError("cannot read a shape from %s: %s" % (location, exc))
-    if not isinstance(shape, dict) or not isinstance(shape.get("modes"), dict):
+    if not _shape_ok(shape):
         raise ValueError("%s is not a SHAPE.json" % location)
     return shape
+
+
+def _shape_ok(shape: Any) -> bool:
+    """modes -> tool -> path -> list of type names, all the way down."""
+    if not isinstance(shape, dict) or not isinstance(shape.get("modes"), dict):
+        return False
+    for tools in shape["modes"].values():
+        if not isinstance(tools, dict):
+            return False
+        for paths in tools.values():
+            if not isinstance(paths, dict):
+                return False
+            for types in paths.values():
+                if not isinstance(types, list) or not all(isinstance(t, str) for t in types):
+                    return False
+    return True
 
 
 def diff_shapes(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
@@ -165,8 +188,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if not lines:
                 print("no shape change")
             return 0
-    except ValueError as exc:
-        sys.stderr.write("payload-shape: %s\n" % exc)
+    except (ValueError, OSError) as exc:
+        sys.stderr.write("payload-shape: %s\n" % " ".join(str(exc).split()))
         return 2
     sys.stderr.write("usage: payload-shape.py shape DIR | payload-shape.py diff A B\n")
     return 2

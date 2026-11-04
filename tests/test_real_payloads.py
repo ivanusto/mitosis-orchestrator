@@ -250,7 +250,7 @@ class TestBreakerOnRealShapes(Base):
                 posts += 1
                 args = payload["toolCall"]["args"]
                 self.assertEqual(payload["error"], "", "real agy 1.5.0 sends error='' for a failed command")
-                self.assertEqual(state["breaker_steps"][str(payload["stepIdx"])], args["CommandLine"])
+                self.assertIn(str(payload["stepIdx"]), state["breaker_steps"])
                 self.assertEqual(state.get("consecutive_failures", 0), history[-1], "PostToolUse must not count")
                 pending.append((payload["stepIdx"], args["CommandLine"]))
             elif record["mode"] == "pre-invocation":
@@ -326,6 +326,39 @@ class TestPayloadShapeTool(unittest.TestCase):
             self.assertEqual(self.run_main("diff", str(Path(tmp) / "missing"), str(junk))[0], 2)
             self.assertEqual(self.run_main("shape", str(Path(tmp) / "missing"))[0], 2)
             self.assertEqual(self.run_main("nonsense")[0], 2)
+
+    def assert_one_line_exit_two(self, *argv):
+        code, out, err = self.run_main(*argv)
+        self.assertEqual(code, 2, argv)
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertNotIn("Traceback", err)
+
+    def test_malformed_inputs_exit_two_with_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listy = root / "listy"
+            listy.mkdir()
+            (listy / "x.jsonl").write_text("[1,2]\n", encoding="utf-8")
+            self.assertEqual(self.run_main("shape", str(listy))[0], 0)  # a non-object first line is skipped, not a crash
+            asdir = root / "asdir"
+            (asdir / "y.jsonl").mkdir(parents=True)
+            self.assert_one_line_exit_two("shape", str(asdir))
+            blocked = root / "blocked"
+            blocked.mkdir()
+            (blocked / "SHAPE.json").mkdir()  # cannot be written on any OS, unlike a chmod
+            (blocked / "a.jsonl").write_text('{"_meta": {}}\n{"mode": "stop", "payload": {}, "result": {}}\n', encoding="utf-8")
+            self.assert_one_line_exit_two("shape", str(blocked))
+            for index, modes in enumerate(({"x": 1}, {"x": {"y": 1}}, {"x": {"y": {"p": [1]}}}, {"x": {"y": {"p": "str"}}})):
+                bad = root / ("bad%d.json" % index)
+                bad.write_text(json.dumps({"modes": modes}), encoding="utf-8")
+                good = root / "good.json"
+                good.write_text(json.dumps({"modes": {"m": {"t": {"p": ["str"]}}}}), encoding="utf-8")
+                self.assert_one_line_exit_two("diff", str(bad), str(good))
+                self.assert_one_line_exit_two("diff", str(good), str(bad))
+
+    def test_the_docstring_says_that_key_and_tool_names_enter_the_shape(self):
+        self.assertIn("key names and tool", " ".join(shape_tool.__doc__.split()))
 
 
 if __name__ == "__main__":

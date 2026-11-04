@@ -7,9 +7,13 @@ IN is the payloads.jsonl written by scripts/mitosis_hook/capture.py (MITOSIS_CAP
 one {"mode", "payload", "result"} object per line. A bare payload per line is accepted too, and its
 mode is read from hook_event_name. Top-level keys other than those three are dropped.
 
-The sanitizer is an allowlist. Key names and structure always survive. A value survives only when its
-key is on a list below and the value passes that list's check (an enum-like name, a small int, a
-boolean, a canned probe command). Everything else becomes a typed placeholder, so a key that is not
+The sanitizer is an allowlist. Structure survives; a key name survives only when it has a plain
+identifier shape (letters and underscores, at most 40 characters, no digit run, no hyphen or dot) or is a
+known key, and never inside a free-form subtree (tool_response, env, headers, and the args or tool_input of
+a tool that is not on the closed tool list), where every key outside a small allowlist becomes "__KEY<n>__".
+A value survives only when its key has a rule below and the value passes it: a closed enum per key, a
+model-name token of a known family, a tool name from a closed list or a plain identifier, a small int, a
+boolean, a canned probe command. Everything else becomes a typed placeholder, so a key that is not
 listed, including one a future CLI adds, can never carry a value out:
 
     string  -> "__STR__" (text keys: "__TEXT__", commands: "__CMD__"); "" stays "" (emptiness is a signal)
@@ -33,7 +37,7 @@ import socket
 import sys
 from typing import Any, Dict, List, Optional
 
-SANITIZER_VERSION = 1
+SANITIZER_VERSION = 2
 
 # Same pattern as scripts/mitosis_hook/platforms/codex.py OPAQUE_MESSAGE_RE (test_fixture_privacy keeps them equal).
 OPAQUE_MESSAGE_RE = re.compile(r"^gAAAAA[A-Za-z0-9_-]{20,}={0,2}$")
@@ -51,7 +55,7 @@ EVENT_TO_MODE = {
 
 ID_KEYS = frozenset((
     "session_id", "conversationId", "turn_id", "thread_id", "thread-id", "tool_use_id", "agent_id", "agentId",
-    "prompt_id", "id", "call_id", "task_name", "harnessSectionHash",
+    "prompt_id", "id", "call_id", "turn-id", "task_name", "harnessSectionHash",
 ))
 PATH_KEYS = frozenset((
     "cwd", "workspacePaths", "artifactDirectoryPath", "transcriptPath", "transcript_path", "agent_transcript_path",
@@ -64,23 +68,189 @@ TEXT_KEYS = frozenset((
     "lastUserInput", "prompt", "Prompt", "message", "last_assistant_message", "Content", "content", "text", "reason",
     "permissionDecisionReason", "systemMessage", "additionalContext", "toolSummary", "description", "error",
     "tool_response", "output", "stdout", "stderr", "old_string", "new_string", "old_str", "new_str", "pattern", "query",
-    "url", "ephemeralMessage", "stopReason",
+    "url", "ephemeralMessage", "stopReason", "input-messages", "input_messages", "last-assistant-message",
 ))
-# Exit-code header of a failure text: it carries the signal and no content.
-EXIT_PREFIX_RE = re.compile(r"^(Exit code \d+|[Cc]ommand exited with code \d+\.?|[Pp]rocess exited with code \d+|exit status \d+)")
+# Exit-code header of a failure text: it carries the signal and no content. At most 3 digits.
+EXIT_PREFIX_RE = re.compile(r"^(Exit code \d{1,3}(?!\d)|[Cc]ommand exited with code \d{1,3}(?!\d)\.?|[Pp]rocess exited with code \d{1,3}(?!\d)|exit status \d{1,3}(?!\d))")
 JSON_TEXT_KEYS = frozenset(("tool_response", "output", "result"))
-# Enum-like names: kept when they match the pattern. Spaces and parentheses cover agy model names.
-NAME_KEYS = frozenset((
-    "hook_event_name", "hookEventName", "tool_name", "permission_mode", "model", "modelName", "Model", "resolvedModel",
-    "agent_type", "agentType", "subagent_type", "terminationReason", "source", "decision", "permissionDecision",
-    "level", "status", "type", "effort", "mode", "fork_turns", "Role", "TypeName", "typeName", "role", "tool", "toolName",
+
+# ----- per-key value rules (the privacy test imports these) -----
+CLAUDE_HOOK_EVENTS = (
+    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "SubagentStart", "SubagentStop", "Stop", "Notification", "PreCompact",
+)
+PERMISSION_MODES = ("default", "acceptEdits", "bypassPermissions", "plan", "auto", "dontAsk")
+EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+TERMINATION_REASONS = (
+    "USER_CANCELED", "ERROR", "MAX_INVOCATIONS", "MAX_FORCED_INVOCATIONS", "MAX_TOKEN_BUDGET_EXCEEDED", "NO_TOOL_CALL",
+)
+PLUGIN_PREFIX = "mitosis-orchestrator:"
+AGENT_TYPES = frozenset((
+    "explorer", "worker", "default", "flash-lite-scout", "flash-worker", "explore", "plan", "general-purpose", "claude",
+    "claude-code-guide", "statusline-setup", "output-style-setup", "bash",
 ))
-NAME_RE = re.compile(r"^[A-Za-z0-9_.:()-][A-Za-z0-9_.:() -]{0,62}$")
+TOOL_NAMES = frozenset((
+    "run_command", "Bash", "shell", "exec_command", "local_shell", "apply_patch", "invoke_subagent", "Task", "Agent",
+    "spawn_agent", "wait_agent", "close_agent", "resume_agent", "interrupt_agent", "send_message", "SendMessage",
+    "followup_task", "run_workflow", "define_subagent", "manage_subagents", "SubagentHandback",
+    "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker", "write_file", "read_file", "write_to_file",
+    "replace_file_content", "multi_replace_file_content", "view_file", "view_file_outline", "view_code_item",
+    "edit_file", "create_file", "list_dir", "grep_search", "find_by_name", "Read", "Write", "Edit", "MultiEdit",
+    "NotebookEdit", "NotebookRead", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "read",
+    "collaborationspawn_agent", "collaborationwait_agent", "collaborationclose_agent", "collaborationresume_agent",
+    "collaborationinterrupt_agent", "collaborationsend_message", "collaborationfollowup_task",
+))
+MCP_TOOL = "__MCP_TOOL__"
+ROLE_CANNED = frozenset(("Reconnaissance Scout",))
+# Plain identifier: letters and underscores (camelCase or snake_case), no digit run, no hyphen or dot.
+IDENT_RE = re.compile(r"^(?!.*[0-9]{2})[A-Za-z_][A-Za-z0-9_]{0,39}$")
+MODEL_FAMILY = frozenset((
+    "gemini", "claude", "gpt", "chatgpt", "o1", "o3", "o4", "haiku", "sonnet", "opus", "fable", "mythos", "flash", "lite",
+    "pro", "ultra", "argon", "codex", "gemma", "llama", "qwen", "qwq", "deepseek", "mistral", "grok", "best", "inherit",
+    "sol", "terra", "luna", "spark", "mini", "nano",
+))
+MODEL_WORDS = MODEL_FAMILY | frozenset((
+    "preview", "latest", "high", "low", "medium", "minimal", "max", "xhigh", "thinking", "instruct", "chat", "exp",
+    "experimental", "turbo", "image", "audio", "live", "tts",
+))
+_MODEL_NUM_RE = re.compile(r"^[A-Za-z]?[0-9]{1,8}[A-Za-z]{0,2}$")
+_MODEL_DATE_RE = re.compile(r"^20[0-9]{6}$")
+
+
+def _model_number_ok(segment: str) -> bool:
+    return bool(_MODEL_NUM_RE.match(segment))
+
+
+def model_ok(value: str) -> bool:
+    """A model name of a known family: 'gpt-5.6-terra', 'haiku', or the agy display form 'Gemini 4 Argon (High)'."""
+    text = re.sub(r"\[[0-9]+[mk]\]$", "", value)
+    if not text or len(text) > 60:
+        return False
+    if " " in text:
+        words = text.split(" ")
+        if len(words) > 6 or words[0].lower() not in ("gemini", "claude", "gpt"):
+            return False
+        for word in words[1:]:
+            inner = word[1:-1] if word.startswith("(") and word.endswith(")") else word
+            if inner.lower() not in MODEL_WORDS and not re.match(r"^[0-9]{1,2}(\.[0-9]{1,2})?[A-Za-z]?$", inner):
+                return False
+        return True
+    segments = [x for x in re.split(r"[-_.:/]", text) if x]
+    if not segments or len(segments) > 12 or len(text) != len(text.strip()) or segments[0].lower() not in MODEL_FAMILY:
+        return False
+    digits = 0
+    for seg in segments[1:]:
+        if seg.lower() in MODEL_WORDS or _MODEL_DATE_RE.match(seg):
+            continue
+        if not _model_number_ok(seg):
+            return False
+        digits += sum(c.isdigit() for c in seg)
+    return digits <= 5
+
+
+def tool_name_ok(value: str) -> bool:
+    return value in TOOL_NAMES or bool(IDENT_RE.match(value))
+
+
+def agent_type_ok(value: str) -> bool:
+    bare = value[len(PLUGIN_PREFIX):] if value.startswith(PLUGIN_PREFIX) else value
+    return bare.lower() in AGENT_TYPES
+
+
+def _enum(*values: str) -> Any:
+    allowed = frozenset(values)
+    return lambda text: text in allowed
+
+
+# key -> predicate. A string under one of these keys survives only when its predicate holds.
+VALUE_RULES = {
+    "status": _enum("completed", "running", "failed", "pending", "error", "cancelled", "shutdown", "timeout", "success"),
+    "source": _enum("startup", "resume", "clear", "compact"),
+    "type": _enum(
+        "text", "message", "tool_use", "tool_result", "image", "thinking", "output_text", "input_text", "function_call",
+        "function_call_output", "reasoning",
+    ),
+    "decision": _enum("allow", "block", "deny", "approve", "ask"),
+    "permissionDecision": _enum("allow", "deny", "ask"),
+    "hook_event_name": _enum(*CLAUDE_HOOK_EVENTS),
+    "hookEventName": _enum(*CLAUDE_HOOK_EVENTS),
+    "permission_mode": _enum(*PERMISSION_MODES),
+    "mode": _enum(*(PERMISSION_MODES + (
+        "session-start", "pre-invocation", "user-prompt-submit", "pre-tool-use", "post-tool-use", "post-tool-use-failure",
+        "stop", "subagent-stop", "codex-notify",
+    ))),
+    "terminationReason": _enum(*TERMINATION_REASONS),
+    "level": _enum(*EFFORT_LEVELS),
+    "effort": _enum(*EFFORT_LEVELS),
+    "fork_turns": _enum("all", "none"),
+    "role": _enum("user", "assistant", "system", "tool", "developer"),
+    "Model": _enum("flash", "flash_lite"),
+    "TypeName": _enum("flash-lite-scout", "flash-worker"),
+    "typeName": _enum("flash-lite-scout", "flash-worker"),
+    "Role": lambda text: text in ROLE_CANNED,
+    "agent_type": agent_type_ok,
+    "agentType": agent_type_ok,
+    "subagent_type": agent_type_ok,
+    "model": model_ok,
+    "modelName": model_ok,
+    "resolvedModel": model_ok,
+    "name": tool_name_ok,
+    "tool_name": tool_name_ok,
+    "tool": tool_name_ok,
+    "toolName": tool_name_ok,
+}
+NAME_KEYS = frozenset(VALUE_RULES)
+
+
+def rule_allows(key: str, text: str) -> Optional[bool]:
+    """None when the key has no value rule; else whether the text survives the rule (placeholders do)."""
+    rule = VALUE_RULES.get(key)
+    if rule is None:
+        return None
+    if text == "__STR__" or text == MCP_TOOL:
+        return True
+    if text.startswith("mcp__"):
+        return False
+    return bool(rule(text))
+
+
+# Key names that stay visible inside a free-form subtree (tool_response, env, headers, args of an unknown tool).
+FREE_KEYS = frozenset((
+    "agentId", "agentType", "canContinueAgent", "content", "harnessNoteCount", "harnessSectionHash", "harnessTailCount",
+    "interrupted", "isImage", "noOutputExpected", "prompt", "resolvedModel", "status", "stderr", "stdout", "toolStats",
+    "toolsUsed", "totalDurationMs", "totalTokens", "totalToolUseCount", "usage", "text", "type", "bashCount",
+    "editFileCount", "linesAdded", "linesRemoved", "otherToolCount", "readCount", "searchCount", "cache_creation",
+    "ephemeral_1h_input_tokens", "ephemeral_5m_input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+    "input_tokens", "output_tokens", "iterations", "output_tokens_details", "thinking_tokens", "server_tool_use",
+    "web_fetch_requests", "web_search_requests", "fallback_credit", "inference_geo", "service_tier", "speed",
+    "message", "timed_out", "task_name", "command", "description", "effort", "model", "subagent_type", "agent_type",
+    "fork_turns", "run_in_background", "timeout_ms", "target", "decision", "reason", "level", "source", "name",
+    "Model", "Role", "TypeName", "Prompt", "CommandLine", "WaitMsBeforeAsync", "toolSummary", "Path", "Content",
+))
+FREE_PARENTS = frozenset(("tool_response", "env", "headers"))
+# Kept apart: 'tool_input' and 'args' are free-form only when the tool next to them is not on TOOL_NAMES.
+UNKNOWN_TOOL_PARENTS = frozenset(("tool_input", "args"))
+
+
+def child_is_free(key: str, node: Dict[str, Any], parent_key: str, free: bool) -> bool:
+    """Whether the value under `key` of dict `node` is a free-form subtree."""
+    if free or key in FREE_PARENTS:
+        return True
+    if key in UNKNOWN_TOOL_PARENTS:
+        tool = node.get("name") if parent_key == "toolCall" else node.get("tool_name")
+        return not (isinstance(tool, str) and tool in TOOL_NAMES)
+    return False
+
+
+PLAIN_KEY_RE = IDENT_RE
+KEY_PLACEHOLDER_RE = re.compile(r"^__KEY[0-9]+__$")
 INT_KEYS = frozenset((
     "invocationNum", "initialNumSteps", "stepIdx", "executionNum", "timeout_ms", "WaitMsBeforeAsync", "duration_ms",
     "yield_time_ms", "max_output_tokens", "fork_turns", "turn", "turnNumber", "step_index",
 ))
 SMALL_INT = 1000
+INT_MAX = 10 ** 7
+KNOWN_KEYS = ID_KEYS | PATH_KEYS | COMMAND_KEYS | TEXT_KEYS | NAME_KEYS | INT_KEYS | FREE_KEYS
 
 # Canned probe commands. Anything else a CLI ran becomes __CMD__.
 CANNED_COMMANDS = frozenset((
@@ -94,13 +264,12 @@ SAFE_FILE_NAMES = frozenset((
 ))
 SYSTEM_PATHS = frozenset(("/", "/tmp", "/dev/null", "/nonexistent-a", "/nonexistent-b", "/nonexistent-c"))
 
-SAFE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.:-]{0,40}$")
 UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 TOKEN_RE = re.compile(r"gAAAA[A-Za-z0-9_-]{16,}")
-SECRET_RE = re.compile(r"sk-[A-Za-z0-9_-]{4,}|ghp_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{8,}|Bearer\s+\S+")
+SECRET_RE = re.compile(r"sk-[A-Za-z0-9_-]{4,}|ghp_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{8,}|Bearer\s+\S+|xox[a-z]-[A-Za-z0-9-]{4,}|github_pat_[A-Za-z0-9_]{6,}|AIza[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{6,}\.")
 HOME_PATH_RE = re.compile(r"^(/home/[^/]+|/Users/[^/]+|[A-Za-z]:[\\/]+Users[\\/]+[^\\/]+)")
-PLACEHOLDER_RE = re.compile(r"__[A-Z]+[0-9]*__")
+PLACEHOLDER_RE = re.compile(r"__[A-Z]+(?:_[A-Z]+)*[0-9]*__")
 
 
 def _local_names() -> List[str]:
@@ -154,8 +323,13 @@ class Sanitizer:
     def _emit(self, text: str, placeholder: str) -> str:
         return placeholder if self._bad(text) else text
 
-    def key(self, name: str) -> str:
-        if SAFE_KEY_RE.match(name) and not self._bad(name):
+    def key(self, name: str, free: bool = False) -> str:
+        """A key keeps its name when it is a plain identifier (or a known key) outside a free-form subtree."""
+        if free:
+            visible = name in FREE_KEYS
+        else:
+            visible = (name in KNOWN_KEYS or bool(PLAIN_KEY_RE.match(name))) and not self._bad(name)
+        if visible:
             return name
         if name not in self.key_names:
             self.key_names[name] = "__KEY%d__" % (len(self.key_names) + 1)
@@ -216,26 +390,40 @@ class Sanitizer:
         return "__TEXT__"
 
     # ----- the walk -----
-    def value(self, value: Any, key: str, parent: str) -> Any:
+    def value(self, value: Any, key: str, parent: str, free: bool = False, strict: bool = False) -> Any:
+        """free: inside a free-form subtree (keys outside FREE_KEYS are renamed). strict: tool_response or hook result."""
         if isinstance(value, bool) or value is None:
             return value
         if isinstance(value, int):
-            if key in INT_KEYS or abs(value) <= SMALL_INT:
-                return value if abs(value) <= 10 ** 9 else 0
-            return 0
+            if key in INT_KEYS:
+                return value if abs(value) <= INT_MAX else 0
+            if strict and key not in FREE_KEYS:
+                return 0
+            return value if abs(value) <= SMALL_INT else 0
         if isinstance(value, float):
             return 0.0
         if isinstance(value, dict):
-            return {self.key(str(k)): self.value(v, str(k), key) for k, v in value.items()}
+            out = {}  # type: Dict[str, Any]
+            for k, v in value.items():
+                name = str(k)
+                child_free = child_is_free(name, value, key, free)
+                shown = self.key(name, free)
+                out[shown] = self.value(v, shown, key, child_free, strict or name == "tool_response")
+            return out
         if isinstance(value, list):
-            return [self.value(v, key, parent) for v in value]
+            return [self.value(v, key, parent, free, strict) for v in value]
         if not isinstance(value, str):
             return "__STR__"
-        return self.string(value, key, parent)
+        return self.string(value, key, parent, strict)
 
-    def string(self, value: str, key: str, parent: str) -> str:
+    def string(self, value: str, key: str, parent: str, strict: bool = False) -> str:
         if value == "":
             return ""
+        rule = VALUE_RULES.get(key)
+        if rule is not None:
+            if value.startswith("mcp__"):
+                return MCP_TOOL
+            return value if rule(value) and not self._bad(value) else "__STR__"
         if OPAQUE_MESSAGE_RE.match(value.strip()):
             return FAKE_OPAQUE
         if key in ID_KEYS:
@@ -244,17 +432,14 @@ class Sanitizer:
             return self.path(value, key)
         if key in COMMAND_KEYS:
             return self.command(value)
-        if key == "name" and parent == "toolCall":
-            return value if NAME_RE.match(value) and not self._bad(value) else "__STR__"
-        if key in NAME_KEYS:
-            return value if NAME_RE.match(value) and not self._bad(value) else "__STR__"
         if key in JSON_TEXT_KEYS and value.lstrip()[:1] in ("{", "["):
             try:
                 parsed = json.loads(value)
             except ValueError:
                 parsed = None
             if isinstance(parsed, (dict, list)):
-                return json.dumps(self.value(parsed, key, key), separators=(",", ":"), sort_keys=True)
+                free = key == "tool_response"
+                return json.dumps(self.value(parsed, key, key, free, True), separators=(",", ":"), sort_keys=True)
         if key in TEXT_KEYS:
             return self.text(value, key)
         return "__STR__"
@@ -308,7 +493,7 @@ def sanitize_lines(lines: List[Dict[str, Any]], meta: Dict[str, Any]) -> List[Di
         out.append({
             "mode": mode if mode in KNOWN_MODES else "__MODE__",
             "payload": san.value(payload, "payload", ""),
-            "result": san.value(line.get("result"), "result", ""),
+            "result": san.value(line.get("result"), "result", "", False, True),
         })
     return out
 

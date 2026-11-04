@@ -45,7 +45,7 @@ Fake payloads have hidden real bugs: 2.6 found two edit budgets whose tests pass
 2. `python3 scripts/sanitize-payloads.py <dir>/payloads.jsonl tests/fixtures/payloads/<platform>/<version>/<scenario>.jsonl --platform <platform> --cli-version <version> --scenario <scenario>`
 3. `python3 scripts/payload-shape.py shape tests/fixtures/payloads/<platform>/<version>`
 4. `python3 scripts/payload-shape.py diff tests/fixtures/payloads/<platform>/<old> tests/fixtures/payloads/<platform>/<version>` shows added, removed and retyped keys.
-5. Update `spec/compat.toml` after a real run on the new version, and read the fixture diff yourself before committing it. `tests/test_fixture_privacy.py` is a net, not a review.
+5. Update `spec/compat.toml` after a real run on the new version, and read the fixture diff yourself before committing it. `tests/test_fixture_privacy.py` is a net, not a review: tool names and top-level keys shaped like identifiers stay visible on purpose, so that a new one shows up in the diff, which means a private name in one of those places would survive.
 
 On Codex, every file change in the plugin needs a new hook review, so record Codex fixtures last and do not record them from a run with edited hook code. The same goes for a temporarily edited handler on any platform, since a fixture stores the hook's result too.
 
