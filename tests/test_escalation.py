@@ -420,6 +420,37 @@ class ClaudeAsyncEscalationTest(_ClaudeBase):
         self.assertNotIn("escalation", self.state())
 
 
+class ReportProblemClassTest(_ClaudeBase):
+    def test_classes_and_messages(self):
+        from mitosis_hook.report import _report_problem, validate_subagent_report
+        good = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: x\nNOTES: y"
+        cases = {
+            "": "empty", "x" * 1700: "too_long", "STATUS: COMPLETED": "too_few_lines",
+            good + "\n" + "\n".join("- b" for _ in range(11)): "too_many_lines",
+            "Here:\n" + good: "preamble", good.replace("COMPLETED", "DONE"): "status_line",
+            good.replace("FILES_CHANGED: NONE", "FILES_CHANGED:"): "files_line",
+            good.replace("VERIFICATION: x", "VERIFICATION:"): "verification_line",
+            good.replace("NOTES: y", "NOTES:") + "\nprose": "bullet",
+            NO_URI: "no_log_uri",
+        }
+        for text, cls in cases.items():
+            self.assertEqual(_report_problem(text, True)[0], cls, cls)
+        self.assertIsNone(_report_problem(good))
+        self.assertIsNone(_report_problem(NO_URI, require_log_uri=False))
+        self.assertEqual(validate_subagent_report(NO_URI), _report_problem(NO_URI)[1])
+
+    def test_record_keeps_class_only(self):
+        aid = "f" * 16
+        args, pre = self.spawn(WORKER_T, WORK)
+        resp = {"isAsync": True, "status": "async_launched", "agentId": aid, "description": "x"}
+        eo.handle_post_tool_use(self.tool("PostToolUse", "Agent", pre["updatedInput"], tool_response=resp))
+        p = dict(self.base, hook_event_name="SubagentStop", agent_id=aid, agent_type=WORKER_T,
+                 last_assistant_message=NO_URI, stop_hook_active=False)
+        eo.handle_subagent_stop(p)
+        rec = self.state()["subagents"][aid]
+        self.assertEqual((rec["report_ok"], rec["report_problem"]), (False, "no_log_uri"))
+
+
 class CodexEscalationTest(_EnvBase):
     UUID = "01a161ae-4d72-74f2-be05-d8fa31145c60"
 

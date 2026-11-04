@@ -28,7 +28,8 @@ from ..report import (
     _append_report_format_enabled,
     append_report_format,
     prompt_has_report_format,
-    validate_subagent_report,
+    _report_problem,
+    store_report_problem,
 )
 from ..pin_verify import claude_handback_report, claude_transcript_models, record_pin_verdict
 from ..routing import NUMBERED_RULE_RE, decide_subagent, find_mutation
@@ -384,9 +385,11 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
                       and bool(record.get("pinned_model")) and _bare_agent_type(agent_type) in ("", "general-purpose"))
     if _is_plugin_agent_type(type_name):
         scout = _bare_agent_type(type_name) == SCOUT_TYPE or (record is not None and _record_tier(record) == "flash_lite")
-        error = validate_subagent_report(report, require_log_uri=not scout)
+        found = _report_problem(report, require_log_uri=not scout)
+        error = found[1] if found else None
         if record is not None and report.strip():
-            record["report_ok"] = error is None
+            record["report_ok"] = found is None
+            store_report_problem(record, found)
         key = agent_id or type_name
         # A handed-back report is already delivered, and a stop without any report gives nothing to judge.
         will_block = (error is not None and enforce and payload.get("stop_hook_active") is not True and not handback

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .common import is_claude_code_payload, is_codex_payload
+from .report import REPORT_PROBLEM_CLASSES
 
 SCHEMA = 1
 THROTTLE_SECONDS = 60.0
@@ -71,7 +72,8 @@ def _bump(bucket: Dict[str, int], key: str, n: int = 1) -> None:
 
 
 def note(*, unhandled: Optional[str] = None, failure: Optional[str] = None,
-         pin: Optional[str] = None, report: Optional[bool] = None) -> None:
+         pin: Optional[str] = None, report: Optional[bool] = None,
+         report_problem: Optional[str] = None, report_scout: bool = False) -> None:
     """Queue counters from anywhere in a hook. Cheap; flushed by record_event()."""
     try:
         if not enabled():
@@ -87,6 +89,11 @@ def note(*, unhandled: Optional[str] = None, failure: Optional[str] = None,
             r = _PENDING.setdefault("report", {})
             key = "ok" if report else "bad"
             r[key] = r.get(key, 0) + 1
+        # Reason class only, from an allowlist: never report content. Counted per stop, so a report
+        # that was blocked and then fixed counts twice.
+        if report is False and report_problem in REPORT_PROBLEM_CLASSES:
+            name = "report_bad_scout" if report_scout else "report_bad_worker"
+            _bump(_PENDING.setdefault(name, {}), report_problem)
     except Exception:
         pass
 
@@ -184,6 +191,8 @@ def record_event(payload: Any, mode: str, *, error_class: Optional[str] = None,
             "stdin_replacement_chars": _int(old.get("stdin_replacement_chars")) + int(replacement_chars),
             "pin": _merge_counts(old.get("pin"), pending.get("pin", {}), ("verified", "mismatch", "unknown")),
             "report": _merge_counts(old.get("report"), pending.get("report", {}), ("ok", "bad")),
+            "report_bad_scout": _merge_map(old.get("report_bad_scout"), pending.get("report_bad_scout", {})),
+            "report_bad_worker": _merge_map(old.get("report_bad_worker"), pending.get("report_bad_worker", {})),
             "last_error": old.get("last_error") if isinstance(old.get("last_error"), dict) else None,
         }
         if error_class:

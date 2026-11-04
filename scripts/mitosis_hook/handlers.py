@@ -81,6 +81,7 @@ from .platforms.codex import (
 from .routing import TEST_RUNNER_RE
 from .state import (
     _RECENT_DECISIONS,
+    _record_tier,
     escalation_enabled,
     escalation_for_record,
     primary_model_alias,
@@ -767,7 +768,10 @@ def _observe_stop_record(record: Any) -> None:
             verdict = record.get("pin_verified")
             heartbeat.note(pin="unknown" if verdict is None else ("verified" if verdict else "mismatch"))
         if "report_ok" in record:
-            heartbeat.note(report=bool(record.get("report_ok")))
+            ok = bool(record.get("report_ok"))
+            problem = None if ok else record.get("report_problem")
+            scout = _record_tier(record) == "flash_lite"
+            heartbeat.note(report=ok, report_problem=problem, report_scout=scout)
     except Exception:
         pass
 

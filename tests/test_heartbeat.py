@@ -216,6 +216,19 @@ class TestThrottle(Base):
         self.assertEqual(data["pin"], {"verified": 0, "mismatch": 1, "unknown": 0})
         self.assertEqual(data["report"], {"ok": 0, "bad": 1})
 
+    def test_report_problem_classes_counted_without_content(self):
+        hb.note(report=False, report_problem="no_log_uri", report_scout=False)
+        hb.note(report=False, report_problem="preamble", report_scout=True)
+        hb.note(report=False, report_problem="preamble", report_scout=True)
+        hb.note(report=False, report_problem="Secret text from /home/x", report_scout=True)  # unknown class
+        hb.note(report=True, report_problem="bullet", report_scout=True)  # valid report: no class
+        hb.record_event(CLAUDE_BASH, "subagent-stop")
+        data = self.read()
+        self.assertEqual(data["report_bad_worker"], {"no_log_uri": 1})
+        self.assertEqual(data["report_bad_scout"], {"preamble": 2})
+        self.assertNotIn("Secret", json.dumps(data))
+        self.assertEqual(data["report"], {"ok": 1, "bad": 4})
+
 
 class TestUnhandledSpawnTools(Base):
     def name_of(self, platform, raw):
@@ -318,6 +331,9 @@ class TestSubagentStopCounts(Base):
         data = self.read()
         self.assertEqual(sum(data["report"].values()), 1)
         self.assertEqual(sum(data["pin"].values()), 1)
+        self.assertEqual(data["report_bad_worker"], {"too_few_lines": 1})
+        self.assertEqual(data["report_bad_scout"], {})
+        self.assertNotIn("not a report", json.dumps(data))
 
 
 if __name__ == "__main__":

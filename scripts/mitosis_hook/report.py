@@ -1,7 +1,7 @@
 """Subagent REPORT FORMAT handling."""
 
 import re
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .common import _GEN, _get_env
 
@@ -116,6 +116,85 @@ def _append_report_format_enabled() -> bool:
     return _get_env("AGY_MITOSIS_APPEND_REPORT_FORMAT", default="1") != "0"
 
 
+REPORT_PROBLEM_CLASSES = (
+    "empty", "too_long", "too_few_lines", "too_many_lines", "preamble", "status_line",
+    "files_line", "verification_line", "notes_line", "bullet", "no_log_uri",
+)
+
+_HEADER_PROBLEM_CLASSES = ("status_line", "files_line", "verification_line", "notes_line")
+
+
+def _report_problem(text: str, require_log_uri: bool = True) -> Optional[Tuple[str, str]]:
+    """Check a report against the 4-header bounded format.
+
+    Returns None when valid, else (class, message). The class is one of REPORT_PROBLEM_CLASSES
+    and carries no report content, so it is safe to count.
+    """
+    stripped = "\n".join(l for l in (text or "").splitlines() if not REPORT_FENCE_RE.match(l)).strip()
+    if not stripped:
+        return "empty", "Subagent report is empty."
+    if len(stripped) > MAX_SUBAGENT_REPORT_CHARS:
+        return "too_long", (
+            f"Subagent report length ({len(stripped)} chars) exceeds maximum "
+            f"{MAX_SUBAGENT_REPORT_CHARS} chars."
+        )
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    max_lines = 4 + MAX_REPORT_BULLET_LINES
+    if len(lines) < 4:
+        return "too_few_lines", (
+            f"Expected at least 4 header lines (STATUS, FILES_CHANGED, VERIFICATION, NOTES), got {len(lines)}."
+        )
+    if len(lines) > max_lines:
+        return "too_many_lines", (
+            f"Expected at most 4 headers plus {MAX_REPORT_BULLET_LINES} bullet lines "
+            f"({max_lines} lines total), got {len(lines)}."
+        )
+
+    expected_prefixes = REPORT_FORMAT_HEADERS
+    for idx, (pattern, prefix) in enumerate(zip(REPORT_LINE_PATTERNS, expected_prefixes), start=1):
+        if not pattern.match(lines[idx - 1]):
+            # `NOTES:` may be bare when bullet lines follow it.
+            if prefix == "NOTES:" and re.match(r"^NOTES:\s*$", lines[idx - 1], re.IGNORECASE) and len(lines) > 4:
+                continue
+            cls = _HEADER_PROBLEM_CLASSES[idx - 1]
+            if idx == 1 and any(REPORT_LINE_PATTERNS[0].match(l) for l in lines[1:]):
+                cls = "preamble"  # the STATUS line exists but something precedes it
+            return cls, f"Line {idx} must match '{prefix} <value>'."
+
+    bullet_lines = lines[4:]
+    for b_idx, b_line in enumerate(bullet_lines, start=5):
+        if not REPORT_BULLET_RE.match(b_line):
+            return "bullet", f"Line {b_idx} after NOTES must be a compact bullet starting with '- ' or '* '."
+
+    if require_log_uri:
+        status_match = re.match(r"^STATUS:\s*(\w+)", lines[0], re.IGNORECASE)
+        status_val = status_match.group(1).upper() if status_match else ""
+        if status_val in {"BLOCKED", "FAILED"}:
+            notes_body = lines[3].split(":", 1)[1].strip() if ":" in lines[3] else ""
+            combined_notes = " ".join([notes_body] + [b[1:].strip() for b in bullet_lines]).strip()
+            if not REPORT_LOG_URI_RE.search(combined_notes):
+                return "no_log_uri", f"When STATUS is {status_val}, NOTES must include a 'file://.../*.log' scratch log URI."
+
+    return None
+
+
+def report_problem_class(text: str, require_log_uri: bool = True) -> Optional[str]:
+    """The reason class of an invalid report, or None when it is valid."""
+    found = _report_problem(text, require_log_uri)
+    return found[0] if found else None
+
+
+def store_report_problem(record: Dict[str, Any], found: Optional[Tuple[str, str]]) -> None:
+    """Keep only the reason class of the latest report (never its content) on a spawn record.
+
+    Heartbeat counts are per stop, so a report blocked once and then fixed counts twice.
+    """
+    if found:
+        record["report_problem"] = found[0]
+    else:
+        record.pop("report_problem", None)
+
+
 def validate_subagent_report(text: str, require_log_uri: bool = True) -> Optional[str]:
     """Validate that a subagent report strictly follows the 4-header bounded format.
 
@@ -133,46 +212,8 @@ def validate_subagent_report(text: str, require_log_uri: bool = True) -> Optiona
 
     Returns None if valid, or an error description string if invalid.
     """
-    stripped = "\n".join(l for l in (text or "").splitlines() if not REPORT_FENCE_RE.match(l)).strip()
-    if not stripped:
-        return "Subagent report is empty."
-    if len(stripped) > MAX_SUBAGENT_REPORT_CHARS:
-        return (
-            f"Subagent report length ({len(stripped)} chars) exceeds maximum "
-            f"{MAX_SUBAGENT_REPORT_CHARS} chars."
-        )
-    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
-    max_lines = 4 + MAX_REPORT_BULLET_LINES
-    if len(lines) < 4:
-        return f"Expected at least 4 header lines (STATUS, FILES_CHANGED, VERIFICATION, NOTES), got {len(lines)}."
-    if len(lines) > max_lines:
-        return (
-            f"Expected at most 4 headers plus {MAX_REPORT_BULLET_LINES} bullet lines "
-            f"({max_lines} lines total), got {len(lines)}."
-        )
-
-    expected_prefixes = REPORT_FORMAT_HEADERS
-    for idx, (pattern, prefix) in enumerate(zip(REPORT_LINE_PATTERNS, expected_prefixes), start=1):
-        if not pattern.match(lines[idx - 1]):
-            # `NOTES:` may be bare when bullet lines follow it.
-            if prefix == "NOTES:" and re.match(r"^NOTES:\s*$", lines[idx - 1], re.IGNORECASE) and len(lines) > 4:
-                continue
-            return f"Line {idx} must match '{prefix} <value>'."
-
-    bullet_lines = lines[4:]
-    for b_idx, b_line in enumerate(bullet_lines, start=5):
-        if not REPORT_BULLET_RE.match(b_line):
-            return f"Line {b_idx} after NOTES must be a compact bullet starting with '- ' or '* '."
-
-    status_match = re.match(r"^STATUS:\s*(\w+)", lines[0], re.IGNORECASE)
-    status_val = status_match.group(1).upper() if status_match else ""
-    if require_log_uri and status_val in {"BLOCKED", "FAILED"}:
-        notes_body = lines[3].split(":", 1)[1].strip() if ":" in lines[3] else ""
-        combined_notes = " ".join([notes_body] + [b[1:].strip() for b in bullet_lines]).strip()
-        if not REPORT_LOG_URI_RE.search(combined_notes):
-            return f"When STATUS is {status_val}, NOTES must include a 'file://.../*.log' scratch log URI."
-
-    return None
+    found = _report_problem(text, require_log_uri)
+    return found[1] if found else None
 
 
 REPORT_BLOCK_REASON = _GEN.REPORT_BLOCK_REASON

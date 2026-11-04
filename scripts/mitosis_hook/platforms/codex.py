@@ -27,6 +27,8 @@ from ..report import (
     _append_report_format_enabled,
     append_report_format,
     prompt_has_report_format,
+    _report_problem,
+    store_report_problem,
     validate_subagent_report,
 )
 from ..routing import _tier_effort, decide_subagent, find_mutation
@@ -456,8 +458,10 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
     rec["stops"] = int(rec.get("stops") or 0) + 1
     rec["last_turn_id"] = payload.get("turn_id")
     if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
-        rec["report_ok"] = validate_subagent_report(
-            str(payload.get("last_assistant_message") or ""), require_log_uri=not _is_scout_record(rec)) is None
+        found = _report_problem(
+            str(payload.get("last_assistant_message") or ""), require_log_uri=not _is_scout_record(rec))
+        rec["report_ok"] = found is None
+        store_report_problem(rec, found)
         # v2 spawns carry no model, so the role file alone pins the child: this is the only check it worked.
         if _get_env("CODEX_MITOSIS_VERIFY_PIN", default="1") != "0":
             path = payload.get("agent_transcript_path") or payload.get("transcript_path")
