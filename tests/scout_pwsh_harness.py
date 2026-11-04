@@ -36,7 +36,9 @@ Strict mode refuses those characters, so it should not show up for accepted stri
 CLI:
   python3 tests/scout_pwsh_harness.py [--fuzz N] [--seed S] [--shell pwsh|powershell] [--workers N]
                                       [--json PATH] [--self-check] [--budget SECONDS]
-Exit: 0 no violations, 1 violations found, 2 could not run (no such shell).
+Exit: 0 nothing that fails the run, 1 it found something, 2 could not run (no such shell).
+alias_shadow, not-found and syntax are counted and printed but do not fail a run: a program that reports
+an error wrote nothing, and an alias is checked once per run against READ_ONLY_ALIAS_TARGETS instead.
 --self-check runs the detection against a guard that accepts every string, on a small set, and exits 1
 if it finds no violation (the harness would then be unable to catch anything).
 
@@ -330,17 +332,23 @@ class Sandbox:
 
 # ---------------------------------------------------------------------------------------------- aliases
 
+# What an allowlisted name may resolve to in PowerShell. None of these write, whatever options they get.
+READ_ONLY_ALIAS_TARGETS = {"Get-ChildItem", "Get-Content", "Write-Output", "Get-Location", "Sort-Object", "Compare-Object"}
+INFO_KINDS = {"alias_shadow", "not-found", "syntax"}
+
+
 def probe_aliases(shell: PsShell, box: Sandbox, names: Sequence[str]) -> Dict[str, Dict[str, str]]:
     """name -> {type, source} as Get-Command resolves it with only the stubs on PATH."""
     script = ("foreach ($n in @(%s)) { $c = Get-Command $n -ErrorAction SilentlyContinue | Select-Object -First 1; "
-              "if ($c) { \"$n`t$($c.CommandType)`t$($c.Source)\" } else { \"$n`tNone`t\" } }"
+              "if ($c) { \"$n`t$($c.CommandType)`t$($c.Source)`t$($c.ResolvedCommandName)\" } else { \"$n`tNone`t\" } }"
               % ",".join("'%s'" % n for n in names))
     res = box.run(shell, script)
     out: Dict[str, Dict[str, str]] = {}
     for line in res["stdout"].splitlines():
         parts = line.rstrip("\r").split("\t")
         if len(parts) >= 2:
-            out[parts[0]] = {"type": parts[1], "source": parts[2] if len(parts) > 2 else ""}
+            out[parts[0]] = {"type": parts[1], "source": parts[2] if len(parts) > 2 else "",
+                             "target": parts[3] if len(parts) > 3 else ""}
     return out
 
 
@@ -577,7 +585,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         report["seconds"]))
     for v in report["violations"][:200]:
         print("  %-12s %r  %s" % (v["kind"], v["command"], v["detail"][:140]))
-    return 1 if report["violation_count"] else 0
+    unsafe = sorted("%s=%s" % (n, table[n].get("target")) for n in shadows
+                    if table[n].get("target") not in READ_ONLY_ALIAS_TARGETS)
+    failing = {k: c for k, c in report["violations_by_class"].items() if k not in INFO_KINDS}
+    print("failing classes: %s  unsafe aliases: %s" % (failing or "none", unsafe or "none"))
+    return 1 if failing or unsafe else 0
 
 
 if __name__ == "__main__":
