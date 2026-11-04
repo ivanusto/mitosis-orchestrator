@@ -23,3 +23,7 @@ Drop `--ablation none` (default is `with-without`) to also run a no-plugin basel
 Graders marked `arm: with-only` are reported as indicators, not scored.
 
 In the baseline arm, plugin agents (`flash-lite-scout`, `flash-worker`) fail with "Agent type not found". This is by design: the plugin is not loaded there, so the delta measures what the plugin adds.
+
+## Overhead experiment
+
+`evals/overhead/` (sealed separately from `evals/compare/`) splits the plugin's extra cost on a short task into static prefix text, output tokens and the rest; see its `PROTOCOL.md`.
