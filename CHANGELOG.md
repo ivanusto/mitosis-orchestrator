@@ -8,7 +8,9 @@
 **The scout's shell check allowed commands that wrote to the repository or could lead to running a program.** A white-box review of `scout_command_is_read_only` (28 cases in 7 causes) found them. The review read man pages and source; the three git cases were then verified on real git 2.43.0.
 - `git config --get --no-get core.x val` writes `.git/config` on git before 2.46 (`--no-get` clears the read mode, and two operands then mean set). `core.fsmonitor` set this way makes the allowed `git status` run a program. `--file` makes it write any path.
 - `git branch --list --no-list newb` and `git tag --format --list newt` create refs.
-- Programs started by an option or a placeholder: gpg through `git log --show-signature`, `%G` and `%(signature` in a git format, and `--diff-merges=remerge`; the decompressors behind `file -z`; a ugrep `---FILE` config; a glob in the `git -C` value, which expands into the subcommand slot.
+- Programs started by an option or a placeholder: gpg through `git log --show-signature` and through `%G` and `%(signature` in a git format; the decompressors behind `file -z`; a ugrep `---FILE` config.
+- `git log --diff-merges=remerge` writes objects, the same as `--remerge-diff`, which was already denied.
+- A glob in the `git -C` value can expand into the subcommand slot.
 
 **Affected versions.** `scout_command_is_read_only` was run from detached checkouts of v1.5.1, v2.3.2, v2.4.0 and v2.4.1, one process each, on six commands. No other tag was tested.
 - Allowed by all four: `git config --get --no-get core.x val`, `git tag --format --list newt`, `git log --show-signature`, `git log --diff-merges=remerge`, `file -zS x`.
@@ -28,7 +30,7 @@ A Codex scout started through the MCP server runs under `--sandbox read-only`, w
 - `CLAUDE_MITOSIS_ENFORCE_REPORT=0` no longer turns off background escalation. Untyped pinned agents escalate. A report wrapped in a code fence arms escalation. A quoted `- STATUS: FAILED` line inside a `COMPLETED` report no longer arms it.
 
 ### Behaviour changes
-- **PowerShell on a POSIX host.** Codex `exec_command` has a model-set `shell` argument that the hook cannot see. On a POSIX host where `pwsh` or `powershell` is reachable, a Codex scout now gets the strict character set (no quotes, backslashes, redirects, globs, `;` or `&`), so quoted patterns are denied there and the message says why. Read-off: strict mode has not been checked against a real `pwsh`, and PowerShell 7 stays untested.
+- **PowerShell on a POSIX host.** Codex `exec_command` has a model-set `shell` argument that the hook cannot see. On a POSIX host where `pwsh` or `powershell` is reachable, a Codex scout now gets the strict character set (no quotes, backslashes, redirects, globs, `;` or `&`), so quoted patterns are denied there and the message says why. Strict mode has not been checked against a real `pwsh`, and PowerShell 7 stays untested.
 - **New denials (scout).** Words starting `---` for `grep`, `egrep` and `fgrep`; `file -z`, `-Z`, `-S`; `git log --diff-merges=...`; `--show-signature`; any `%G` or `%(signature` in `git log`, `show`, `shortlog`, `reflog`, `branch` and `tag` words (this also denies harmless text such as `%%G`); `git config --get --no-*`; too many operands; `--list -f x` (write `--file=x`); `git branch NAME` or `--list` after an option that takes a value; `date -d x*`; `git -C r* ...`. A denial says what to change.
 
 ### Correction
@@ -60,10 +62,10 @@ A Codex scout started through the MCP server runs under `--sandbox read-only`, w
 ### Verification
 - 846 tests at `368dc34` (2 skipped), against 755 at 2.4.1.
 - Routing: 1,290 cases, 0 flips against `c887e99`; `routing.py` is unchanged in the range.
-- Oracle fuzz, 4 seeds x 20,000 strings = 80,000: 7,751 accepted, 6,451 unique, 0 violations on bash, dash and busybox sh in bwrap. zsh is not installed. The count is lower than 2.4.1's 280,000 because concurrency was limited.
+- Oracle fuzz, 4 seeds x 20,000 strings = 80,000: 7,751 accepted, 6,451 unique, 0 violations on bash, dash and busybox sh in bwrap. zsh is not installed. This is fewer strings than the 280,000 at 2.4.1, run with 2 workers to limit the load on the machine.
 - Discrimination: the 2.4.0 guard on 5,000 strings gives 664 oracle violations, so the oracle does tell versions apart.
 - Census: 52 programs, 15,680 accepted runs, 0 violations, 0 network, 6 timeouts (all `file`), 0 `skipped_for_memory`.
-- Blind set 3 (sealed, sha256 `589f6116...94c3`): `c887e99` scored 60/60 and 39/40, and the candidate `368dc34` scored 60/60 and 39/40. This set did not catch what the white-box review caught.
+- Blind set 3 (sealed, sha256 `589f6116...94c3`): attacks denied and legitimate commands allowed were 60/60 and 39/40 at `c887e99`, and the same at the candidate `368dc34`. The one denied legitimate command has `$` inside double quotes, which is denied on purpose. This set did not catch what the white-box review caught.
 - Phase 0 measurement of what grows the primary's context was run on one machine (188 interactive sessions). A long-session experiment has not been run.
 
 ### Not covered
