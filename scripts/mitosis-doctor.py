@@ -389,9 +389,22 @@ def run_shell(command: str, env: Dict[str, str], stdin: bytes, cwd: Path) -> Tup
     return proc.returncode, proc.stdout
 
 
+def claude_hooks_rel(root: Path) -> str:
+    """Claude hooks file declared by the manifest; older installs have none, so fall back to hooks/hooks.json."""
+    data, err = load_json(root / ".claude-plugin" / "plugin.json")
+    value = data.get("hooks") if not err and isinstance(data, dict) else None
+    if isinstance(value, str) and value.strip():
+        rel = value.strip()
+        if rel.startswith("./"):
+            rel = rel[2:]
+        if rel and not rel.startswith("/") and ".." not in rel.split("/"):
+            return rel
+    return "hooks/hooks.json"
+
+
 def manifest_command(platform: str, root: Path, tool: str) -> Tuple[Optional[str], str, str]:
     """(command with the plugin root substituted, status, message) for the PreToolUse hook."""
-    rel = {"claude": "hooks/hooks.json", "codex": "hooks/codex-hooks.json", "agy": "hooks.json"}[platform]
+    rel = {"claude": claude_hooks_rel(root), "codex": "hooks/codex-hooks.json", "agy": "hooks.json"}[platform]
     data, err = load_json(root / rel)
     if err:
         return None, UNKNOWN, "%s is %s, nothing to probe" % (rel, err)
@@ -960,11 +973,12 @@ def check_claude(ctx: Ctx, live: bool) -> None:
                 root = root or install
     check_stale(ctx, p, version, "installed_plugins.json")
     if root is not None:
-        missing = [rel for rel in ("hooks/hooks.json", "claude-agents/flash-lite-scout.md", "claude-agents/flash-worker.md") if not (root / rel).is_file()]
+        hooks_rel = claude_hooks_rel(root)
+        missing = [rel for rel in (hooks_rel, "claude-agents/flash-lite-scout.md", "claude-agents/flash-worker.md") if not (root / rel).is_file()]
         if missing:
             ctx.add(p, "files", FAIL, "missing under %s: %s" % (root, ", ".join(missing)))
         else:
-            ctx.add(p, "files", OK, "hooks/hooks.json and both agent files present")
+            ctx.add(p, "files", OK, "%s and both agent files present" % hooks_rel)
     else:
         ctx.add(p, "files", UNKNOWN, "no install path to inspect")
     states = []

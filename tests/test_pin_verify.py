@@ -438,7 +438,7 @@ class StoredHandbackTest(_NoKeyMixin, _ClaudeBase):
         self.assertEqual(after.get("pending_spawns"), before.get("pending_spawns"))
 
     def test_s9_hooks_json_matches_subagent_handback(self):
-        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        hooks = json.loads((ROOT / "hooks" / "claude-hooks.json").read_text(encoding="utf-8"))["hooks"]
         matchers = [g.get("matcher", "") for g in hooks["PostToolUse"]]
         self.assertTrue(any("SubagentHandback" in m.split("|") for m in matchers), matchers)
 

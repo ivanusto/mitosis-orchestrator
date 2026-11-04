@@ -55,6 +55,13 @@ class TestVersionsAgree(unittest.TestCase):
 
 
 class TestManifestPaths(unittest.TestCase):
+    def test_claude_hooks_declared_in_manifest(self):
+        # agy never loads hooks/hooks.json, so the Claude file has its own name and the manifest points at it.
+        rel = load_json(".claude-plugin/plugin.json")["hooks"]
+        self.assertTrue(rel.startswith("./"), rel)
+        self.assertTrue((ROOT / rel).is_file(), rel)
+        self.assertFalse((ROOT / "hooks" / "hooks.json").exists())
+
     def test_claude_agents_exist_with_dot_slash(self):
         # Claude Code loads plugin agents only from "./"-prefixed paths.
         for rel in load_json(".claude-plugin/plugin.json")["agents"]:
@@ -63,7 +70,7 @@ class TestManifestPaths(unittest.TestCase):
                 self.assertTrue((ROOT / rel).is_file(), rel)
 
     def test_hook_commands_point_at_existing_scripts(self):
-        configs = ["hooks.json", "hooks/hooks.json"]
+        configs = ["hooks.json", "hooks/claude-hooks.json"]
         if (ROOT / "hooks" / "codex-hooks.json").exists():
             configs.append("hooks/codex-hooks.json")
         script_re = re.compile(r"(?:\}|\.)/(scripts/[\w.-]+\.py)")
@@ -91,7 +98,7 @@ class TestManifestPaths(unittest.TestCase):
                 for item in node:
                     yield from commands(item)
 
-        for rel in ("hooks.json", "hooks/hooks.json", "hooks/codex-hooks.json"):
+        for rel in ("hooks.json", "hooks/claude-hooks.json", "hooks/codex-hooks.json"):
             found = list(commands(load_json(rel)))
             self.assertTrue(found, rel)
             for command in found:
@@ -102,7 +109,7 @@ class TestManifestPaths(unittest.TestCase):
         handlers = re.search(r"^HANDLERS = \{(.*?)^\}", read("scripts/enforce-orchestrator.py"), re.M | re.S).group(1)
         known = set(re.findall(r'"([\w-]+)":', handlers))
         mode_re = re.compile(r'enforce-orchestrator\.py\\?"? ([\w-]+)')
-        for rel in ("hooks.json", "hooks/hooks.json", "hooks/codex-hooks.json"):
+        for rel in ("hooks.json", "hooks/claude-hooks.json", "hooks/codex-hooks.json"):
             if not (ROOT / rel).exists():
                 continue
             for mode in mode_re.findall(read(rel)):

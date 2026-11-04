@@ -128,8 +128,6 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 | Claude Code | 2.1.318 | 2026-11-04 | headless run of advice, enforce and built-in pinning |
 | Codex CLI | 0.166.0 | 2026-11-04 | installed plugin run after hook review |
 | agy | 1.5.0 | 2026-11-04 | headless run of the edit budget and advice |
-
-- agy: `agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.
 <!-- END GENERATED: compat -->
 
 ### 1. Google Antigravity (`agy` 1.4+)
@@ -168,7 +166,7 @@ For a local checkout, add the directory as the marketplace instead (`claude plug
 claude --plugin-dir /path/to/mitosis-orchestrator
 ```
 
-What gets loaded: `hooks/hooks.json` (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop), the `/orchestrate` skill, and two subagents reachable through the `Agent` tool as `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku, effort `low`) and `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet, effort `medium`). Verify in a new session: the SessionStart banner `[Mitosis Orchestrator Active] Primary model is 'fable'.` appears and `/orchestrate` is listed.
+What gets loaded: `hooks/claude-hooks.json` (declared by `hooks` in `.claude-plugin/plugin.json`) (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop), the `/orchestrate` skill, and two subagents reachable through the `Agent` tool as `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku, effort `low`) and `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet, effort `medium`). Verify in a new session: the SessionStart banner `[Mitosis Orchestrator Active] Primary model is 'fable'.` appears and `/orchestrate` is listed.
 
 ### 3. OpenAI Codex CLI (0.134+; see the verified versions table above)
 
@@ -210,7 +208,7 @@ Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook
 
 ## Bundled Components & Guardrails
 
-### 1. Lifecycle Enforcement Hooks ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
+### 1. Lifecycle Enforcement Hooks ([`hooks.json`](./hooks.json) · [`hooks/claude-hooks.json`](./hooks/claude-hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
 Zero-dependency Python 3.8+ standard library hook engine (entry script plus the [`scripts/mitosis_hook/`](./scripts/mitosis_hook) package) on every turn (~30 ms per call). Model pinning and the scout read-only layer are enforced; delegation of the primary's own edits and tests is advice by default (`*_MITOSIS_FASTPATH_MODE`). On Claude Code the `PreToolUse` matcher is limited to the tools the engine actually inspects (`Agent`, `Task`, `Bash`, `Read`, `NotebookRead`, `Write`, `Edit`, `NotebookEdit`, `SendMessage`), so `Grep` / `Glob` / `WebFetch` / MCP calls no longer pay the hook start-up cost:
 
 | Hook Event | Guardrail / Behavior |

@@ -310,7 +310,7 @@ class TestFailureObserver(Base):
 
     def test_mode_registered_and_hook_configured(self):
         self.assertIn("post-tool-use-failure", eo.HANDLERS)
-        cfg = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["PostToolUseFailure"][0]
+        cfg = json.loads((ROOT / "hooks" / "claude-hooks.json").read_text())["hooks"]["PostToolUseFailure"][0]
         self.assertEqual(cfg["matcher"], "Agent|Bash")
         self.assertIn("post-tool-use-failure", cfg["hooks"][0]["command"])
 

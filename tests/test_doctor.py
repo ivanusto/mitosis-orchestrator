@@ -567,10 +567,21 @@ class TestStatic(DoctorCase):
         self.assertFalse([k for k in checks if "heartbeat" in k or "pin_verify" in k])
 
     def test_claude_missing_hooks_file_is_fail(self):
-        (self.fx.claude_tree / "hooks" / "hooks.json").unlink()
+        (self.fx.claude_tree / "hooks" / "claude-hooks.json").unlink()
         checks = self.fx.checks("--platform", "claude")
-        self.assertFail(checks, "claude.files", "hooks/hooks.json")
+        self.assertFail(checks, "claude.files", "hooks/claude-hooks.json")
         self.assertEqual(self.status(checks, "claude.probe.scout"), "UNKNOWN")
+
+    def test_claude_old_install_without_manifest_hooks_falls_back(self):
+        tree = self.fx.claude_tree
+        (tree / "hooks" / "claude-hooks.json").rename(tree / "hooks" / "hooks.json")
+        manifest = tree / ".claude-plugin" / "plugin.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data.pop("hooks", None)
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        checks = self.fx.checks("--platform", "claude")
+        self.assertEqual(self.status(checks, "claude.files"), "OK")
+        self.assertEqual(self.status(checks, "claude.probe.scout"), "OK")
 
     def test_stale_version_warns(self):
         p = self.fx.home / ".claude" / "plugins" / "installed_plugins.json"
@@ -670,7 +681,7 @@ class TestFaultInjection(DoctorCase):
         self.assertIn("DENIAL", verdict[1])
 
     def test_matcher_that_skips_the_tool_fails(self):
-        path = self.fx.claude_tree / "hooks" / "hooks.json"
+        path = self.fx.claude_tree / "hooks" / "claude-hooks.json"
         edit(path, "Agent|Task|Bash", "Task|Bash")
         self.assertFail(self.fx.checks("--platform", "claude"), "claude.probe.scout", "matcher")
 

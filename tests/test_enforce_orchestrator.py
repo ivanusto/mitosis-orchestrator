@@ -2049,7 +2049,7 @@ class TestClaudeStopPayloadDetection(unittest.TestCase):
 
 class TestClaudeHooksManifest(unittest.TestCase):
     def test_pretooluse_matcher_is_narrowed(self):
-        data = json.loads((Path(__file__).resolve().parent.parent / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        data = json.loads((Path(__file__).resolve().parent.parent / "hooks" / "claude-hooks.json").read_text(encoding="utf-8"))
         matcher = data["hooks"]["PreToolUse"][0]["matcher"]
         self.assertNotEqual(matcher, "*")
         for tool in ("Agent", "Task", "Bash", "Read", "Write", "Edit", "NotebookEdit", "SendMessage"):

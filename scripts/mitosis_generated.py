@@ -45,5 +45,5 @@ REPORT_BLOCK_REASON = "[Mitosis Orchestrator] Your final message must be the bou
 COMPAT = {
     'claude': {'verified': '2.1.318', 'verified_on': '2026-11-04', 'method': 'headless run of advice, enforce and built-in pinning'},
     'codex': {'verified': '0.166.0', 'verified_on': '2026-11-04', 'method': 'installed plugin run after hook review'},
-    'agy': {'verified': '1.5.0', 'verified_on': '2026-11-04', 'method': 'headless run of the edit budget and advice', 'note': '`agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.'},
+    'agy': {'verified': '1.5.0', 'verified_on': '2026-11-04', 'method': 'headless run of the edit budget and advice'},
 }

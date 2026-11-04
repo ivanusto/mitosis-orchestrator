@@ -20,7 +20,7 @@ import _support  # noqa: E402,F401
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "enforce-orchestrator.py"
-CONFIGS = ("hooks.json", "hooks/hooks.json", "hooks/codex-hooks.json")
+CONFIGS = ("hooks.json", "hooks/claude-hooks.json", "hooks/codex-hooks.json")
 WINDOWS = os.name == "nt"
 PAYLOAD = {
     "hook_event_name": "PreToolUse",
@@ -161,7 +161,7 @@ class TestFallbackChain(unittest.TestCase):
         bash = r"C:\Program Files\Git\bin\bash.exe"
         if not os.path.exists(bash):
             self.skipTest("no Git Bash")
-        command = config_commands("hooks/hooks.json")[0]
+        command = config_commands("hooks/claude-hooks.json")[0]
         proc = subprocess.run([bash, "-c", command], input=json.dumps(PAYLOAD).encode(), capture_output=True, cwd=str(ROOT), timeout=60)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIsInstance(json.loads(proc.stdout.decode()), dict)

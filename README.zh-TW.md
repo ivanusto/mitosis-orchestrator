@@ -128,8 +128,6 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | Claude Code | 2.1.318 | 2026-11-04 | 以 headless 實跑提醒、拒絕與內建代理釘定 |
 | Codex CLI | 0.166.0 | 2026-11-04 | 完成 hook review 後以已安裝外掛實跑 |
 | agy | 1.5.0 | 2026-11-04 | 以 headless 實跑改檔預算與提醒 |
-
-- agy：`agy plugin validate --strict` 會警告 hooks/hooks.json 未被載入。該檔供 Claude Code 使用；agy 讀的是外掛根目錄的 hooks.json。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
@@ -168,7 +166,7 @@ claude plugin list         # mitosis-orchestrator@mitosis-orchestrator  ✔ enab
 claude --plugin-dir /path/to/mitosis-orchestrator
 ```
 
-載入內容：`hooks/hooks.json`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop）、`/orchestrate` skill，以及兩個可由 `Agent` 工具呼叫的子代理：`subagent_type: "mitosis-orchestrator:flash-lite-scout"`（haiku，effort `low`）與 `subagent_type: "mitosis-orchestrator:flash-worker"`（sonnet，effort `medium`）。驗證方式：開新 session 後應看到 `[Mitosis Orchestrator Active] Primary model is 'fable'.` 橫幅，且 `/orchestrate` 出現在指令清單。
+載入內容：`hooks/claude-hooks.json`（由 `.claude-plugin/plugin.json` 的 `hooks` 宣告）（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop）、`/orchestrate` skill，以及兩個可由 `Agent` 工具呼叫的子代理：`subagent_type: "mitosis-orchestrator:flash-lite-scout"`（haiku，effort `low`）與 `subagent_type: "mitosis-orchestrator:flash-worker"`（sonnet，effort `medium`）。驗證方式：開新 session 後應看到 `[Mitosis Orchestrator Active] Primary model is 'fable'.` 橫幅，且 `/orchestrate` 出現在指令清單。
 
 ### 平台三：OpenAI Codex CLI (0.134 以上；已驗證版本見上方表格)
 
@@ -210,7 +208,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 
 ## 核心組件與安全防護機制
 
-### 1. 生命週期強制守衛 ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
+### 1. 生命週期強制守衛 ([`hooks.json`](./hooks.json) · [`hooks/claude-hooks.json`](./hooks/claude-hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
 零外部依賴（僅 Python 3.8+ 標準函式庫；入口腳本加上 [`scripts/mitosis_hook/`](./scripts/mitosis_hook) 套件），每次呼叫約 30 毫秒，於每個代理生命週期運作。模型釘定與 scout 唯讀層是強制的；主核自己改檔與跑測試是否委派，預設只提醒（`*_MITOSIS_FASTPATH_MODE`）。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
 
 | Hook 事件 | 防護機制與行為說明 |
