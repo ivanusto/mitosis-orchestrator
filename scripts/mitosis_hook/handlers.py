@@ -177,14 +177,20 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("agent_id"):
         return {}
     state = load_state(payload)
-    state["turn_edited_files"] = []
+    agy = _is_agy_payload(payload)
+    inv = payload.get("invocationNum", 0)
+    # agy fires PreInvocation on every model call; its invocationNum returns to 0 on a new user turn.
+    if not agy or isinstance(inv, bool) or not isinstance(inv, int) or inv == 0:
+        state["turn_edited_files"] = []
+        state["fastpath_advised"] = []
     state["consecutive_failures"] = 0
     agy_steps: List[Dict[str, Any]] = []
-    if (payload.get("artifactDirectoryPath") and not is_codex_payload(payload)
-            and not is_claude_code_payload(payload)):
+    if agy:
         # agy primary: read newly delivered subagent reports (arms escalation, flags invalid ones).
         scan_new_messages(payload, state)
         agy_steps = invalid_report_steps(state)
+        for text in state.pop("fastpath_pending_advice", None) or []:
+            agy_steps.append({"ephemeralMessage": text})
     save_state(payload, state)
 
     model_name = str(payload.get("modelName") or payload.get("model_name") or payload.get("model") or "")
@@ -399,6 +405,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                     payload,
                 )
 
+    advice: Optional[str] = None
     # Primary agent guards (context hygiene and fast-path budget)
     if is_primary_agent(payload, state):
         # Context hygiene: block direct reads of raw logs or transcripts by primary agent
@@ -422,7 +429,9 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
 
         # Fast-path budget: direct workspace file mutations and test-runner loops
-        if not _env_flag("CODEX_MITOSIS_ALLOW_DIRECT_FASTPATH", "CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
+        mode = _fastpath_mode()
+        if mode != "off":
+            enforce = mode == "enforce"
             if tool_name in MUTATION_TOOLS or tool_name == "apply_patch":
                 if tool_name == "apply_patch":
                     patch_targets = _extract_apply_patch_files(args)
@@ -434,22 +443,23 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                             norm_targets.append(t)
                     state = load_state(payload)  # locked read-modify-write of the edit budget
                     edited: List[str] = state.setdefault("turn_edited_files", [])
-                    max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
-                    try:
-                        max_edits = int(max_edits_str)
-                    except ValueError:
-                        max_edits = 3
+                    max_edits = _max_direct_edits()
+                    over = False
                     new_targets = [nt for nt in norm_targets if nt not in edited]
                     if len(edited) + len(new_targets) > max_edits:
-                        return _deny(
-                            f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
-                            f"when editing via apply_patch. Delegate multi-file modifications to "
-                            f"{_delegation_hint(payload, 'flash')}.",
-                            payload,
-                        )
+                        if enforce:
+                            return _deny(
+                                f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
+                                f"when editing via apply_patch. Delegate multi-file modifications to "
+                                f"{_delegation_hint(payload, 'flash')}.",
+                                payload,
+                            )
+                        over = True
+                        advice = _fastpath_advice(payload, state, "edit_limit",
+                                                  f"more than {max_edits} files were edited directly this turn")
                     for nt in new_targets:
                         edited.append(nt)
-                    if new_targets:
+                    if new_targets or over:
                         save_state(payload, state)
                 else:
                     target = str(
@@ -474,34 +484,141 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                             norm_target = target
                         state = load_state(payload)  # locked read-modify-write of the edit budget
                         edited: List[str] = state.setdefault("turn_edited_files", [])
-                        max_edits_str = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
-                        try:
-                            max_edits = int(max_edits_str)
-                        except ValueError:
-                            max_edits = 3
+                        max_edits = _max_direct_edits()
+                        over = False
                         if norm_target not in edited and len(edited) >= max_edits:
-                            return _deny(
-                                f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
-                                f"when editing '{Path(target).name}'. Delegate multi-file modifications to "
-                                f"{_delegation_hint(payload, 'flash')}.",
-                                payload,
-                            )
+                            if enforce:
+                                return _deny(
+                                    f"[Mitosis Orchestrator] Direct workspace edit limit ({max_edits} files per turn) exceeded "
+                                    f"when editing '{Path(target).name}'. Delegate multi-file modifications to "
+                                    f"{_delegation_hint(payload, 'flash')}.",
+                                    payload,
+                                )
+                            over = True
+                            advice = _fastpath_advice(payload, state, "edit_limit",
+                                                      f"more than {max_edits} files were edited directly this turn")
                         if norm_target not in edited:
                             edited.append(norm_target)
+                            save_state(payload, state)
+                        elif over:
                             save_state(payload, state)
 
             elif tool_name in ("run_command", "Bash", "shell", "exec_command", "local_shell"):
                 cmd = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "").strip()
                 edited = state.get("turn_edited_files", [])
-                if edited and TEST_RUNNER_RE.search(cmd):
-                    return _deny(
-                        "[Mitosis Orchestrator] Direct workspace edit followed by test runner execution detected "
-                        f"in the primary agent ('{cmd}'). Delegate code editing and test execution loops "
-                        f"to {_delegation_hint(payload, 'flash')}.",
-                        payload,
-                    )
+                if edited and _runs_test_runner(cmd):
+                    if enforce:
+                        return _deny(
+                            "[Mitosis Orchestrator] Direct workspace edit followed by test runner execution detected "
+                            f"in the primary agent ('{cmd}'). Delegate code editing and test execution loops "
+                            f"to {_delegation_hint(payload, 'flash')}.",
+                            payload,
+                        )
+                    state = load_state(payload)
+                    advice = _fastpath_advice(payload, state, "edit_test",
+                                              "a test runner was started after direct edits in this context")
+                    save_state(payload, state)
 
-    return _handle_workspace_guard(payload, tool_name, args)
+    verdict = _handle_workspace_guard(payload, tool_name, args)
+    if advice and (is_claude_code_payload(payload) or is_codex_hook_payload(payload)):
+        verdict = _attach_advice(verdict, advice)
+    return verdict
+
+
+def _fastpath_mode() -> str:
+    if _env_flag("CODEX_MITOSIS_ALLOW_DIRECT_FASTPATH", "CLAUDE_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_MITOSIS_ALLOW_DIRECT_FASTPATH", "AGY_ARGON_ALLOW_DIRECT_FASTPATH"):
+        return "off"
+    mode = _get_env("CODEX_MITOSIS_FASTPATH_MODE", "CLAUDE_MITOSIS_FASTPATH_MODE", "AGY_MITOSIS_FASTPATH_MODE", default="advise").lower()
+    return mode if mode in ("enforce", "advise", "off") else "advise"
+
+
+def _max_direct_edits() -> int:
+    raw = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
+    try:
+        return int(raw)
+    except ValueError:
+        return 3
+
+
+def _is_agy_payload(payload: Dict[str, Any]) -> bool:
+    return bool(payload.get("artifactDirectoryPath")) and not is_codex_payload(payload) and not is_claude_code_payload(payload)
+
+
+def _fastpath_advice(payload: Dict[str, Any], state: Dict[str, Any], kind: str, what: str) -> Optional[str]:
+    """Once per kind per turn. Returns text to attach now (Claude/Codex hooks); queues it on agy."""
+    hook = is_claude_code_payload(payload) or is_codex_hook_payload(payload)
+    agy = _is_agy_payload(payload)
+    if not (hook or agy):
+        return None
+    advised = state.get("fastpath_advised")
+    if not isinstance(advised, list):
+        advised = state["fastpath_advised"] = []
+    if kind in advised:
+        return None
+    advised.append(kind)
+    text = (
+        f"[Mitosis Orchestrator] Advice, not a block: {what}. Delegating to "
+        f"{_delegation_hint(payload, 'flash')} protects this context but usually costs more in total, "
+        "so do it only when this context matters. Set *_MITOSIS_FASTPATH_MODE=enforce to turn this into a denial."
+    )
+    if agy:
+        pending = state.get("fastpath_pending_advice")
+        if not isinstance(pending, list):
+            pending = state["fastpath_pending_advice"] = []
+        pending.append(text)
+        return None
+    return text
+
+
+def _attach_advice(verdict: Dict[str, Any], advice: str) -> Dict[str, Any]:
+    if not verdict:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": advice}}
+    hso = verdict.get("hookSpecificOutput")
+    if isinstance(hso, dict) and hso.get("permissionDecision") != "deny":
+        hso["additionalContext"] = advice
+    return verdict
+
+
+_QUOTED_RE = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\||\n|(?<![>&])&(?![>&])")
+_SHELL_STRING_RE = re.compile(r"(?:^|[\s;&|(])(?:\S*/)?(?:bash|sh|zsh|dash|eval)\s+(?:-\w*c\b|[\"'])")
+_RUNS_NESTED_RE = re.compile(r"\$\(|`|\s-exec(?:dir)?\s|\s-ok\s")
+_NON_RUNNER_WORDS = {"grep", "rg", "cat", "echo", "git", "sed", "awk", "ls", "find", "head", "tail"}
+
+
+def _strip_heredocs(cmd: str) -> str:
+    lines = cmd.split("\n")
+    out: List[str] = []
+    delim: Optional[str] = None
+    for line in lines:
+        if delim is not None:
+            if line.strip() == delim:
+                delim = None
+            continue
+        out.append(line)
+        m = _HEREDOC_RE.search(line)
+        if m:
+            delim = m.group(2)
+    return "\n".join(out)
+
+
+def _runs_test_runner(cmd: str) -> bool:
+    """True when a command actually runs a test runner, not when text merely names one."""
+    body = _strip_heredocs(cmd)
+    # A string handed to a shell is a command, so read it instead of removing it.
+    if _SHELL_STRING_RE.search(body) and TEST_RUNNER_RE.search(body):
+        return True
+    text = _QUOTED_RE.sub(" ", body)
+    for seg in _SEGMENT_SPLIT_RE.split(text):
+        words = seg.split()
+        if not words:
+            continue
+        if os.path.basename(words[0]) in _NON_RUNNER_WORDS and not _RUNS_NESTED_RE.search(seg):
+            continue
+        if TEST_RUNNER_RE.search(seg):
+            return True
+    return False
 
 
 def _tool_failed(tool_name: str, payload: Dict[str, Any]) -> bool:

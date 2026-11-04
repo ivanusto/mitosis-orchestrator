@@ -111,10 +111,11 @@ All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*`
 - **`CLAUDE_MITOSIS_SCOUT_MODEL` / `CLAUDE_MITOSIS_WORKER_MODEL`**: Claude Code model per tier (defaults `haiku` / `sonnet`; accepts `haiku`, `sonnet`, `opus`, `fable`).
 - **`CLAUDE_MITOSIS_PIN_EFFORT=0`**: Stop adding `effort` to pinned Claude Code `Agent` calls.
 - **`CLAUDE_MITOSIS_SCOUT_EFFORT` / `CLAUDE_MITOSIS_WORKER_EFFORT`**: Claude Code effort per tier (defaults `low` / `medium`).
-- **`*_MITOSIS_AUTO_ALLOW=1`**: Enable workspace scope guard for automated in-workspace permissions.
+- **`*_MITOSIS_AUTO_ALLOW=1`**: Enable workspace scope guard for automated in-workspace permissions (on Codex the guard only denies, because Codex rejects an allow without updatedInput).
 - **`*_MITOSIS_MAX_DIRECT_EDITS=<int>`**: Cap direct primary agent file edits per turn (default: 3).
 - **`*_MITOSIS_ALLOW_DIRECT_LOGS=1`**: Allow primary agent direct inspection of raw `.log` and transcripts.
-- **`*_MITOSIS_ALLOW_DIRECT_FASTPATH=1`**: Bypass direct edit budget and edit-then-test restrictions.
+- **`*_MITOSIS_FASTPATH_MODE=advise|enforce|off`**: Fast-path budget mode (default `advise`: never blocks, one advice note per kind per turn; `enforce` restores the denials; `off` disables). On agy the budget is per user turn.
+- **`*_MITOSIS_ALLOW_DIRECT_FASTPATH=1`**: Same as `*_MITOSIS_FASTPATH_MODE=off`, with no tracking.
 - **`*_MITOSIS_CIRCUIT_BREAKER=0`**: Disable the 2-failure circuit breaker.
 - **`*_MITOSIS_DEBUG=1`**: Enable verbose JSON diagnostic logging to `mitosis_orchestrator_debug.log`.
 - **`MITOSIS_CODEX_YOLO=1`**: Run Codex subagents from the MCP server without sandboxing (default: scouts `read-only`, workers `workspace-write`).

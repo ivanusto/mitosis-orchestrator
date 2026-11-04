@@ -33,8 +33,10 @@ pre-tool-use
                          failures reach >= 2.
     context hygiene   -> blocks direct inspection of .log and transcript.jsonl
                          files by the primary agent (delegates to flash-lite-scout).
-    fast-path budget  -> tracks direct workspace edits (max 3 by default) and blocks
+    fast-path budget  -> tracks direct workspace edits (max 3 by default) and flags
                          direct workspace edit + test-runner loops in the primary agent.
+                         Default mode is advise (no block, one note per kind per turn);
+                         FASTPATH_MODE=enforce denies. On agy the budget is per user turn.
     workspace guard   -> "allow" when cwd, paths and command text stay inside
                          workspacePaths or artifactDirectoryPath; "ask" for
                          paths outside, privilege escalation, destructive or
@@ -61,7 +63,8 @@ Environment variables:
     AGY_MITOSIS_AUTO_ALLOW=1            enable the workspace scope guard (off by default)
     AGY_MITOSIS_MAX_DIRECT_EDITS=<int>  max distinct workspace file edits per turn (default: 3)
     AGY_MITOSIS_ALLOW_DIRECT_LOGS=1     allow primary agent to read raw logs and transcripts
-    AGY_MITOSIS_ALLOW_DIRECT_FASTPATH=1 allow primary agent direct edit-test loops and unlimited edits
+    AGY_MITOSIS_FASTPATH_MODE=<mode>    advise (default) | enforce (deny) | off, for the fast-path budget
+    AGY_MITOSIS_ALLOW_DIRECT_FASTPATH=1 same as FASTPATH_MODE=off (no tracking)
     AGY_MITOSIS_CIRCUIT_BREAKER=0       disable the 2-failure circuit breaker
     CLAUDE_MITOSIS_PIN_SUBAGENTS=0      (Claude Code) stop rewriting Agent calls entirely
     CLAUDE_MITOSIS_SCOUT_MODEL=<m>      (Claude Code) scout model (default: haiku; haiku|sonnet|opus|fable)

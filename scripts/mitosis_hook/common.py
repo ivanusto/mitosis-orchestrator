@@ -194,9 +194,9 @@ def _allow(
             out["updatedInput"] = updated_input
         return {"hookSpecificOutput": out}
     if payload and is_codex_hook_payload(payload):
-        # Codex applies updatedInput only alongside "allow". A bare allow would
-        # skip Codex's own approval, so pass-through stays silent.
-        if updated_input is None and not overrides:
+        # Codex applies updatedInput only alongside "allow" and marks an allow
+        # without it as a failed hook, so the guard only denies there.
+        if updated_input is None:
             return {}
         out = {"hookEventName": "PreToolUse", "permissionDecision": "allow", "permissionDecisionReason": reason}
         if updated_input is not None:

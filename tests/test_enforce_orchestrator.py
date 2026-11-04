@@ -732,6 +732,7 @@ class TestContextHygieneAndFastPath(HookBase):
         self.assertEqual(res["decision"], "allow")
 
     def test_direct_edits_capped_at_max_direct_edits(self):
+        os.environ["AGY_MITOSIS_FASTPATH_MODE"] = "enforce"
         # Default max is 3 distinct files
         res1 = eo.handle_pre_tool_use(self.tool("write_to_file", {"TargetFile": str(self.ws / "a.py")}))
         self.assertEqual(res1["decision"], "allow")
@@ -748,6 +749,7 @@ class TestContextHygieneAndFastPath(HookBase):
         self.assertIn("Direct workspace edit limit", res4["reason"])
 
     def test_direct_edits_custom_max(self):
+        os.environ["AGY_MITOSIS_FASTPATH_MODE"] = "enforce"
         os.environ["AGY_MITOSIS_MAX_DIRECT_EDITS"] = "1"
         res1 = eo.handle_pre_tool_use(self.tool("write_to_file", {"TargetFile": str(self.ws / "a.py")}))
         self.assertEqual(res1["decision"], "allow")
@@ -755,6 +757,7 @@ class TestContextHygieneAndFastPath(HookBase):
         self.assertEqual(res2["decision"], "deny")
 
     def test_direct_edits_custom_max_legacy(self):
+        os.environ["AGY_MITOSIS_FASTPATH_MODE"] = "enforce"
         os.environ["AGY_ARGON_MAX_DIRECT_EDITS"] = "1"
         res1 = eo.handle_pre_tool_use(self.tool("write_to_file", {"TargetFile": str(self.ws / "a.py")}))
         self.assertEqual(res1["decision"], "allow")
@@ -781,6 +784,7 @@ class TestContextHygieneAndFastPath(HookBase):
         self.assertEqual(state.get("turn_edited_files", []), [])
 
     def test_workspace_edit_followed_by_test_runner_denied(self):
+        os.environ["AGY_MITOSIS_FASTPATH_MODE"] = "enforce"
         eo.handle_pre_tool_use(self.tool("write_to_file", {"TargetFile": str(self.ws / "calc.py")}))
         for test_cmd in ("pytest", "python -m unittest discover", "npm test", "cargo test", "go test", "vitest run"):
             with self.subTest(cmd=test_cmd):
@@ -804,6 +808,7 @@ class TestContextHygieneAndFastPath(HookBase):
         self.assertEqual(res["decision"], "allow")
 
     def test_pre_invocation_resets_turn_tracking(self):
+        self.payload["invocationNum"] = 0  # agy resets the turn budget on invocationNum 0
         eo.handle_pre_tool_use(self.tool("write_to_file", {"TargetFile": str(self.ws / "a.py")}))
         state = eo.load_state(self.payload)
         self.assertTrue(len(state.get("turn_edited_files", [])) > 0)
@@ -1194,6 +1199,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_claude_write_budget_capped(self):
+        os.environ["CLAUDE_MITOSIS_FASTPATH_MODE"] = "enforce"
         for i in range(3):
             call = self.tool("Write", {"file_path": str(self.project_dir / f"f{i}.py")})
             res = eo.handle_pre_tool_use(call)
@@ -1205,6 +1211,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         self.assertIn("Direct workspace edit limit", res_blocked["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_claude_write_budget_custom_max(self):
+        os.environ["CLAUDE_MITOSIS_FASTPATH_MODE"] = "enforce"
         os.environ["CLAUDE_MITOSIS_MAX_DIRECT_EDITS"] = "1"
         call1 = self.tool("Write", {"file_path": str(self.project_dir / "a.py")})
         res1 = eo.handle_pre_tool_use(call1)
@@ -1222,6 +1229,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
             self.assertEqual(res, {})  # pass-through: no permission verdict
 
     def test_claude_bash_edit_then_test_runner_denied(self):
+        os.environ["CLAUDE_MITOSIS_FASTPATH_MODE"] = "enforce"
         write_call = self.tool("Write", {"file_path": str(self.project_dir / "calc.py")})
         eo.handle_pre_tool_use(write_call)
         bash_call = self.tool("Bash", {"command": "pytest tests/"})
@@ -1385,6 +1393,7 @@ class TestCodexEngine(HookBase):
         self.assertEqual(eo._extract_apply_patch_files({"files": ["test.py"]}), ["test.py"])
 
     def test_apply_patch_fast_path_budget(self):
+        os.environ["CODEX_MITOSIS_FASTPATH_MODE"] = "enforce"
         ws = Path(self.tmp.name) / "workspace"
         ws.mkdir(parents=True, exist_ok=True)
         (ws / "f1.py").write_text("x", encoding="utf-8")
