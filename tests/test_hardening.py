@@ -280,6 +280,22 @@ class TestMcpServerRobustness(unittest.TestCase):
         self.assertEqual((res["model"], res["type"]), (mcp.DEFAULT_CODEX_WORKER_MODEL, mcp.WORKER_TYPE))
         self.assertEqual(seen, [mcp.DEFAULT_CODEX_SCOUT_MODEL, mcp.DEFAULT_CODEX_WORKER_MODEL])
 
+    def test_scout_blocked_without_log_uri_is_valid_but_a_workers_is_not(self):
+        """A scout is read-only and cannot write the log a BLOCKED report would cite (require_log_uri follows the role)."""
+        blocked = "STATUS: BLOCKED\nFILES_CHANGED: NONE\nVERIFICATION: grep was denied\nNOTES: denied: grep -r"
+
+        def runner(prompt, model, workspace="inherit", cwd=None, **kw):
+            return 0, blocked, ""
+
+        scout = mcp.execute_subagent_task({"prompt": "Locate parse_token"}, runner=runner)
+        self.assertEqual(scout["type"], mcp.SCOUT_TYPE)
+        self.assertEqual(scout["report_validation"], "valid")
+        self.assertFalse(scout["is_error"])
+        worker = mcp.execute_subagent_task({"prompt": "Edit parser.py to fix the crash"}, runner=runner)
+        self.assertEqual(worker["type"], mcp.WORKER_TYPE)
+        self.assertNotEqual(worker["report_validation"], "valid")
+        self.assertTrue(worker["is_error"])
+
     def test_dash_prompt_stays_positional(self):
         cmd = mcp.build_codex_cmd("--help me", "gpt-5.6-terra")
         self.assertEqual(cmd[-2:], ["--", "--help me"])

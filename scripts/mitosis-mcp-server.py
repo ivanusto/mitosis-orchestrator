@@ -230,7 +230,8 @@ def execute_subagent_task(
     rc, stdout, stderr = run_codex_exec(prompt, model, workspace=workspace, cwd=cwd, runner=runner, role_type=role_type)
     output = stdout.strip() if stdout else stderr.strip()
 
-    val_error = validate_subagent_report(output)
+    # A scout runs in a read-only sandbox and cannot write the log a BLOCKED/FAILED report would cite.
+    val_error = validate_subagent_report(output, require_log_uri=role_type != SCOUT_TYPE)
     is_error = rc != 0 or bool(val_error)
 
     return {
