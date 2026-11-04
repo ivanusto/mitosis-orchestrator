@@ -16,6 +16,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _support  # noqa: E402,F401
@@ -570,7 +571,25 @@ class TestFaultInjection(DoctorCase):
         self.assertEqual((self.fx.hb_dir / "heartbeat-claude.json").read_text(encoding="utf-8"), hb)
 
 
+# Doctor never treats a Codex hash method as verified on Windows (codex_trust_verified), so a mismatch there is UNKNOWN.
+MISMATCH = "UNKNOWN" if os.name == "nt" else "FAIL"
+
+
 class TestCodexTrust(DoctorCase):
+    def assertMismatch(self, checks, cid, text=None):
+        self.assertEqual(self.status(checks, cid), MISMATCH, checks[cid])
+        if text and MISMATCH == "FAIL":
+            self.assertIn(text, checks[cid]["message"])
+
+    def test_trust_verified_is_false_on_windows_and_follows_the_table_elsewhere(self):
+        line = "codex-cli 0.166.0"
+        with mock.patch.object(doctor.os, "name", "nt"):
+            self.assertFalse(doctor.codex_trust_verified(line))
+        with mock.patch.object(doctor.os, "name", "posix"):
+            self.assertTrue(doctor.codex_trust_verified(line))
+            self.assertFalse(doctor.codex_trust_verified("codex-cli 9.9.9"))
+            self.assertFalse(doctor.codex_trust_verified(None))
+
     def setUp(self):
         super().setUp()
         self.fx.codex_version("0.166.0")
@@ -614,17 +633,17 @@ class TestCodexTrust(DoctorCase):
         target = self.fx.codex_tree / "scripts" / "enforce-orchestrator.py"
         target.write_bytes(target.read_bytes() + b" ")
         checks = self.trust()
-        self.assertFail(checks, "codex.trust.bundle", "Completed")
+        self.assertMismatch(checks, "codex.trust.bundle", "Completed")
         self.assertOnlyTrustNotOk(checks, {"codex.trust.bundle"})
-        self.assertEqual(self.fx.last_rc, 2)
+        self.assertEqual(self.fx.last_rc, 1 if os.name == "nt" else 2)
 
     def test_new_file_fails(self):
         (self.fx.codex_tree / "extra.txt").write_text("x", encoding="utf-8")
-        self.assertFail(self.trust(), "codex.trust.bundle")
+        self.assertMismatch(self.trust(), "codex.trust.bundle")
 
     def test_new_empty_directory_fails(self):
         (self.fx.codex_tree / "emptydir").mkdir()
-        self.assertFail(self.trust(), "codex.trust.bundle")
+        self.assertMismatch(self.trust(), "codex.trust.bundle")
 
     def test_pyc_pycache_venv_egg_info_changes_stay_ok(self):
         t = self.fx.codex_tree
@@ -654,8 +673,9 @@ class TestCodexTrust(DoctorCase):
     def test_baseline_missing_warns_and_is_not_created(self):
         self.fx.write_codex(content=False)
         checks = self.trust()
-        self.assertEqual(self.status(checks, "codex.trust.bundle"), "WARN")
-        self.assertIn("unreviewed", checks["codex.trust.bundle"]["message"])
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "UNKNOWN" if os.name == "nt" else "WARN")
+        if os.name != "nt":
+            self.assertIn("unreviewed", checks["codex.trust.bundle"]["message"])
         self.assertFalse((self.fx.home / ".codex" / ".hook-trust").exists())
         self.fx.codex_version("9.9.9")
         self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN")
@@ -670,7 +690,7 @@ class TestCodexTrust(DoctorCase):
         self.assertEqual(self.status(checks, "codex.trust.bundle"), "OK")
         self.assertIn("legacy", checks["codex.trust.bundle"]["message"])
         bf.write_text("sha256:" + "0" * 64, encoding="utf-8")
-        self.assertFail(self.trust(), "codex.trust.bundle")
+        self.assertMismatch(self.trust(), "codex.trust.bundle")
         self.fx.codex_version("9.9.9")
         self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN")
 
@@ -683,10 +703,10 @@ class TestCodexTrust(DoctorCase):
         idx = max(i for i, ln in enumerate(lines) if ln.startswith("trusted_content_hash"))
         del lines[idx]
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "WARN")
+        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN" if os.name == "nt" else "WARN")
         target = self.fx.codex_tree / "scripts" / "enforce-orchestrator.py"
         target.write_bytes(target.read_bytes() + b" ")
-        self.assertFail(self.trust(), "codex.trust.bundle")
+        self.assertMismatch(self.trust(), "codex.trust.bundle")
 
     # ---- declarations
     def test_matcher_edit_fails_only_pre_tool_use(self):
@@ -715,8 +735,8 @@ class TestCodexTrust(DoctorCase):
             path.write_text(path.read_text(encoding="utf-8").replace("|| exit 0", "|| exit 0 "), encoding="utf-8")
         checks = self.trust()
         for event in EVENTS:
-            self.assertFail(checks, "codex.trust." + event)
-        self.assertFail(checks, "codex.trust.bundle")
+            self.assertMismatch(checks, "codex.trust." + event)
+        self.assertMismatch(checks, "codex.trust.bundle")
         self.fx.codex_version("9.9.9")
         checks = self.trust()
         for event in EVENTS:

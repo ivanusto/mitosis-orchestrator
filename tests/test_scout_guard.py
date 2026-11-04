@@ -445,6 +445,33 @@ class TestScoutOracle(unittest.TestCase):
         self.assertTrue({v["kind"] for v in found} >= {"argv", "missing"})
 
 
+class TestChildPreexecWithoutResource(unittest.TestCase):
+    """Windows has no `resource` module and Popen rejects any preexec_fn there; runs on every platform."""
+
+    def test_no_preexec_when_resource_is_absent(self):
+        with mock.patch.object(scout_limits, "resource", None):
+            self.assertIsNone(scout_limits.child_preexec(4))
+            self.assertIsNone(scout_limits.child_preexec(0))
+            self.assertTrue(scout_limits.MemoryFloor(3, reader=lambda: 3.5).allow())
+            self.assertFalse(scout_limits.MemoryFloor(3, reader=lambda: 1.0).allow())
+
+    def test_import_survives_a_missing_resource_module(self):
+        import importlib.util
+        real_import = __import__
+
+        def fake(name, *a, **k):
+            if name == "resource":
+                raise ImportError("no resource")
+            return real_import(name, *a, **k)
+
+        spec = importlib.util.spec_from_file_location("scout_limits_noresource", str(Path(scout_limits.__file__)))
+        mod = importlib.util.module_from_spec(spec)
+        with mock.patch("builtins.__import__", side_effect=fake):
+            spec.loader.exec_module(mod)
+        self.assertIsNone(mod.resource)
+        self.assertIsNone(mod.child_preexec(4))
+
+
 @unittest.skipIf(os.name == "nt", "the shell oracle needs a POSIX system")
 class TestOracleSafeDefaults(unittest.TestCase):
     """The oracle and the census must not push a shared host into the OOM killer."""

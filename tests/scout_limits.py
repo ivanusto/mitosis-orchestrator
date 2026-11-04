@@ -9,9 +9,13 @@ can push available memory low enough for the OOM killer to take the engine. Two 
 Python 3.8, standard library only.
 """
 
-import resource
 import threading
 from typing import Callable, Optional
+
+try:
+    import resource
+except ImportError:  # Windows: no RLIMIT_AS, and Popen has no preexec_fn there either
+    resource = None  # type: ignore
 
 DEFAULT_CHILD_AS_GIB = 4.0
 DEFAULT_MIN_AVAILABLE_GIB = 3.0
@@ -31,8 +35,8 @@ def read_available_gib(path: str = MEMINFO) -> Optional[float]:
 
 
 def child_preexec(gib: float) -> Optional[Callable[[], None]]:
-    """A preexec_fn that caps the address space of the child, or None when gib is 0 or negative."""
-    if not gib or gib <= 0:
+    """A preexec_fn that caps the address space of the child, or None when gib is 0 or negative or `resource` is absent (Windows)."""
+    if resource is None or not gib or gib <= 0:
         return None
     limit = int(gib * 1024 * 1024 * 1024)
 
