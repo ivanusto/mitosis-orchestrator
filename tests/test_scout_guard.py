@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scout_limits  # noqa: E402
 import scout_oracle  # noqa: E402
 from test_hardening import EnvCase, eo  # noqa: E402
 
@@ -314,6 +315,62 @@ class TestScoutOracle(unittest.TestCase):
             "ls a", shell, oracle.box().run(shell, "ls a"), oracle.allowed, [[("ls", -1, True), ("b", -1, True)]],
             str(oracle.box().home))
         self.assertTrue({v["kind"] for v in found} >= {"argv", "missing"})
+
+
+@unittest.skipIf(os.name == "nt", "the shell oracle needs a POSIX system")
+class TestOracleSafeDefaults(unittest.TestCase):
+    """The oracle and the census must not push a shared host into the OOM killer."""
+
+    def test_meminfo_reader(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "meminfo"
+            good.write_text("MemTotal: 100 kB\nMemAvailable:    2097152 kB\n", encoding="ascii")
+            self.assertAlmostEqual(scout_limits.read_available_gib(str(good)), 2.0)
+            bad = Path(tmp) / "bad"
+            bad.write_text("MemTotal: 100 kB\n", encoding="ascii")
+            self.assertIsNone(scout_limits.read_available_gib(str(bad)))
+        self.assertIsNone(scout_limits.read_available_gib("/nonexistent/meminfo"))
+
+    def test_floor_counts_skips_and_absent_reader_means_no_floor(self):
+        low = scout_limits.MemoryFloor(3, reader=lambda: 2.5)
+        self.assertFalse(low.allow())
+        self.assertFalse(low.allow())
+        self.assertEqual(low.report()["skipped_for_memory"], 2)
+        self.assertEqual(low.report()["lowest_available_gib"], 2.5)
+        self.assertTrue(scout_limits.MemoryFloor(3, reader=lambda: 3.0).allow())
+        none = scout_limits.MemoryFloor(3, reader=lambda: None)
+        self.assertTrue(none.allow())
+        self.assertEqual(none.report()["skipped_for_memory"], 0)
+        self.assertTrue(scout_limits.MemoryFloor(0, reader=lambda: 0.1).allow())
+
+    def test_defaults(self):
+        self.assertEqual(scout_limits.DEFAULT_CHILD_AS_GIB, 4.0)
+        self.assertEqual(scout_limits.DEFAULT_MIN_AVAILABLE_GIB, 3.0)
+        self.assertIsNone(scout_limits.child_preexec(0))
+        self.assertTrue(callable(scout_limits.child_preexec(4)))
+
+    def test_fuzz_skips_runs_under_the_floor_and_reports_it_apart(self):
+        guard = scout_oracle.load_guard(ROOT)
+        shells = _oracle_shells()[:1]
+        floor = scout_limits.MemoryFloor(3, reader=lambda: 1.0)
+        report = scout_oracle.run_fuzz(guard, 300, 3, shells, workers=2, floor=floor)
+        self.assertGreater(report["unique_accepted"], 0)
+        self.assertEqual(report["skipped_for_memory"], report["unique_accepted"])
+        self.assertEqual(report["skipped_for_budget"], 0)
+        self.assertEqual(report["runs"], {shells[0].label: 0})
+        self.assertEqual(report["violations"], [])
+        self.assertEqual(report["min_available_gib"], 3)
+
+    def test_children_run_under_the_address_space_limit(self):
+        import subprocess
+        out = subprocess.run(["/bin/sh", "-c", "ulimit -v"], stdout=subprocess.PIPE,
+                             preexec_fn=scout_limits.child_preexec(4)).stdout.decode().strip()
+        self.assertEqual(out, str(4 * 1024 * 1024))
+        shell = _oracle_shells()[0]
+        o = scout_oracle.Oracle(scout_oracle.load_guard(ROOT), [shell], child_as_gib=4)
+        self.addCleanup(o.close)
+        self.assertEqual(o.run_command("echo a | cat"), [])  # shells start under the limit
 
 
 if __name__ == "__main__":

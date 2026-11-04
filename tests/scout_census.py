@@ -11,7 +11,7 @@ For every program in SCOUT_READ_ONLY_COMMANDS and every git subcommand in SCOUT_
   4. classifies the run: VIOLATION, BENIGN-INDEX, NETWORK, TIMEOUT, CLEAN.
 systemctl and journalctl are never run (only --help is read) and are compared with the guard statically.
 
-    python3 tests/scout_census.py --guard-root <dir> --out <dir> [--programs ls,git:log] [--jobs 8]
+    python3 tests/scout_census.py --guard-root <dir> --out <dir> [--programs ls,git:log] [--jobs 2] [--child-as-gib 4] [--min-available-gib 3]
     python3 tests/scout_census.py --wrappers --guard-root <dir> --out <dir> [--programs 'find(bfs),grep(ugrep)']
     python3 tests/scout_census.py --merge <dir> <dir> ... --out <dir>
 
@@ -37,6 +37,9 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scout_limits  # noqa: E402
 
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -568,7 +571,8 @@ PRIORITY = ("VIOLATION", "NETWORK", "TIMEOUT", "BENIGN-INDEX", "CLEAN")
 
 
 class Runner(object):
-    def __init__(self, work, template, slot, timeout, gitexec):
+    def __init__(self, work, template, slot, timeout, gitexec, preexec=None):
+        self.preexec = preexec
         self.fx = os.path.join(work, "fx%d" % slot)
         self.logdir = os.path.join(work, "log%d" % slot)
         os.makedirs(self.logdir, exist_ok=True)
@@ -599,7 +603,7 @@ class Runner(object):
         err = b""
         rc = None
         p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                             env=env, start_new_session=True)
+                             env=env, start_new_session=True, preexec_fn=self.preexec)
         try:
             _, err = p.communicate(timeout=self.timeout)
             rc = p.returncode
@@ -745,9 +749,11 @@ def run_census(args):
     progmap = dict((l, (p, b, s)) for l, p, b, s, e, t in plan)
     wrapmap = wraps
     jobs_n = max(1, args.jobs)
+    preexec = scout_limits.child_preexec(args.child_as_gib)
+    floor = scout_limits.MemoryFloor(args.min_available_gib)
     runners = []
     for i in range(jobs_n):
-        runners.append(Runner(work, template, i, args.timeout, gitexec))
+        runners.append(Runner(work, template, i, args.timeout, gitexec, preexec))
     free = list(range(jobs_n))
     lock = threading.Lock()
     done = [0]
@@ -755,6 +761,8 @@ def run_census(args):
 
     def work_one(job):
         label, cmd, o, kind = job
+        if not floor.allow():
+            return job, None
         with lock:
             slot = free.pop()
         try:
@@ -781,7 +789,7 @@ def run_census(args):
     # A stall while eight runs share the machine is not a hang: run every TIMEOUT again, alone.
     rechecked = 0
     for idx, (job, r) in enumerate(collected):
-        if "TIMEOUT" in r["all"]:
+        if r is not None and "TIMEOUT" in r["all"]:
             label = job[0]
             prog, b, script = progmap[label]
             r2 = runners[0].run(job[1].split(), prog, b, script, wrapmap.get(label))
@@ -794,6 +802,9 @@ def run_census(args):
         for job, r in collected:
             label, cmd, o, kind = job
             ps = results["programs"][label]
+            if r is None:
+                ps["skipped_for_memory"] = ps.get("skipped_for_memory", 0) + 1
+                continue
             ps["classes"][r["class"]] += 1
             if "TIMEOUT" in r["all"]:
                 ps["flag_timeout"] += 1
@@ -810,6 +821,8 @@ def run_census(args):
                 results["timeouts"].append(row)
             if any(x.startswith("HARNESS?") for x in r["evidence"]):
                 results["harness_warnings"].append(row)
+    results["resources"] = dict(scout_limits.MemoryFloor.report(floor), jobs=jobs_n, child_as_gib=args.child_as_gib)
+    results["skipped_for_memory"] = floor.skipped
     results["counts"]["forms_generated"] = sum(p.get("forms_generated", 0) for p in results["programs"].values())
     results["elapsed_s"] = round(time.time() - started, 1)
     results["violations_by_program"] = {}
@@ -916,6 +929,7 @@ def merge(dirs, out):
         for k, v in r["counts"].items():
             merged["counts"][k] = merged["counts"].get(k, 0) + v
         merged["elapsed_s"] = merged.get("elapsed_s", 0) + r.get("elapsed_s", 0)
+        merged["skipped_for_memory"] = merged.get("skipped_for_memory", 0) + r.get("skipped_for_memory", 0)
     merged["violations_by_program"] = {}
     for v in merged["violations"]:
         merged["violations_by_program"].setdefault(v["program"], []).append(v["command"])
@@ -930,7 +944,11 @@ def main():
     ap.add_argument("--guard-root")
     ap.add_argument("--out", required=True)
     ap.add_argument("--programs", default="", help="comma list: ls,rg,git:log (default all); 'git' = all subcommands")
-    ap.add_argument("--jobs", type=int, default=8)
+    ap.add_argument("--jobs", type=int, default=min(2, os.cpu_count() or 2), help="parallel runs, default 2")
+    ap.add_argument("--child-as-gib", type=float, default=scout_limits.DEFAULT_CHILD_AS_GIB,
+                    help="RLIMIT_AS for spawned children in GiB, 0 disables")
+    ap.add_argument("--min-available-gib", type=float, default=scout_limits.DEFAULT_MIN_AVAILABLE_GIB,
+                    help="stop starting runs when MemAvailable is below this, 0 disables")
     ap.add_argument("--timeout", type=float, default=5.0)
     ap.add_argument("--budget", type=float, default=520.0)
     ap.add_argument("--max-runs", type=int, default=0)
@@ -957,7 +975,7 @@ def main():
         json.dump(res, fh, indent=1, sort_keys=True)
     print(json.dumps({"counts": res["counts"], "violations": len(res["violations"]),
                       "network": len(res["network"]), "timeouts": len(res["timeouts"]),
-                      "elapsed_s": res.get("elapsed_s")}))
+                      "elapsed_s": res.get("elapsed_s"), "skipped_for_memory": res.get("skipped_for_memory", 0)}))
     return 0
 
 

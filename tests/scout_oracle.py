@@ -19,6 +19,12 @@ no _scout_scan.
 CLI:
   python3 tests/scout_oracle.py --guard-root DIR --fuzz N --seed S --shells bash,dash,busybox[,zsh=/path]
                                 [--bwrap] [--json out.json]
+                                [--workers N] [--child-as-gib G] [--min-available-gib G]
+
+Safe defaults (the host may run an inference engine): workers = min(4, cpu count), every child runs under
+RLIMIT_AS 4 GiB (--child-as-gib 0 disables), and no new run starts while MemAvailable is under
+--min-available-gib (default 3; 0 disables). Runs not started for that reason are counted in
+"skipped_for_memory", separate from "skipped_for_budget". No /proc/meminfo means no floor.
 
 Python 3.8, standard library only.
 """
@@ -40,6 +46,9 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scout_limits  # noqa: E402
 
 DEFAULT_ALLOWLIST = (
     "ls cat head tail wc rg grep egrep fgrep find stat file du df pwd which tree sort cut jq basename "
@@ -163,7 +172,9 @@ class Sandbox:
     """One temp tree: stubs/ log/ work/ home/. Not thread safe, use one per worker."""
 
     def __init__(self, stub_names: Sequence[str], allowed: Sequence[str], bwrap: bool = False,
-                 env_extra: Optional[Dict[str, str]] = None, base: Optional[str] = None) -> None:
+                 env_extra: Optional[Dict[str, str]] = None, base: Optional[str] = None,
+                 child_as_gib: float = scout_limits.DEFAULT_CHILD_AS_GIB) -> None:
+        self.preexec = scout_limits.child_preexec(child_as_gib)
         self.tmp = Path(tempfile.mkdtemp(prefix="scout-oracle-", dir=base)).resolve()
         self.stubs = self.tmp / "stubs"
         self.logs = self.tmp / "log"
@@ -208,7 +219,8 @@ class Sandbox:
         probe = "for n in %s; do printf '%%s\\t%%s\\n' \"$n\" \"$(command -v \"$n\")\"; done" % " ".join(self.stub_names)
         try:
             res = subprocess.run(["/usr/bin/env", "-i", "PATH=/nonexistent", "HOME=" + str(self.home)] + shell.argv + ["-c", probe],
-                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=TIMEOUT, cwd=str(self.work))
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=TIMEOUT, cwd=str(self.work),
+                                 preexec_fn=self.preexec)
         except (OSError, subprocess.TimeoutExpired):
             return []
         names = []
@@ -231,7 +243,7 @@ class Sandbox:
         timed_out = False
         proc = subprocess.Popen([a.encode("utf-8", "surrogateescape") for a in argv], cwd=str(self.work),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                start_new_session=True)
+                                start_new_session=True, preexec_fn=self.preexec)
         try:
             out, err = proc.communicate(timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -359,7 +371,9 @@ class Oracle:
 
     def __init__(self, guard: Optional[Guard], shells: List[Shell], bwrap: bool = False,
                  env_extra: Optional[Dict[str, str]] = None, base: Optional[str] = None,
-                 allowlist: Optional[Sequence[str]] = None) -> None:
+                 allowlist: Optional[Sequence[str]] = None,
+                 child_as_gib: float = scout_limits.DEFAULT_CHILD_AS_GIB) -> None:
+        self.child_as_gib = child_as_gib
         self.guard = guard
         self.shells = shells
         self.bwrap = bwrap
@@ -376,7 +390,7 @@ class Oracle:
     def box(self) -> Sandbox:
         box = getattr(self._local, "box", None)
         if box is None:
-            box = Sandbox(self.stub_names, self.allowed, self.bwrap, self.env_extra, self.base)
+            box = Sandbox(self.stub_names, self.allowed, self.bwrap, self.env_extra, self.base, self.child_as_gib)
             self._local.box = box
             with self._lock:
                 self._boxes.append(box)
@@ -542,13 +556,18 @@ def gen_command(rng: random.Random) -> str:
 
 def run_fuzz(guard: Guard, count: int, seed: int, shells: List[Shell], bwrap: bool = False, workers: int = 0,
              env_extra: Optional[Dict[str, str]] = None, base: Optional[str] = None,
-             budget: float = 0.0) -> Dict[str, Any]:
+             budget: float = 0.0, child_as_gib: float = scout_limits.DEFAULT_CHILD_AS_GIB,
+             min_available_gib: float = scout_limits.DEFAULT_MIN_AVAILABLE_GIB,
+             floor: Optional["scout_limits.MemoryFloor"] = None) -> Dict[str, Any]:
     """Generate count strings, ask the guard, run each distinct accepted one in every shell.
-    budget (seconds, 0 = none) stops starting new runs; the report says how many were skipped."""
+    budget (seconds, 0 = none) stops starting new runs; the report says how many were skipped.
+    A run is also not started while MemAvailable is under min_available_gib: those are counted apart as
+    skipped_for_memory. workers defaults to min(4, cpu count)."""
     rng = random.Random(seed)
     started = time.time()
     commands = [gen_command(rng) for _ in range(count)]
-    oracle = Oracle(guard, shells, bwrap=bwrap, env_extra=env_extra, base=base)
+    oracle = Oracle(guard, shells, bwrap=bwrap, env_extra=env_extra, base=base, child_as_gib=child_as_gib)
+    floor = floor or scout_limits.MemoryFloor(min_available_gib)
     accepted: List[str] = []
     accepted_seen = set()
     violations: List[Violation] = []
@@ -562,16 +581,17 @@ def run_fuzz(guard: Guard, count: int, seed: int, shells: List[Shell], bwrap: bo
             accepted_seen.add(cmd)
             accepted.append(cmd)
     to_run = sorted(accepted_seen)
-    workers = workers or min(32, (os.cpu_count() or 4))
+    workers = workers or min(4, (os.cpu_count() or 4))
     skipped = 0
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             def job(cmd: str) -> Optional[List[Violation]]:
                 if budget and time.time() - started > budget:
                     return None
+                if not floor.allow():
+                    return None
                 return oracle.run_command(cmd)
 
-            skipped = 0
             for found in pool.map(job, to_run):
                 if found is None:
                     skipped += 1
@@ -582,7 +602,8 @@ def run_fuzz(guard: Guard, count: int, seed: int, shells: List[Shell], bwrap: bo
     return {
         "guard_root": str(guard.root), "mitosis_hook": str(sys.modules["mitosis_hook"].__file__), "seed": seed,
         "tried": count, "accepted": len(accepted), "unique_accepted": len(accepted_seen),
-        "skipped_for_budget": skipped,
+        "skipped_for_budget": skipped - floor.skipped, "workers": workers, "child_as_gib": child_as_gib,
+        **floor.report(),
         "runs": dict(oracle.runs), "bwrap": bwrap, "violation_count": len(violations),
         "violations": [dict(v) for v in violations[:2000]], "seconds": round(time.time() - started, 1),
     }
@@ -595,7 +616,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--shells", default="bash,dash,busybox")
     ap.add_argument("--bwrap", action="store_true")
-    ap.add_argument("--workers", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=0, help="default min(4, cpu count)")
+    ap.add_argument("--child-as-gib", type=float, default=scout_limits.DEFAULT_CHILD_AS_GIB,
+                    help="RLIMIT_AS for spawned children in GiB, 0 disables")
+    ap.add_argument("--min-available-gib", type=float, default=scout_limits.DEFAULT_MIN_AVAILABLE_GIB,
+                    help="stop starting runs when MemAvailable is below this, 0 disables")
     ap.add_argument("--lc", default="", help="set LC_ALL for the shell, for example C.UTF-8")
     ap.add_argument("--tmp-base", default=None)
     ap.add_argument("--allowlist-only", action="append", default=[], metavar="COMMAND",
@@ -610,7 +635,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     env_extra = {"LC_ALL": args.lc} if args.lc else None
     guard = load_guard(args.guard_root)
     if args.allowlist_only:
-        oracle = Oracle(guard, shells, bwrap=args.bwrap, env_extra=env_extra, base=args.tmp_base)
+        oracle = Oracle(guard, shells, bwrap=args.bwrap, env_extra=env_extra, base=args.tmp_base,
+                        child_as_gib=args.child_as_gib)
         try:
             bad = 0
             for cmd in args.allowlist_only:
@@ -621,12 +647,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             oracle.close()
         return 0
     report = run_fuzz(guard, args.fuzz, args.seed, shells, args.bwrap, args.workers, env_extra, args.tmp_base,
-                      args.budget)
+                      args.budget, args.child_as_gib, args.min_available_gib)
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=1, ensure_ascii=True), encoding="utf-8")
     print("guard %s" % report["guard_root"])
-    print("tried %d  accepted %d (unique %d, skipped %d)  runs %s  violations %d  %ss" % (
-        report["tried"], report["accepted"], report["unique_accepted"], report["skipped_for_budget"], report["runs"],
+    print("tried %d  accepted %d (unique %d, skipped for budget %d, skipped for memory %d)  runs %s  violations %d  %ss" % (
+        report["tried"], report["accepted"], report["unique_accepted"], report["skipped_for_budget"],
+        report["skipped_for_memory"], report["runs"],
         report["violation_count"], report["seconds"]))
     for v in report["violations"][:50]:
         print("  %-8s %-9s %r  %s" % (v["shell"], v["kind"], v["command"], v["detail"][:120]))
