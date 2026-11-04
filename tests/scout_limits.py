@@ -9,7 +9,6 @@ can push available memory low enough for the OOM killer to take the engine. Two 
 Python 3.8, standard library only.
 """
 
-import os
 import resource
 import threading
 from typing import Callable, Optional

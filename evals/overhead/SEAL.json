@@ -1,0 +1,73 @@
+{
+ "budget_limit_usd": 10.0,
+ "files": {
+  "compare:PROTOCOL.md": "a9e8bdbf4b7f531071a437de9ed413badef3684fe38cbc8f6e6e36e8d0f8356e",
+  "compare:run.py": "57f5c25b5a36d353a8c2367113ae60df270b7633abb83a9b1080e1f2d1e16c6f",
+  "lookup/allowed_tools.txt": "d29bbfb890485dbd5ff5065214a7c6378dba9f68c157197e1d5be0a82c7300c1",
+  "lookup/grade.py": "7ee22c9a82e3750c9a6910719759d8f9e5d1d09ddbbaa75c812edac939650317",
+  "lookup/key.json": "7b8650753a05299dc6ef6bec0a63af66aa4c9e2d4781f23e05bec493424c9dcd",
+  "lookup/make_questions.py": "f373e6ddd86f7fafd41bb3ad9fa4af649e0e91bd9ddd5531f44fcbe04d1b0990",
+  "lookup/prompt.md": "a364e76f172fba5b45479607ec50fd5a5810a5299b4682d6ece83e7ce552d876",
+  "lookup/questions.json": "e69db1623087d19d15cffb6dac4726cc511e4209762828f8c368d4ba13258feb",
+  "lookup/questions.py": "5662e62c7cc37938ffad8718e7444115f483550189869c575fa3056dae1abb99",
+  "lookup/reference/answers.json": "7b8650753a05299dc6ef6bec0a63af66aa4c9e2d4781f23e05bec493424c9dcd",
+  "lookup/scaffold.py": "b84be676f454b409615186e012606c867154ebdac8c9d5c78a5133c2d29e3416",
+  "lookup/stdlib.manifest.json": "cda737b5c5dfd24c0b53455cf08a70d942cd5566721b462778833b69dd440578",
+  "lookup/treequery.py": "0f836e9f9ad962452e11686b0d2600eb0ad3f9bd25c9589f66470d713d56e26d",
+  "lookup/verify_key.py": "6c5c5b8316bca14b08aa3f0423751c48079700557cd70fc724fad1836fae8537",
+  "overhead:PROTOCOL.md": "91b55768b6cb5ceaa2d8029ec85e368e3ce8f93ac92bd56cbb5fdb6f3eaaff73",
+  "overhead:run.py": "5eaf6077c1ade980e8fbcf5cad319ce5834883f07b4dbcb724fb2eb631d5720b",
+  "repo:scripts/mitosis-cost-report.py": "9e54a3608642207fa95c5b82f22788803a5a744182518797108843deceb07bda",
+  "repo:scripts/mitosis_generated.py": "7808abf38c88903c92be59a22ae6a360ec8c820cfe5716fd14ab08d323b7b48f"
+ },
+ "plugin_commit": "368dc3428e45ce834cd2db61c23e0c1d3039d82e",
+ "plugin_tree_sha256": "2e9090aa43131f8bc2b1d2fadd2a7827c928a5530436c1fad3b650277e4917fa",
+ "probe_cap_usd": 0.5,
+ "probe_order": [
+  "off",
+  "orchestrate",
+  "loaded"
+ ],
+ "repeats": 3,
+ "run_cap_usd": 2.0,
+ "schedule": [
+  [
+   1,
+   "orchestrate"
+  ],
+  [
+   1,
+   "off"
+  ],
+  [
+   1,
+   "loaded"
+  ],
+  [
+   2,
+   "loaded"
+  ],
+  [
+   2,
+   "orchestrate"
+  ],
+  [
+   2,
+   "off"
+  ],
+  [
+   3,
+   "orchestrate"
+  ],
+  [
+   3,
+   "off"
+  ],
+  [
+   3,
+   "loaded"
+  ]
+ ],
+ "seed": 20261104,
+ "version": 1
+}
