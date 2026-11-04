@@ -103,7 +103,7 @@ Result (Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, none 
 3. Limits: n=3 per arm, 3 uncorrected comparisons, and ops only just crosses the 10% line with a difference of about 0.05 USD. The tasks are short (peak context 40K to 90K against a 274K median in real sessions), so this says nothing about long sessions or context protection.
 4. A first attempt stopped after one scored run because the tamper check counted hook-written bytecode as a change. The harness was fixed and resealed; that run (success, 0.70 USD, off arm) was discarded, not reused.
 
-This plugin makes no savings claim. What is not measured here: isolating the primary's context, and parallelism for work that really is parallel.
+This plugin makes no savings claim. Parallelism for work that really is parallel is not measured here. One calibration run per arm on a long chained session (`evals/long/RESULTS.md`, not a verdict) lowered primary context growth by 30% and raised total cost by 71%.
 
 ### Tuning the daughter cells
 

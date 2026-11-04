@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Documentation and evals only. No plugin code changed and no new version.
+- Corrected the 2.5.0 overhead numbers: the 1.4% output share was wrong, because the stream undercounts output tokens. Output accounts for about 45% of the `/orchestrate` difference. The outcome NO TRIM is unchanged.
+- Added `evals/long/`: a chained long-session calibration harness and one run per arm, not a verdict. Over the six stages that compare, delegation lowered primary context growth by 30% and raised total cost by 71%. See `evals/long/RESULTS.md`.
+
 ## 2.5.0 - 2026-11-04
 
 **After updating, do this.** On Codex, open Codex once and accept the hook review, then run `python3 scripts/mitosis-doctor.py`. Until you accept it, doctor reports `trust.bundle` FAIL for Codex and `codex exec` shows `hook: ... Failed` with no guard. That FAIL is correct, not a doctor bug. On Claude Code, start a new session. The scout command check below is a security fix; update.
