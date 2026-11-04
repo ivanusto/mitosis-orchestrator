@@ -118,6 +118,20 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 
 **Windows.** Hooks run through `cmd /c` on agy and try `python3`, then `python`, then `py -3`, so any normal install works. The Microsoft Store aliases in `%LOCALAPPDATA%\Microsoft\WindowsApps` exit 9009 without running anything; the chain moves past them. If a broken `python` shadows your real one, fix `PATH` or turn the aliases off in Settings > Apps > Advanced app settings > App execution aliases. **With no working Python the hooks exit 0 with no output:** the CLI keeps working (a failed hook blocks every tool on agy), but routing, model pinning and the guardrails are off, without any warning. Check with `python3 --version`, `python --version` or `py -3 --version`.
 
+<!-- BEGIN GENERATED: compat -->
+### Verified CLI versions
+
+The CLI versions this plugin release was actually verified on. A newer CLI is unverified, not broken; `mitosis-doctor` shows it in an info row `<platform>.cli_verified` that never changes the exit code.
+
+| Platform | Verified version | Verified on | Method |
+| --- | --- | --- | --- |
+| Claude Code | 2.1.317 | 2026-11-04 | interactive and headless run |
+| Codex CLI | 0.166.0 | 2026-11-04 | installed plugin run after hook review |
+| agy | 1.4.6 | 2026-10-26 | live run through invoke_subagent |
+
+- agy: `agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.
+<!-- END GENERATED: compat -->
+
 ### 1. Google Antigravity (`agy` 1.4+)
 
 ```bash
@@ -156,7 +170,7 @@ claude --plugin-dir /path/to/mitosis-orchestrator
 
 What gets loaded: `hooks/hooks.json` (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop), the `/orchestrate` skill, and two subagents reachable through the `Agent` tool as `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku, effort `low`) and `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet, effort `medium`). Verify in a new session: the SessionStart banner `[Mitosis Orchestrator Active] Primary model is 'fable'.` appears and `/orchestrate` is listed.
 
-### 3. OpenAI Codex CLI (0.134+; verified on 0.154.0 and 0.163.0)
+### 3. OpenAI Codex CLI (0.134+; see the verified versions table above)
 
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
@@ -218,7 +232,7 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 #### Failure escalation (2.3)
 
 - **Trigger.** A mitosis scout reports `STATUS: FAILED` or `BLOCKED`. Claude Code detects it on `SubagentStop` (background `Agent` calls deliver the report only there) or in a synchronous `PostToolUse` result; Codex on `SubagentStop` of a bound explorer; agy (2.3.1) on the primary's next pre-invocation or `invoke_subagent` call, by reading the reports in `<artifactDirectoryPath>/.system_generated/messages/`. The first scan of a conversation only marks old reports as seen. The same pre-invocation also tells the primary once per subagent when a report breaks the four-header contract.
-- **agy note.** The bundled agents use `inheritCustomizations: false`, so plugin hooks do not run inside them; only the primary-side scan works (verified on agy 1.4.6).
+- **agy note.** The bundled agents use `inheritCustomizations: false`, so plugin hooks do not run inside them; only the primary-side scan works (see the verified versions table above).
 - **Effect.** The next scout-routed dispatch runs on the worker (rule `escalation`), once, within 3 dispatches or 30 minutes. An escalated spawn never escalates again. Untyped calls keep no `subagent_type` and only get the model.
 - **Opt-in.** `*_MITOSIS_ESCALATE_PRIMARY=1` (Claude Code only) also sends the next dispatch after a failed worker to the primary model. `*_MITOSIS_ESCALATE=0` turns escalation off.
 - **Headless check.** A scout told to read a missing file reported `BLOCKED`, and the same scout-typed re-dispatch ran as `mitosis-orchestrator:flash-worker` on sonnet (0.25 USD session).
@@ -371,7 +385,7 @@ The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets eac
 
 **Measured use.** One machine, 2026-10-23 to 2026-11-02, interactive Claude Code, `mitosis-cost-report.py --fleet`: 40 sessions, 5,799 primary tool calls, 27 `Agent` calls (0.5%); Bash was 77% of tool calls. The primary cost about 492 USD and subagents about 11.4 USD (2.3%). Of the subagent spend, 23.8% was unpinned (2 `Explore` calls, 2.71 USD), and no subagent ran on haiku. Limit: one user, one machine, 11 days, list prices.
 
-**Doctor.** `python3 scripts/mitosis-doctor.py` checks each installed platform and prints OK, WARN, FAIL, UNKNOWN or SKIP. It runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. Anything it cannot determine is UNKNOWN, never OK. Exit 0 means all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. Since 2.5.0 doctor recomputes the Codex hook trust hashes from local files (rows `trust.<event>` for the declaration hash and `trust.bundle` for the content hash; the old `trust_hash` UNKNOWN row is gone). A match is conclusive. A mismatch is a conclusive FAIL only for Codex versions whose hashing was checked against source (0.166, on POSIX) and UNKNOWN otherwise. So a healthy Codex install can now exit 0, and agy still exits 1 because its child model cannot be checked. Right after an update, `trust.bundle` is FAIL until you accept the review in Codex. Info rows `heartbeat.report` (rejected report classes) and `codex.scout_shell_rules` (which rule set a Codex scout gets) never WARN. Flags: `--platform`, `--json`, `--root`, `--home`, and `--live` (runs a real session, costs money). The tests inject the faults it exists to catch: the Codex namespace, the agy flat parameter, cp950 and a missing Python.
+**Doctor.** `python3 scripts/mitosis-doctor.py` checks each installed platform and prints OK, WARN, FAIL, UNKNOWN or SKIP. It runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. Anything it cannot determine is UNKNOWN, never OK. Exit 0 means all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. Since 2.5.0 doctor recomputes the Codex hook trust hashes from local files (rows `trust.<event>` for the declaration hash and `trust.bundle` for the content hash; the old `trust_hash` UNKNOWN row is gone). A match is conclusive. A mismatch is a conclusive FAIL only for Codex versions whose hashing was checked against source (0.166, on POSIX) and UNKNOWN otherwise. So a healthy Codex install can now exit 0, and agy still exits 1 because its child model cannot be checked. Right after an update, `trust.bundle` is FAIL until you accept the review in Codex. Info rows `heartbeat.report` (rejected report classes), `codex.scout_shell_rules` (which rule set a Codex scout gets) and `<platform>.cli_verified` (whether the installed CLI is newer than the version in `spec/compat.toml`) never WARN and never change the exit code. Flags: `--platform`, `--json`, `--root`, `--home`, and `--live` (runs a real session, costs money). The tests inject the faults it exists to catch: the Codex namespace, the agy flat parameter, cp950 and a missing Python.
 
 **Pin verification.** Claude Code compares the pinned model with the subagent transcript at `SubagentStop` and warns once on the primary's `Stop` (a `systemMessage` on `SubagentStop` is not displayed). Codex compares with the last `turn_context` of the child rollout and records state only. agy cannot verify. `CLAUDE_MITOSIS_VERIFY_PIN=0` and `CODEX_MITOSIS_VERIFY_PIN=0` turn it off.
 

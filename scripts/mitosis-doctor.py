@@ -24,6 +24,7 @@ makes no network call. `--live` runs scripts/smoke-claude.py, which spends real 
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -44,6 +45,7 @@ SELF_ROOT = Path(__file__).resolve().parent.parent
 HEARTBEAT_STALE_DAYS = 14
 PROBE_TIMEOUT = 60
 CODEX_EVENTS = ("pre_tool_use", "post_tool_use", "session_start", "user_prompt_submit", "subagent_stop", "stop")
+# Adding a version here needs a tests/codex_trust_oracle.py run; it is independent of spec/compat.toml.
 CODEX_TRUST_VERIFIED = ("0.166",)  # major.minor of Codex releases whose hook-trust hashing was checked against source
 CODEX_EVENT_LABELS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PreToolUse": "pre_tool_use",
                       "PostToolUse": "post_tool_use", "SubagentStop": "subagent_stop", "Stop": "stop"}
@@ -291,6 +293,55 @@ def check_cli(ctx: Ctx, platform: str, exe: str, version_cheap: bool = True) -> 
         return line
     ctx.add(platform, "cli", UNKNOWN, "found %s but `--version` gave no usable answer" % path)
     return None
+
+
+def compat_table(root: Optional[Path]) -> Dict[str, Any]:
+    """COMPAT from a generated module (the --root tree first, then this checkout). Read defensively: an older
+    generated module has no COMPAT, and a bad file must never stop doctor."""
+    for base in (root, SELF_ROOT):
+        if base is None:
+            continue
+        try:
+            path = base / "scripts" / "mitosis_generated.py"
+            if not path.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("mitosis_generated_compat", str(path))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            table = getattr(mod, "COMPAT", None)
+            if isinstance(table, dict):
+                return table
+        except Exception:
+            continue
+    return {}
+
+
+def _version_token(text: Any) -> Optional[Tuple[int, ...]]:
+    m = re.search(r"(?<![\d.])(\d+(?:\.\d+)+)", str(text or ""))
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def cli_verified_message(platform: str, cli_line: Optional[str], entry: Any) -> str:
+    """Informational text only; compares numerically (a pre-release suffix is ignored)."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("verified"), str) or _version_token(entry["verified"]) is None:
+        return "info: no verified CLI version is recorded for %s" % platform
+    ver, on = safe(entry["verified"], 32), safe(entry.get("verified_on", "?"), 16)
+    have = _version_token(cli_line)
+    if have is None:
+        return "info: the %s CLI version could not be read; last verified on %s (%s)" % (platform, ver, on)
+    shown = ".".join(str(x) for x in have)
+    if have <= _version_token(entry["verified"]):
+        return "info: %s CLI %s is not newer than the version verified on %s (%s)" % (platform, shown, ver, on)
+    return "info: the %s CLI %s is newer than the last version verified (%s on %s); not an error, just not tested" % (platform, shown, ver, on)
+
+
+def check_cli_verified(ctx: Ctx, platform: str, cli_line: Optional[str]) -> None:
+    """Informational. Always OK: a CLI update must never change the exit code."""
+    try:
+        msg = cli_verified_message(platform, cli_line, compat_table(ctx.root).get(platform))
+    except Exception:
+        msg = "info: the verified CLI version could not be compared"
+    ctx.add(platform, "cli_verified", OK, msg)
 
 
 def check_stale(ctx: Ctx, platform: str, installed: Optional[str], where: str) -> None:
@@ -866,7 +917,7 @@ def check_claude(ctx: Ctx, live: bool) -> None:
     plugins = dig(data, "plugins")
     if err is None and isinstance(plugins, dict) and plugins.get(PLUGIN_KEY) is None:
         return not_installed(ctx, p, "`%s` has no entry in installed_plugins.json" % PLUGIN_KEY, "claude")
-    check_cli(ctx, p, "claude")
+    check_cli_verified(ctx, p, check_cli(ctx, p, "claude"))
     root = ctx.root
     version = None
     if err or not isinstance(plugins, dict):
@@ -965,6 +1016,7 @@ def check_codex(ctx: Ctx) -> None:
     if cache_dir is None and err != "unreadable" and not isinstance(dig(cfg, "plugins", PLUGIN_KEY), dict):
         return not_installed(ctx, p, "no [plugins.\"%s\"] entry in ~/.codex/config.toml and no cache under ~/.codex/plugins/cache" % PLUGIN_KEY, "codex")
     cli_line = check_cli(ctx, p, "codex")
+    check_cli_verified(ctx, p, cli_line)
     if err == "missing":
         ctx.add(p, "hooks_feature", FAIL, "config.toml is missing: `[features] hooks = true` is absent, hooks are silently off")
     elif err:
@@ -1028,7 +1080,7 @@ def check_agy(ctx: Ctx) -> None:
     default = ctx.home / ".gemini" / "config" / "plugins" / PLUGIN
     if not default.is_dir():
         return not_installed(ctx, p, "plugin directory ~/.gemini/config/plugins/%s not found" % PLUGIN, "agy")
-    check_cli(ctx, p, "agy")
+    check_cli_verified(ctx, p, check_cli(ctx, p, "agy"))
     root = ctx.root or default
     if not root.is_dir():
         ctx.add(p, "plugin", FAIL, "plugin directory %s does not exist" % root)

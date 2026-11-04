@@ -118,6 +118,20 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 **Windows。** agy 透過 `cmd /c` 執行 hook，並依序嘗試 `python3`、`python`、`py -3`，一般安裝方式都能用。`%LOCALAPPDATA%\Microsoft\WindowsApps` 裡的 Microsoft Store 別名不會執行任何東西，只回傳 9009，後備鏈會跳過它們。如果有壞掉的 `python` 遮住真正的 Python，請修正 `PATH`，或到「設定 > 應用程式 > 進階應用程式設定 > 應用程式執行別名」關閉別名。**完全沒有可用的 Python 時，hook 不輸出任何內容並以 0 結束：** CLI 照常運作（在 agy 上 hook 失敗會擋下所有工具），但路由、模型釘定與守衛都會失效，而且不會有任何警告。可用 `python3 --version`、`python --version` 或 `py -3 --version` 確認。
 
+<!-- BEGIN GENERATED: compat -->
+### 已驗證的 CLI 版本
+
+下表是本外掛版本實際驗證過的 CLI 版本。你的 CLI 較新只表示尚未驗證，不代表壞掉；`mitosis-doctor` 會以資訊列 `<platform>.cli_verified` 顯示，且不影響結束碼。
+
+| 平台 | 已驗證版本 | 驗證日期 | 方式 |
+| --- | --- | --- | --- |
+| Claude Code | 2.1.317 | 2026-11-04 | 互動與 headless 實跑 |
+| Codex CLI | 0.166.0 | 2026-11-04 | 完成 hook review 後以已安裝外掛實跑 |
+| agy | 1.4.6 | 2026-10-26 | 透過 invoke_subagent 實跑 |
+
+- agy：`agy plugin validate --strict` 會警告 hooks/hooks.json 未被載入。該檔供 Claude Code 使用；agy 讀的是外掛根目錄的 hooks.json。
+<!-- END GENERATED: compat -->
+
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
 
 ```bash
@@ -156,7 +170,7 @@ claude --plugin-dir /path/to/mitosis-orchestrator
 
 載入內容：`hooks/hooks.json`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / SubagentStop / Stop）、`/orchestrate` skill，以及兩個可由 `Agent` 工具呼叫的子代理：`subagent_type: "mitosis-orchestrator:flash-lite-scout"`（haiku，effort `low`）與 `subagent_type: "mitosis-orchestrator:flash-worker"`（sonnet，effort `medium`）。驗證方式：開新 session 後應看到 `[Mitosis Orchestrator Active] Primary model is 'fable'.` 橫幅，且 `/orchestrate` 出現在指令清單。
 
-### 平台三：OpenAI Codex CLI (0.134 以上；已於 0.154.0 與 0.163.0 驗證)
+### 平台三：OpenAI Codex CLI (0.134 以上；已驗證版本見上方表格)
 
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
@@ -218,7 +232,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 #### 失敗升級（2.3）
 
 - **觸發條件。** mitosis 偵察者回報 `STATUS: FAILED` 或 `BLOCKED`。Claude Code 在 `SubagentStop`（背景 `Agent` 呼叫只會在此時交付回報）或同步的 `PostToolUse` 結果偵測；Codex 在已綁定 explorer 的 `SubagentStop` 偵測；agy（2.3.1 起）在主核下一次 pre-invocation 或 `invoke_subagent` 呼叫時，讀取 `<artifactDirectoryPath>/.system_generated/messages/` 內的回報。對話第一次掃描只會把既有回報標為已讀。同一次 pre-invocation 也會在子代理回報違反四標題格式時，對每個子代理提醒尖端模型一次。
-- **agy 注意事項。** 內建代理使用 `inheritCustomizations: false`，外掛掛鉤不會在子代理內部執行，因此只有主核端的掃描有效（於 agy 1.4.6 實測）。
+- **agy 注意事項。** 內建代理使用 `inheritCustomizations: false`，外掛掛鉤不會在子代理內部執行，因此只有主核端的掃描有效（已驗證版本見上方表格）。
 - **效果。** 下一次路由到偵察者的派發改由執行者處理（規則 `escalation`），只升級一次，限 3 次派發或 30 分鐘內。已升級的派發不會再次升級。未指定類型的呼叫不會被加上 `subagent_type`，只會被指定模型。
 - **選用。** `*_MITOSIS_ESCALATE_PRIMARY=1`（僅 Claude Code）會讓失敗的執行者之後的下一次派發改用主核模型。`*_MITOSIS_ESCALATE=0` 關閉升級。
 - **無頭驗證。** 被要求讀取不存在檔案的偵察者回報 `BLOCKED`，同一個標為偵察者的重新派發改以 sonnet 的 `mitosis-orchestrator:flash-worker` 執行（該工作階段花費 0.25 美元）。
@@ -377,7 +391,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 
 **實測使用情形。** 一台機器，2026-10-23 至 2026-11-02，互動式 Claude Code，使用 `mitosis-cost-report.py --fleet`：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%）；Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中有 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。限制：單一使用者、單一機器、11 天、牌價。
 
-**Doctor。** `python3 scripts/mitosis-doctor.py` 逐平台檢查已安裝的外掛，輸出 OK、WARN、FAIL、UNKNOWN 或 SKIP。它以各平台的 payload（含 cp950 主控台下的中文文字）執行每個安裝的實際 hook 指令鏈，並讀取 heartbeat。無法判定的項目一律是 UNKNOWN，絕不是 OK。結束碼 0 表示全部 OK 或 SKIP，1 表示有 WARN 或 UNKNOWN，2 表示有 FAIL。2.5.0 起 doctor 以本機檔案重新計算 Codex hook 信任雜湊（`trust.<event>` 列為宣告雜湊，`trust.bundle` 列為內容雜湊；舊的 `trust_hash` UNKNOWN 列已移除）。相符即為定論；不相符時，只有雜湊方式已對照原始碼確認的 Codex 版本（0.166，POSIX）才是確定的 FAIL，其他版本為 UNKNOWN。所以健康的 Codex 安裝現在可以回傳 0，agy 仍回傳 1，因為其子代理的模型無法檢查。更新後在 Codex 接受 review 之前，`trust.bundle` 會是 FAIL。資訊列 `heartbeat.report`（被拒回報的類別）與 `codex.scout_shell_rules`（Codex 偵察者適用哪一組規則）不會產生 WARN。旗標：`--platform`、`--json`、`--root`、`--home`，以及 `--live`（實際跑一個 session，會花錢）。測試以故障注入重現它要抓的問題：Codex 命名空間、agy 扁平參數、cp950 與缺少 Python。
+**Doctor。** `python3 scripts/mitosis-doctor.py` 逐平台檢查已安裝的外掛，輸出 OK、WARN、FAIL、UNKNOWN 或 SKIP。它以各平台的 payload（含 cp950 主控台下的中文文字）執行每個安裝的實際 hook 指令鏈，並讀取 heartbeat。無法判定的項目一律是 UNKNOWN，絕不是 OK。結束碼 0 表示全部 OK 或 SKIP，1 表示有 WARN 或 UNKNOWN，2 表示有 FAIL。2.5.0 起 doctor 以本機檔案重新計算 Codex hook 信任雜湊（`trust.<event>` 列為宣告雜湊，`trust.bundle` 列為內容雜湊；舊的 `trust_hash` UNKNOWN 列已移除）。相符即為定論；不相符時，只有雜湊方式已對照原始碼確認的 Codex 版本（0.166，POSIX）才是確定的 FAIL，其他版本為 UNKNOWN。所以健康的 Codex 安裝現在可以回傳 0，agy 仍回傳 1，因為其子代理的模型無法檢查。更新後在 Codex 接受 review 之前，`trust.bundle` 會是 FAIL。資訊列 `heartbeat.report`（被拒回報的類別）、`codex.scout_shell_rules`（Codex 偵察者適用哪一組規則）與 `<platform>.cli_verified`（已安裝的 CLI 是否比 `spec/compat.toml` 記錄的版本新）不會產生 WARN，也不會改變結束碼。旗標：`--platform`、`--json`、`--root`、`--home`，以及 `--live`（實際跑一個 session，會花錢）。測試以故障注入重現它要抓的問題：Codex 命名空間、agy 扁平參數、cp950 與缺少 Python。
 
 **釘定驗證。** Claude Code 在 `SubagentStop` 比對釘定的模型與子代理 transcript，並在主核的 `Stop` 警告一次（`SubagentStop` 上的 `systemMessage` 不會顯示）。Codex 比對子代理 rollout 最後一個 `turn_context`，只記錄狀態。agy 無法驗證。`CLAUDE_MITOSIS_VERIFY_PIN=0` 與 `CODEX_MITOSIS_VERIFY_PIN=0` 可關閉。
 

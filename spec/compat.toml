@@ -1,0 +1,24 @@
+# CLI versions this plugin release was last verified on. Read by scripts/sync-generated.py, which writes
+# COMPAT into scripts/mitosis_generated.py and the table between the compat markers in both READMEs.
+# Editing this file never changes doctor's exit code; doctor only prints an info row. `method_zh` and
+# `note_zh` are the Traditional Chinese texts used by README.zh-TW.md.
+
+[claude]
+verified = "2.1.317"
+verified_on = "2026-11-04"
+method = "interactive and headless run"
+method_zh = "互動與 headless 實跑"
+
+[codex]
+verified = "0.166.0"
+verified_on = "2026-11-04"
+method = "installed plugin run after hook review"
+method_zh = "完成 hook review 後以已安裝外掛實跑"
+
+[agy]
+verified = "1.4.6"
+verified_on = "2026-10-26"
+method = "live run through invoke_subagent"
+method_zh = "透過 invoke_subagent 實跑"
+note = "`agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root."
+note_zh = "`agy plugin validate --strict` 會警告 hooks/hooks.json 未被載入。該檔供 Claude Code 使用；agy 讀的是外掛根目錄的 hooks.json。"

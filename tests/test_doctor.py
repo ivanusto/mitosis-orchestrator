@@ -354,6 +354,93 @@ class TestCodexScoutShellRules(DoctorCase):
         self.assertNotIn("claude.scout_shell_rules", self.fx.checks("--platform", "claude"))
 
 
+class TestCliVerified(DoctorCase):
+    """The <platform>.cli_verified info row: always OK, never changes the exit code."""
+
+    ENTRY = {"verified": "0.166.0", "verified_on": "2026-11-04", "method": "m"}
+
+    def msg(self, line):
+        return doctor.cli_verified_message("codex", line, self.ENTRY)
+
+    def test_older_equal_newer_unreadable_prerelease(self):
+        self.assertIn("not newer than the version verified on 0.166.0 (2026-11-04)", self.msg("codex-cli 0.165.9"))
+        self.assertIn("not newer than the version verified", self.msg("codex-cli 0.166.0"))
+        self.assertIn("not newer", self.msg("0.99.0"))  # numeric, not textual: 0.99 < 0.166
+        for line in ("codex-cli 0.167.0", "codex-cli 0.167.0-alpha.1", "1.0.0", "0.166.0.1"):
+            text = self.msg(line)
+            self.assertIn("is newer than the last version verified (0.166.0 on 2026-11-04)", text, line)
+        self.assertIn("not newer", self.msg("codex-cli 0.166.0-alpha.1"))
+        for line in (None, "", "codex-cli unknown"):
+            self.assertIn("could not be read", self.msg(line))
+        for text in (self.msg("0.1.0"), self.msg("9.9.9"), self.msg(None)):
+            self.assertTrue(text.startswith("info:"), text)
+
+    def test_missing_or_bad_entry(self):
+        for entry in (None, {}, {"verified": 5}, {"verified": "abc"}):
+            self.assertIn("no verified CLI version is recorded", doctor.cli_verified_message("agy", "1.4.6", entry))
+
+    @unittest.skipIf(os.name == "nt", "PATH shims are POSIX here")
+    def test_rows_per_platform_never_change_the_exit_code(self):
+        compat = doctor.compat_table(ROOT)
+        self.assertEqual(set(compat), {"claude", "codex", "agy"})
+        for platform in ("claude", "codex", "agy"):
+            verified = compat[platform]["verified"]
+            parts = [int(x) for x in verified.split(".")]
+            up = ".".join(str(x) for x in parts[:-1] + [parts[-1] + 1])
+            down = ".".join(str(x) for x in parts[:-1] + [max(parts[-1] - 1, 0)])
+            cases = ((down, "not newer"), (verified, "not newer"), (up, "is newer"), (up + "-alpha.1", "is newer"))
+            base = {}
+            for version, expect in cases:
+                shim = self.fx.bin / platform
+                shim.write_text("#!/bin/sh\necho '%s %s'\n" % (platform, version), encoding="ascii")
+                checks = self.fx.checks("--platform", platform)
+                row = checks[platform + ".cli_verified"]
+                self.assertEqual(row["status"], "OK", row)
+                self.assertTrue(row["message"].startswith("info:"), row)
+                self.assertIn(expect, row["message"], (platform, version))
+                base[version] = self.fx.last_rc
+            self.assertEqual(len(set(base.values())), 1, base)
+            shim.write_text("#!/bin/sh\necho 'no digits here'\n", encoding="ascii")
+            checks = self.fx.checks("--platform", platform)
+            self.assertEqual(checks[platform + ".cli_verified"]["status"], "OK")
+            self.assertIn("could not be read", checks[platform + ".cli_verified"]["message"])
+            self.assertEqual(self.fx.last_rc, base[verified])
+
+    def test_exit_codes_with_the_9_9_9_shims(self):
+        for platform, rc in (("claude", 0), ("codex", 0), ("agy", 1)):
+            checks = self.fx.checks("--platform", platform)
+            self.assertEqual(checks[platform + ".cli_verified"]["status"], "OK")
+            self.assertIn("is newer", checks[platform + ".cli_verified"]["message"])
+            self.assertEqual(self.fx.last_rc, rc, platform)
+
+    def test_old_generated_module_without_compat_does_not_fail_doctor(self):
+        gen = self.fx.agy_tree / "scripts" / "mitosis_generated.py"
+        text = gen.read_text(encoding="utf-8")
+        gen.write_text(text[:text.index("COMPAT = {")], encoding="utf-8")
+        self.assertEqual(doctor.compat_table(self.fx.agy_tree).get("agy", {}).get("verified"),
+                         doctor.compat_table(ROOT)["agy"]["verified"])  # falls back to this checkout
+        gen.write_text("raise RuntimeError('broken')\n", encoding="utf-8")
+        checks = self.fx.checks("--platform", "agy", "--root", str(self.fx.agy_tree))
+        self.assertEqual(checks["agy.cli_verified"]["status"], "OK")
+
+    def test_editing_compat_without_regenerating_is_caught_by_check(self):
+        tree = Path(self._tmp.name) / "synctree"
+        for name in ("scripts", "spec", "rules", "skills", "claude-agents", "codex-agents", "codex-config", "agents", ".agents", "README.md", "README.zh-TW.md"):
+            src = ROOT / name
+            if src.is_dir():
+                shutil.copytree(str(src), str(tree / name), ignore=shutil.ignore_patterns("__pycache__"))
+            elif src.is_file():
+                (tree / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(tree / name))
+        cmd = [sys.executable, str(tree / "scripts" / "sync-generated.py"), "--check"]
+        self.assertEqual(subprocess.run(cmd, capture_output=True, text=True).returncode, 0)
+        edit(tree / "spec" / "compat.toml", 'verified = "2.1.317"', 'verified = "2.1.999"')
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("scripts/mitosis_generated.py", proc.stdout)
+        self.assertIn("README.md", proc.stdout)
+
+
 class TestStatic(DoctorCase):
     def test_platform_not_installed_is_skip(self):
         shutil.rmtree(str(self.fx.home / ".codex"))
