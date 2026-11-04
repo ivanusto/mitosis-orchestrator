@@ -28,4 +28,8 @@ In the baseline arm, plugin agents (`flash-lite-scout`, `flash-worker`) fail wit
 
 `evals/overhead/` (sealed separately from `evals/compare/`) splits the plugin's extra cost on a short task into static prefix text, output tokens and the rest; see its `PROTOCOL.md`.
 
+## Long-session calibration
+
+`evals/long/` is an unscored, unsealed calibration harness (eleven stages, `--resume`, off against delegate) that sizes a long-session fixture and finds out how cost and context growth behave; it applies no decision rule. See its `PROTOCOL.md`.
+
 `evals/compare/run.py`'s seal check now reports `changed: repo:scripts/mitosis_generated.py` (and `new file: RESULTS.md`). That is expected for a closed experiment: the repository moved on after the seal, and the compare runs are finished. Do not reseal it to clear the message.
