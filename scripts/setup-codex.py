@@ -267,6 +267,9 @@ def main() -> int:
     try:
         setup_codex(codex_home=args.codex_home, mcp_script=args.mcp_script, interpreter=args.interpreter)
         print(f"\nMitosis Orchestrator v{plugin_version(REPO_ROOT)} successfully mounted into Codex CLI!")
+        print("After a plugin install or update, Codex needs one hook review: open Codex once, accept the hook review,\n"
+              "then run `python3 scripts/mitosis-doctor.py --platform codex`; its `hook:` lines must show Completed.\n"
+              "No Mitosis script writes hook trust hashes; only Codex does, when you accept the review.")
         return 0
     except Exception as exc:
         print(f"ERROR: Setup failed: {exc}", file=sys.stderr)

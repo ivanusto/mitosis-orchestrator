@@ -3,9 +3,11 @@
 exit codes and the no-secrets guarantee. Fixtures use --home and copies of the plugin tree under a temp dir.
 Run: python -m unittest tests.test_doctor -v"""
 
+import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -50,6 +52,67 @@ def edit(path, old, new):
     Path(path).write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+LABELS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PreToolUse": "pre_tool_use",
+          "PostToolUse": "post_tool_use", "SubagentStop": "subagent_stop", "Stop": "stop"}
+
+
+def oracle_content_hash(root):
+    """Independent re-statement of Codex's plugin bundle hash (recursive, written apart from the doctor)."""
+    digest = hashlib.sha256(b"codex-plugin-bundle-v1")
+
+    def visit(path, rel):
+        name = rel.split(b"/")[-1] if rel else b""
+        if rel:
+            try:
+                label = name.decode("utf-8")
+            except UnicodeDecodeError:
+                label = ""
+            if label in ("__pycache__", ".venv") or label.endswith(".pyc") or label.endswith(".egg-info"):
+                return
+        digest.update(len(rel).to_bytes(8, "little") + rel)
+        if os.path.islink(path):
+            raise AssertionError("symlink in oracle tree")
+        if os.path.isdir(path):
+            digest.update(b"directory")
+            for child in sorted(os.listdir(os.fsencode(path))):
+                visit(os.path.join(os.fsencode(path), child), (rel + b"/" + child) if rel else child)
+        else:
+            data = Path(os.fsdecode(path)).read_bytes()
+            digest.update(b"file" + len(data).to_bytes(8, "little") + data)
+
+    visit(os.fsencode(str(root)), b"")
+    return "sha256:" + digest.hexdigest()
+
+
+def oracle_decl_hash(label, matcher, command):
+    """Compact sorted JSON written by hand: keys async, command, timeout, type; event_name, hooks, matcher."""
+    handler = '{"async":false,"command":%s,"timeout":600,"type":"command"}' % json.dumps(command, ensure_ascii=False)
+    text = '{"event_name":"%s","hooks":[%s]%s}' % (
+        label, handler, (',"matcher":%s' % json.dumps(matcher, ensure_ascii=False)) if matcher is not None else "")
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def oracle_baseline_name(config_file, plugin_id):
+    h = hashlib.sha256()
+    for part in (str(config_file).encode("utf-8"), plugin_id.encode("utf-8")):
+        h.update(len(part).to_bytes(8, "little") + part)
+    return h.hexdigest()
+
+
+def tree_digest(root):
+    """Names, kinds and contents of everything under root."""
+    h = hashlib.sha256()
+    for path in sorted(Path(root).rglob("*"), key=str):
+        h.update(str(path).encode("utf-8", "surrogateescape"))
+        if path.is_symlink():
+            h.update(b"L" + os.readlink(str(path)).encode("utf-8", "surrogateescape"))
+        elif path.is_file():
+            h.update(b"F" + path.read_bytes())
+        else:
+            h.update(b"D")
+    return h.hexdigest()
+
+
 def models():
     return doctor.spec_models(ROOT)
 
@@ -83,22 +146,40 @@ class Fixture:
         (d / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {KEY: [entry]}}), encoding="utf-8")
         (d / "settings.json").write_text(json.dumps({"enabledPlugins": {KEY: True}, "apiKeyHelper": MARKER}), encoding="utf-8")
 
-    def write_codex(self, hooks=True, drop_event=None):
+    def hook_declarations(self):
+        """[(event label, matcher or None, command)] straight from the cached manifest, via the oracle."""
+        data = json.loads((self.codex_tree / "hooks" / "codex-hooks.json").read_text(encoding="utf-8"))
+        return [(LABELS[ev], g.get("matcher") if LABELS[ev] in ("pre_tool_use", "post_tool_use", "session_start", "subagent_stop") else None, g["hooks"][0]["command"])
+                for ev, groups in data["hooks"].items() for g in groups]
+
+    def write_codex(self, hooks=True, drop_event=None, content=True, extra_state=None):
         d = self.home / ".codex"
         (d / "agents").mkdir(parents=True, exist_ok=True)
         m = models()
+        decls = {label: oracle_decl_hash(label, matcher, command) for label, matcher, command in self.hook_declarations()}
+        bundle = oracle_content_hash(self.codex_tree)
         lines = ["model = \"%s\"" % MARKER, "", "[features]"]
         if hooks:
             lines.append("hooks = true")
         lines += ["", "[hooks.state]"]
         for ev in EVENTS:
             if ev != drop_event:
-                lines += ["", "[hooks.state.\"%s:hooks/codex-hooks.json:%s:0:0\"]" % (KEY, ev), "trusted_hash = \"sha256:%s\"" % MARKER]
+                lines += ["", "[hooks.state.\"%s:hooks/codex-hooks.json:%s:0:0\"]" % (KEY, ev), "trusted_hash = \"%s\"" % decls[ev]]
+                if content:
+                    lines.append("trusted_content_hash = \"%s\"" % bundle)
+                lines += (extra_state or {}).get(ev, [])
         lines += ["", "[mcp_servers.x]", "env = { TOKEN = \"%s\" }" % MARKER, "", "[plugins.\"%s\"]" % KEY, "enabled = true", ""]
         (d / "config.toml").write_text("\n".join(lines), encoding="utf-8")
         for role, model in (("explorer", m["codex"]["scout"]["model"]), ("worker", m["codex"]["worker"]["model"]),
                             ("flash-lite-scout", m["codex"]["scout"]["model"]), ("flash-worker", m["codex"]["worker"]["model"])):
             (d / "agents" / (role + ".toml")).write_text("name = \"%s\"\nmodel = \"%s\"\n" % (role, model), encoding="utf-8")
+
+    def codex_version(self, version):
+        """Make the `codex` shim report this version (the other shims stay at 9.9.9)."""
+        if os.name == "nt":
+            return
+        path = self.bin / "codex"
+        path.write_text("#!/bin/sh\necho 'codex-cli %s'\n" % version, encoding="ascii")
 
     def shims(self):
         self.bin.mkdir(exist_ok=True)
@@ -158,12 +239,14 @@ class TestHealthy(DoctorCase):
         self.assertEqual(bad, {})
         self.assertEqual(self.fx.last_rc, 0)
 
-    def test_codex_only_trust_hash_is_unknown(self):
+    def test_codex_healthy_trust_rows_are_ok(self):
         checks = self.fx.checks("--platform", "codex")
-        self.assertEqual({k for k, v in checks.items() if v["status"] != "OK"}, {"codex.trust_hash"})
-        self.assertEqual(checks["codex.trust_hash"]["status"], "UNKNOWN")
-        self.assertIn("/hooks", checks["codex.trust_hash"]["message"])
-        self.assertEqual(self.fx.last_rc, 1)
+        self.assertNotIn("codex.trust_hash", checks)
+        for event in EVENTS:
+            self.assertEqual(checks["codex.trust." + event]["status"], "OK", checks["codex.trust." + event])
+        self.assertEqual(checks["codex.trust.bundle"]["status"], "OK")
+        self.assertEqual({k for k, v in checks.items() if v["status"] != "OK"}, set())
+        self.assertEqual(self.fx.last_rc, 0)
 
     def test_agy_only_pin_verification_is_unknown(self):
         checks = self.fx.checks("--platform", "agy")
@@ -439,6 +522,222 @@ class TestFaultInjection(DoctorCase):
         self.fx.checks()
         self.assertEqual(sorted(str(p) for p in self.fx.home.rglob("*")), before)
         self.assertEqual((self.fx.hb_dir / "heartbeat-claude.json").read_text(encoding="utf-8"), hb)
+
+
+class TestCodexTrust(DoctorCase):
+    def setUp(self):
+        super().setUp()
+        self.fx.codex_version("0.166.0")
+
+    def trust(self, **kw):
+        return self.fx.checks("--platform", "codex", **kw)
+
+    def assertOnlyTrustNotOk(self, checks, expected):
+        bad = {k for k, v in checks.items() if k.startswith("codex.trust") and v["status"] != "OK"}
+        self.assertEqual(bad, expected)
+
+    # ---- golden vectors, computed apart from the doctor code
+    def test_golden_vectors(self):
+        root = Path(self._tmp.name) / "golden"
+        (root / "sub").mkdir(parents=True)
+        (root / "empty").mkdir()
+        (root / "__pycache__").mkdir()
+        (root / "a.txt").write_bytes(b"hello")
+        (root / "sub" / "b.bin").write_bytes(b"\x00\x01")
+        (root / "__pycache__" / "x.pyc").write_bytes(b"junk")
+        self.assertEqual(oracle_content_hash(root), doctor.codex_bundle_hash(root))
+        self.assertEqual(doctor.codex_bundle_hash(root), "sha256:8d6bacc7ca877b10495e2297cb644731332fec3f6a5903759dbca70b637afd67")
+        handler = {"type": "command", "command": "echo ${PLUGIN_ROOT} \u00e9"}
+        self.assertEqual(doctor.codex_declaration_hash("pre_tool_use", "Bash|Edit", handler),
+                         oracle_decl_hash("pre_tool_use", "Bash|Edit", "echo ${PLUGIN_ROOT} \u00e9"))
+        self.assertEqual(doctor.codex_declaration_hash("pre_tool_use", "Bash|Edit", handler), "sha256:8b58014e94c8e43f6f2bdb6026a5e771fb74dcda9bce53e8f877d08c48539ed5")
+        self.assertEqual(doctor.codex_declaration_hash("stop", "ignored", handler), oracle_decl_hash("stop", None, "echo ${PLUGIN_ROOT} \u00e9"))
+
+    def test_real_manifest_hashes_match_the_oracle(self):
+        for label, matcher, command in self.fx.hook_declarations():
+            data = {"type": "command", "command": command}
+            self.assertEqual(doctor.codex_declaration_hash(label, matcher, data), oracle_decl_hash(label, matcher, command))
+
+    def test_healthy_at_verified_version(self):
+        checks = self.trust()
+        self.assertOnlyTrustNotOk(checks, set())
+        self.assertEqual(self.fx.last_rc, 0)
+
+    # ---- bundle changes
+    def test_one_byte_change_fails_bundle_only(self):
+        target = self.fx.codex_tree / "scripts" / "enforce-orchestrator.py"
+        target.write_bytes(target.read_bytes() + b" ")
+        checks = self.trust()
+        self.assertFail(checks, "codex.trust.bundle", "Completed")
+        self.assertOnlyTrustNotOk(checks, {"codex.trust.bundle"})
+        self.assertEqual(self.fx.last_rc, 2)
+
+    def test_new_file_fails(self):
+        (self.fx.codex_tree / "extra.txt").write_text("x", encoding="utf-8")
+        self.assertFail(self.trust(), "codex.trust.bundle")
+
+    def test_new_empty_directory_fails(self):
+        (self.fx.codex_tree / "emptydir").mkdir()
+        self.assertFail(self.trust(), "codex.trust.bundle")
+
+    def test_pyc_pycache_venv_egg_info_changes_stay_ok(self):
+        t = self.fx.codex_tree
+        (t / "scripts" / "__pycache__").mkdir(exist_ok=True)
+        (t / "scripts" / "__pycache__" / "a.cpython-38.pyc").write_bytes(b"1")
+        (t / "scripts" / "loose.pyc").write_bytes(b"2")
+        (t / ".venv").mkdir()
+        (t / ".venv" / "bin").write_bytes(b"3")
+        (t / "pkg.egg-info").mkdir()
+        (t / "pkg.egg-info" / "PKG-INFO").write_bytes(b"4")
+        checks = self.trust()
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "OK")
+
+    def test_symlink_in_bundle(self):
+        if os.name == "nt":
+            self.skipTest("symlinks need privileges on Windows")
+        os.symlink("scripts", str(self.fx.codex_tree / "link"))
+        self.assertFail(self.trust(), "codex.trust.bundle", "symlink")
+        self.fx.codex_version("9.9.9")
+        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN")
+
+    # ---- legacy baseline
+    def baseline_file(self):
+        cfg = self.fx.home / ".codex" / "config.toml"
+        return cfg.parent / ".hook-trust" / oracle_baseline_name(cfg, KEY)
+
+    def test_baseline_missing_warns_and_is_not_created(self):
+        self.fx.write_codex(content=False)
+        checks = self.trust()
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "WARN")
+        self.assertIn("unreviewed", checks["codex.trust.bundle"]["message"])
+        self.assertFalse((self.fx.home / ".codex" / ".hook-trust").exists())
+        self.fx.codex_version("9.9.9")
+        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN")
+        self.assertFalse((self.fx.home / ".codex" / ".hook-trust").exists())
+
+    def test_baseline_match_is_ok_and_differ_fails(self):
+        self.fx.write_codex(content=False)
+        bf = self.baseline_file()
+        bf.parent.mkdir(parents=True)
+        bf.write_text(oracle_content_hash(self.fx.codex_tree), encoding="utf-8")
+        checks = self.trust()
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "OK")
+        self.assertIn("legacy", checks["codex.trust.bundle"]["message"])
+        bf.write_text("sha256:" + "0" * 64, encoding="utf-8")
+        self.assertFail(self.trust(), "codex.trust.bundle")
+        self.fx.codex_version("9.9.9")
+        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "UNKNOWN")
+
+    def test_mixed_stored_and_absent_worst_wins(self):
+        self.fx.write_codex(content=True)
+        cfg = self.fx.home / ".codex" / "config.toml"
+        text = cfg.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        # drop the content approval of the last event only: it then relies on the (missing) baseline
+        idx = max(i for i, ln in enumerate(lines) if ln.startswith("trusted_content_hash"))
+        del lines[idx]
+        cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertEqual(self.status(self.trust(), "codex.trust.bundle"), "WARN")
+        target = self.fx.codex_tree / "scripts" / "enforce-orchestrator.py"
+        target.write_bytes(target.read_bytes() + b" ")
+        self.assertFail(self.trust(), "codex.trust.bundle")
+
+    # ---- declarations
+    def test_matcher_edit_fails_only_pre_tool_use(self):
+        edit(self.fx.codex_tree / "hooks" / "codex-hooks.json", "|Edit|Write|", "|Edit|")
+        checks = self.trust()
+        self.assertFail(checks, "codex.trust.pre_tool_use", "Completed")
+        for event in EVENTS:
+            if event != "pre_tool_use":
+                self.assertEqual(self.status(checks, "codex.trust." + event), "OK")
+
+    def test_enabled_false_fails(self):
+        self.fx.write_codex(extra_state={"stop": ["enabled = false"]})
+        checks = self.trust()
+        self.assertFail(checks, "codex.trust.stop", "enabled = false")
+        self.assertEqual(self.status(checks, "codex.trust.pre_tool_use"), "OK")
+
+    def test_missing_entry_fails_both_ways(self):
+        self.fx.write_codex(drop_event="stop")
+        self.assertFail(self.trust(), "codex.trust.stop", "accept the hook review")
+        self.fx.codex_version("9.9.9")
+        self.assertFail(self.trust(), "codex.trust.stop")
+
+    def test_verified_versus_unverified_shim(self):
+        for event_file in ("codex-hooks.json",):
+            path = self.fx.codex_tree / "hooks" / event_file
+            path.write_text(path.read_text(encoding="utf-8").replace("|| exit 0", "|| exit 0 "), encoding="utf-8")
+        checks = self.trust()
+        for event in EVENTS:
+            self.assertFail(checks, "codex.trust." + event)
+        self.assertFail(checks, "codex.trust.bundle")
+        self.fx.codex_version("9.9.9")
+        checks = self.trust()
+        for event in EVENTS:
+            self.assertEqual(self.status(checks, "codex.trust." + event), "UNKNOWN")
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "UNKNOWN")
+        self.assertEqual(self.fx.last_rc, 1)
+
+    def test_unverified_single_mismatch_with_other_matches_is_fail(self):
+        edit(self.fx.codex_tree / "hooks" / "codex-hooks.json", "|Edit|Write|", "|Edit|")
+        self.fx.codex_version("9.9.9")
+        checks = self.trust()
+        self.assertFail(checks, "codex.trust.pre_tool_use")
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "UNKNOWN")
+
+    def test_stale_hint_when_hook_ran_after_newest_file(self):
+        edit(self.fx.codex_tree / "hooks" / "codex-hooks.json", "|Edit|Write|", "|Edit|")
+        old = time.time() - 5000
+        for path in [self.fx.codex_tree] + list(self.fx.codex_tree.rglob("*")):
+            os.utime(str(path), (old, old))
+        self.fx.codex_version("9.9.9")
+        checks = self.trust()
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "UNKNOWN")
+        self.assertIn("probably stale", checks["codex.trust.bundle"]["message"])
+        newer = time.time()
+        os.utime(str(self.fx.codex_tree / "plugin.json"), (newer, newer))
+        self.assertNotIn("probably stale", self.trust()["codex.trust.bundle"]["message"])
+
+    def test_no_codex_cli_mismatch_is_unknown(self):
+        target = self.fx.codex_tree / "scripts" / "enforce-orchestrator.py"
+        target.write_bytes(target.read_bytes() + b" ")
+        checks = self.trust(path=str(self.fx.tmp / "nothing-here"))
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "UNKNOWN")
+        self.assertEqual(self.status(checks, "codex.cli"), "WARN")
+
+    def test_root_flag_does_not_change_what_is_hashed(self):
+        other = copy_tree(Path(self._tmp.name) / "other-root")
+        (other / "stray.txt").write_text("x", encoding="utf-8")
+        checks = self.fx.checks("--platform", "codex", "--root", str(other))
+        self.assertEqual(self.status(checks, "codex.trust.bundle"), "OK")
+
+    def test_codex_home_env_is_honoured_without_home_flag(self):
+        env = {k: v for k, v in os.environ.items() if "MITOSIS" not in k}
+        env["PATH"] = str(self.fx.bin) + os.pathsep + env.get("PATH", "")
+        env["CODEX_HOME"] = str(self.fx.home / ".codex")
+        env["HOME"] = str(self.fx.tmp / "no-such-home")
+        env["XDG_CACHE_HOME"] = str(self.fx.home / ".cache")
+        proc = subprocess.run([sys.executable, str(DOCTOR), "--platform", "codex", "--json"], capture_output=True, env=env, timeout=300)
+        checks = {c["id"]: c for c in json.loads(proc.stdout.decode("utf-8"))["checks"]}
+        self.assertEqual(checks["codex.trust.bundle"]["status"], "OK")
+
+    # ---- output hygiene
+    def test_no_hash_value_in_any_output(self):
+        for mutate in (False, True):
+            if mutate:
+                (self.fx.codex_tree / "extra.txt").write_text("x", encoding="utf-8")
+                edit(self.fx.codex_tree / "hooks" / "codex-hooks.json", "|Edit|Write|", "|Edit|")
+            for args in ((), ("--json",)):
+                rc, out, err = self.fx.run("--platform", "codex", *args)
+                self.assertNotIn("sha256:", out + err)
+                self.assertIsNone(re.search(r"[0-9a-f]{64}", out + err))
+
+    def test_home_tree_is_unchanged(self):
+        self.fx.write_codex(content=False)  # missing baseline: the tempting case to write one
+        (self.fx.codex_tree / "extra.txt").write_text("x", encoding="utf-8")
+        before = tree_digest(self.fx.home)
+        self.fx.checks("--platform", "codex")
+        self.assertEqual(tree_digest(self.fx.home), before)
 
 
 if __name__ == "__main__":

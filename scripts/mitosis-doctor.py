@@ -11,17 +11,24 @@ heartbeat the hooks keep. Anything it cannot determine is UNKNOWN, never OK.
 Statuses: OK, WARN, FAIL, UNKNOWN, SKIP (platform not installed).
 Exit code: 0 if every check is OK or SKIP; 1 if any WARN or UNKNOWN; 2 if any FAIL.
 
-Read-only: it never modifies the user's config, never prints env values, tokens, config or file
-contents (only versions, paths, key names and verdicts), never reads ~/.codex/auth.json, and makes
-no network call. `--live` runs scripts/smoke-claude.py, which spends real money (Claude only).
+Codex hook trust is decided offline: the declaration hash and the plugin-bundle content hash that
+Codex computes (verified against Codex 0.166) are recomputed from the installed files and compared
+with `[hooks.state]` in config.toml and the legacy `.hook-trust` baseline. On a Codex version not in
+CODEX_TRUST_VERIFIED a mismatch is only UNKNOWN. Doctor never starts Codex to ask it.
+
+Read-only: it never modifies the user's config, never prints env values, tokens, hashes, config or
+file contents (only versions, paths, key names and verdicts), never reads ~/.codex/auth.json, and
+makes no network call. `--live` runs scripts/smoke-claude.py, which spends real money (Claude only).
 """
 
 import argparse
+import hashlib
 import importlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +44,11 @@ SELF_ROOT = Path(__file__).resolve().parent.parent
 HEARTBEAT_STALE_DAYS = 14
 PROBE_TIMEOUT = 60
 CODEX_EVENTS = ("pre_tool_use", "post_tool_use", "session_start", "user_prompt_submit", "subagent_stop", "stop")
+CODEX_TRUST_VERIFIED = ("0.166",)  # major.minor of Codex releases whose hook-trust hashing was checked against source
+CODEX_EVENT_LABELS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PreToolUse": "pre_tool_use",
+                      "PostToolUse": "post_tool_use", "SubagentStop": "subagent_stop", "Stop": "stop"}
+CODEX_MATCHER_EVENTS = ("pre_tool_use", "post_tool_use", "session_start", "subagent_stop")
+CODEX_DEFAULT_CONTEXT_LIMIT = 2500
 CODEX_ROLES = (("explorer", "scout", True), ("worker", "worker", True), ("flash-lite-scout", None, False), ("flash-worker", None, False))
 ZH_LOOKUP = "請找出 parse_header 這個函式定義在哪個檔案,並回報檔名"
 OPAQUE = (
@@ -263,20 +275,22 @@ class Ctx:
         return Path(base) / "mitosis-orchestrator"
 
 
-def check_cli(ctx: Ctx, platform: str, exe: str, version_cheap: bool = True) -> None:
+def check_cli(ctx: Ctx, platform: str, exe: str, version_cheap: bool = True) -> Optional[str]:
+    """Adds the cli row; returns the first line of `--version` when it could be read."""
     path = shutil.which(exe)
     if not path:
         ctx.add(platform, "cli", WARN, "`%s` is not on PATH (config may still exist, but this shell cannot start it)" % exe)
-        return
+        return None
     if not version_cheap:
         ctx.add(platform, "cli", OK, "found %s" % path)
-        return
+        return None
     rc, out = run_cmd([path, "--version"])
     line = out.strip().splitlines()[0] if out.strip() else ""
     if rc == 0 and line:
         ctx.add(platform, "cli", OK, "%s, version %s" % (path, re.sub(r"[^A-Za-z0-9 ._()+-]", "?", line)[:80]))
-    else:
-        ctx.add(platform, "cli", UNKNOWN, "found %s but `--version` gave no usable answer" % path)
+        return line
+    ctx.add(platform, "cli", UNKNOWN, "found %s but `--version` gave no usable answer" % path)
+    return None
 
 
 def check_stale(ctx: Ctx, platform: str, installed: Optional[str], where: str) -> None:
@@ -547,6 +561,269 @@ def check_heartbeat(ctx: Ctx, platform: str, installed: Optional[str]) -> None:
         ctx.add(platform, "heartbeat.age", OK, "last hook event %s ago" % age_text(now - last))
 
 
+# --------------------------------------------------------------------------- Codex hook trust (offline)
+
+class BundleError(Exception):
+    """kind is "unsupported" (symlink, device, ...: Codex refuses the bundle) or "unreadable"."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+def codex_bundle_hash(root: Path) -> str:
+    """Codex's plugin content hash (plugin_fingerprint.rs, rust-v0.166.0), as `sha256:<hex>`."""
+    rootb = os.fsencode(str(root))
+    try:
+        if not stat.S_ISDIR(os.lstat(rootb).st_mode):
+            raise BundleError("unsupported")
+    except OSError:
+        raise BundleError("unreadable")
+    h = hashlib.sha256()
+    h.update(b"codex-plugin-bundle-v1")
+    pending = [b""]
+    while pending:
+        rel = pending.pop()
+        last = rel.rsplit(b"/", 1)[-1]
+        if rel:
+            try:
+                text = last.decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+            if text is not None and (text in ("__pycache__", ".venv") or text.endswith(".pyc") or text.endswith(".egg-info")):
+                continue
+        h.update(len(rel).to_bytes(8, "little"))
+        h.update(rel)
+        full = rootb + b"/" + rel if rel else rootb
+        try:
+            st = os.lstat(full)
+            if stat.S_ISDIR(st.st_mode):
+                h.update(b"directory")
+                names = sorted(os.listdir(full))
+                pending.extend((rel + b"/" + n) if rel else n for n in reversed(names))
+            elif stat.S_ISREG(st.st_mode):
+                h.update(b"file")
+                h.update(st.st_size.to_bytes(8, "little"))
+                seen = 0
+                with open(full, "rb") as fh:
+                    while True:
+                        chunk = fh.read(65536)
+                        if not chunk:
+                            break
+                        seen += len(chunk)
+                        if seen > st.st_size:
+                            break
+                        h.update(chunk)
+                if seen != st.st_size:
+                    raise BundleError("unreadable")
+            else:
+                raise BundleError("unsupported")
+        except OSError:
+            raise BundleError("unreadable")
+    return "sha256:" + h.hexdigest()
+
+
+def codex_declaration_hash(label: str, matcher: Any, handler: Dict[str, Any]) -> Optional[str]:
+    """Codex's hook declaration hash (discovery.rs hook_hash), as `sha256:<hex>`; None if not a plain command hook."""
+    if handler.get("type") != "command" or not isinstance(handler.get("command"), str) or not handler["command"].strip():
+        return None
+    timeout = handler.get("timeout")
+    if timeout is not None and (not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 0):
+        return None
+    run_async = handler.get("async", False)
+    status_message = handler.get("statusMessage")
+    limit = handler.get("additionalContextLimit")
+    if not isinstance(run_async, bool) or (status_message is not None and not isinstance(status_message, str)):
+        return None
+    if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+        return None
+    entry: Dict[str, Any] = {"type": "command", "command": handler["command"], "timeout": max(1, 600 if timeout is None else timeout),
+                             "async": run_async}
+    if status_message is not None:
+        entry["statusMessage"] = status_message
+    if limit is not None and label in ("pre_tool_use", "post_tool_use", "session_start", "user_prompt_submit") and limit != CODEX_DEFAULT_CONTEXT_LIMIT:
+        entry["additionalContextLimit"] = limit
+    identity: Dict[str, Any] = {"event_name": label, "hooks": [entry]}
+    if label in CODEX_MATCHER_EVENTS and isinstance(matcher, str):
+        identity["matcher"] = matcher
+    raw = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def codex_legacy_baseline_path(config_file: Path, plugin_id: str) -> Path:
+    ident = hashlib.sha256()
+    for part in (os.fsencode(str(config_file)), plugin_id.encode("utf-8")):
+        ident.update(len(part).to_bytes(8, "little"))
+        ident.update(part)
+    return config_file.parent / ".hook-trust" / ident.hexdigest()
+
+
+def codex_hook_list(version_dir: Path) -> Tuple[Optional[List[Tuple[str, str, Optional[str]]]], Optional[str]]:
+    """[(config key, event label, declaration hash or None)] for every command hook in the cached manifest."""
+    data, err = load_json(version_dir / "hooks" / "codex-hooks.json")
+    hooks = dig(data, "hooks") if err is None else None
+    if not isinstance(hooks, dict):
+        return None, err or "malformed"
+    out = []
+    for event, groups in hooks.items():
+        label = CODEX_EVENT_LABELS.get(event)
+        if label is None or not isinstance(groups, list):
+            continue
+        for gi, group in enumerate(groups):
+            handlers = group.get("hooks") if isinstance(group, dict) else None
+            for hi, handler in enumerate(handlers if isinstance(handlers, list) else []):
+                key = "%s:hooks/codex-hooks.json:%s:%d:%d" % (PLUGIN_KEY, label, gi, hi)
+                decl = codex_declaration_hash(label, group.get("matcher"), handler) if isinstance(handler, dict) else None
+                out.append((key, label, decl))
+    return out, None
+
+
+def codex_trust_verified(cli_line: Optional[str]) -> bool:
+    if os.name == "nt" or not cli_line:
+        return False
+    m = re.search(r"(\d+)\.(\d+)", cli_line)
+    return bool(m) and ("%s.%s" % (m.group(1), m.group(2))) in CODEX_TRUST_VERIFIED
+
+
+_RANK = {OK: 0, WARN: 1, UNKNOWN: 2, FAIL: 3}
+REVIEW_HINT = ("Fix: open Codex once, accept the hook review, then run doctor again; the `hook:` lines "
+               "in Codex must show Completed.")
+
+
+def worst(results: List[Tuple[str, str]], default: Tuple[str, str]) -> Tuple[str, str]:
+    return max(results, key=lambda r: _RANK[r[0]]) if results else default
+
+
+def newest_mtime(root: Path) -> Optional[float]:
+    newest = None
+    try:
+        for base, dirs, files in os.walk(str(root)):
+            for name in files + dirs:
+                try:
+                    m = os.lstat(os.path.join(base, name)).st_mtime
+                except OSError:
+                    continue
+                newest = m if newest is None or m > newest else newest
+    except OSError:
+        return None
+    return newest
+
+
+def check_codex_trust(ctx: Ctx, cfg: Any, err: Optional[str], xdir: Path, version_dir: Optional[Path], verified: bool) -> None:
+    p = "codex"
+    state = dig(cfg, "hooks", "state") if not err else None
+    hooks, herr = (None, "no cache") if version_dir is None else codex_hook_list(version_dir)
+    if err or hooks is None:
+        why = "config.toml is %s" % err if err else ("no plugin cache to read the hook declarations from" if herr == "no cache"
+                                                      else "hooks/codex-hooks.json in the cache is %s" % herr)
+        for event in CODEX_EVENTS:
+            ctx.add(p, "trust." + event, UNKNOWN, why)
+        ctx.add(p, "trust.bundle", UNKNOWN, why)
+        return
+    states: Dict[str, Any] = {}
+    for key, label, decl in hooks:
+        item = state.get(key) if isinstance(state, dict) else None
+        states[key] = item
+    declared = {label for _k, label, _d in hooks}
+    # pass 1: did any declaration match?
+    any_match = any(
+        decl is not None and isinstance(states[key], dict) and states[key].get("trusted_hash") == decl
+        for key, _l, decl in hooks)
+    per_event: Dict[str, List[Tuple[str, str]]] = {}
+    for key, label, decl in hooks:
+        item = states[key]
+        res = per_event.setdefault(label, [])
+        if not isinstance(item, dict) or item.get("trusted_hash") in (None, ""):
+            res.append((FAIL, "no approval `[hooks.state.\"%s\"] trusted_hash` in config.toml: Codex refuses this hook. %s" % (key, REVIEW_HINT)))
+        elif not isinstance(item["trusted_hash"], str) or item.get("enabled") not in (None, True, False):
+            res.append((UNKNOWN, "the stored approval for this hook is malformed"))
+        elif item.get("enabled") is False:
+            res.append((FAIL, "the hook is disabled (`enabled = false`) in config.toml, Codex will not run it. Enable it in Codex `/hooks`, then run doctor again."))
+        elif decl is None:
+            res.append((UNKNOWN, "the hook declaration in hooks/codex-hooks.json is not a plain command hook, cannot compute its hash"))
+        elif item["trusted_hash"] == decl:
+            res.append((OK, "approval matches the hook declaration"))
+        elif verified or any_match:
+            res.append((FAIL, "the hook declaration changed since it was approved (Codex shows it as modified and refuses it). " + REVIEW_HINT))
+        else:
+            res.append((UNKNOWN, "the approval does not match this hook declaration, but this Codex version's hash method is not verified, so it may be this check that is out of date"))
+    for event in CODEX_EVENTS:
+        if event not in declared:
+            ctx.add(p, "trust." + event, FAIL, "hooks/codex-hooks.json declares no `%s` hook. Reinstall the plugin." % event)
+            continue
+        status, message = worst(per_event[event], (UNKNOWN, "no result"))
+        ctx.add(p, "trust." + event, status, message)
+
+    # bundle
+    try:
+        content = codex_bundle_hash(version_dir)
+        content_err = None
+    except BundleError as exc:
+        content, content_err = None, exc.kind
+    results: List[Tuple[str, str]] = []
+    if content_err == "unsupported":
+        results.append((FAIL if verified else UNKNOWN, "the plugin tree holds a symlink or special file; Codex cannot fingerprint it and skips the hooks. Reinstall the plugin without it, then: " + REVIEW_HINT))
+    elif content_err:
+        results.append((UNKNOWN, "the plugin tree could not be read consistently (changed while hashing, or unreadable)"))
+    else:
+        baseline_text: Optional[str] = None
+        baseline_state = "missing"
+        cfg_file = xdir / "config.toml"
+        for cand in dict.fromkeys([cfg_file, Path(os.path.realpath(str(cfg_file)))]):
+            bpath = codex_legacy_baseline_path(cand, PLUGIN_KEY)
+            try:
+                baseline_text = bpath.read_text(encoding="utf-8")
+                baseline_state = "found"
+                break
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                baseline_state = "unreadable"
+                break
+        for key, label, decl in hooks:
+            item = states[key]
+            if not isinstance(item, dict) or not isinstance(item.get("trusted_hash"), str) or not item.get("trusted_hash"):
+                continue
+            stored = item.get("trusted_content_hash")
+            if stored is not None:
+                if not isinstance(stored, str):
+                    results.append((UNKNOWN, "a stored content approval is malformed"))
+                elif stored == content:
+                    results.append((OK, "plugin contents match the stored approval"))
+                else:
+                    results.append((FAIL if verified else UNKNOWN, "the plugin files changed after the hooks were approved (Codex refuses them). " + REVIEW_HINT
+                                    if verified else "the plugin contents differ from the stored approval, but this Codex version's hash method is not verified"))
+            elif baseline_state == "found":
+                if baseline_text == content:
+                    results.append((OK, "plugin contents match the legacy approval baseline (no per-hook content approval stored)"))
+                else:
+                    results.append((FAIL if verified else UNKNOWN, ("the plugin files differ from the legacy approval baseline (Codex refuses the hooks). " + REVIEW_HINT)
+                                    if verified else "the plugin contents differ from the legacy baseline, but this Codex version's hash method is not verified"))
+            elif baseline_state == "unreadable":
+                results.append((UNKNOWN, "the legacy approval baseline file is unreadable"))
+            else:
+                results.append((WARN if verified else UNKNOWN, "no content approval and no legacy baseline: Codex will pin whatever is installed, unreviewed, on the next hook run. Review the hooks in Codex `/hooks` first."))
+    status, message = worst(results, (UNKNOWN, "no stored hook approval to compare the plugin contents with"))
+    if status == UNKNOWN and not verified and any("not verified" in m for s, m in results):
+        hint = stale_hint(ctx, version_dir)
+        if hint:
+            message += "; " + hint
+    ctx.add(p, "trust.bundle", status, message)
+
+
+def stale_hint(ctx: Ctx, version_dir: Optional[Path]) -> str:
+    """A hook ran after the newest bundle file changed: then Codex accepted these files and this check is stale."""
+    data, err = load_json(ctx.heartbeat_dir() / "heartbeat-codex.json")
+    last = data.get("last_event_at") if err is None and isinstance(data, dict) else None
+    seen = data.get("plugin_version") if err is None and isinstance(data, dict) else None
+    if version_dir is None or not isinstance(last, (int, float)) or seen != version_dir.name:
+        return ""
+    newest = newest_mtime(version_dir)
+    if newest is not None and last > newest:
+        return "a hook ran after the newest plugin file changed, so the check method is probably stale for this Codex"
+    return ""
+
+
 # --------------------------------------------------------------------------- platforms
 
 def not_installed(ctx: Ctx, platform: str, reason: str, tool: str) -> None:
@@ -641,12 +918,13 @@ def newest_version_dir(base: Path) -> Optional[Path]:
 
 def check_codex(ctx: Ctx) -> None:
     p = "codex"
-    xdir = ctx.home / ".codex"
+    env_home = os.environ.get("CODEX_HOME")
+    xdir = Path(env_home) if env_home and not ctx.explicit_home else ctx.home / ".codex"
     cfg, err = load_toml(xdir / "config.toml")
     cache_dir = newest_version_dir(xdir / "plugins" / "cache" / PLUGIN / PLUGIN)
     if cache_dir is None and err != "unreadable" and not isinstance(dig(cfg, "plugins", PLUGIN_KEY), dict):
         return not_installed(ctx, p, "no [plugins.\"%s\"] entry in ~/.codex/config.toml and no cache under ~/.codex/plugins/cache" % PLUGIN_KEY, "codex")
-    check_cli(ctx, p, "codex")
+    cli_line = check_cli(ctx, p, "codex")
     if err == "missing":
         ctx.add(p, "hooks_feature", FAIL, "config.toml is missing: `[features] hooks = true` is absent, hooks are silently off")
     elif err:
@@ -679,18 +957,7 @@ def check_codex(ctx: Ctx) -> None:
         else:
             ctx.add(p, "cache", OK, "cache at %s" % version_dir)
     check_stale(ctx, p, version, "the cache directory name")
-    state = dig(cfg, "hooks", "state") if not err else None
-    for event in CODEX_EVENTS:
-        key = "%s:hooks/codex-hooks.json:%s:0:0" % (PLUGIN_KEY, event)
-        if err:
-            ctx.add(p, "trust." + event, UNKNOWN, "config.toml is %s" % err)
-            continue
-        item = state.get(key) if isinstance(state, dict) else None
-        if isinstance(item, dict) and isinstance(item.get("trusted_hash"), str) and item["trusted_hash"]:
-            ctx.add(p, "trust." + event, OK, "trust key present")
-        else:
-            ctx.add(p, "trust." + event, FAIL, "no trust key `[hooks.state.\"%s\"]`: Codex silently skips this untrusted hook" % key)
-    ctx.add(p, "trust_hash", UNKNOWN, "whether each stored hash is still current cannot be determined offline; open `/hooks` in Codex and confirm the hooks show as trusted")
+    check_codex_trust(ctx, cfg, err, xdir, version_dir, codex_trust_verified(cli_line))
     models = spec_models(root)
     for role, tier, required in CODEX_ROLES:
         rdata, rerr = load_toml(xdir / "agents" / (role + ".toml"))
