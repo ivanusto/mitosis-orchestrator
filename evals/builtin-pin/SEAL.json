@@ -1,0 +1,262 @@
+{
+ "batches": [
+  [
+   "q03",
+   "q16",
+   "q20",
+   "q21",
+   "q28"
+  ],
+  [
+   "q01",
+   "q08",
+   "q09",
+   "q24",
+   "q29"
+  ],
+  [
+   "q10",
+   "q13",
+   "q14",
+   "q26",
+   "q30"
+  ],
+  [
+   "q02",
+   "q04",
+   "q07",
+   "q18",
+   "q19"
+  ],
+  [
+   "q06",
+   "q11",
+   "q12",
+   "q23",
+   "q27"
+  ],
+  [
+   "q05",
+   "q15",
+   "q17",
+   "q22",
+   "q25"
+  ]
+ ],
+ "budget_limit_usd": 20.0,
+ "calibration_order": [
+  "inherit",
+  "pinned"
+ ],
+ "files": {
+  "builtin-pin:PROTOCOL.md": "f56d92c029bbb8bb49c683d299c075c0a35e539f2f5d7bc7033b6bfb54ff737c",
+  "builtin-pin:run.py": "1b52f2fb0c212066c21d17ba2956acac36cc43f68a76819d1bbf03111e706a1a",
+  "compare:PROTOCOL.md": "a9e8bdbf4b7f531071a437de9ed413badef3684fe38cbc8f6e6e36e8d0f8356e",
+  "compare:run.py": "57f5c25b5a36d353a8c2367113ae60df270b7633abb83a9b1080e1f2d1e16c6f",
+  "lookup/allowed_tools.txt": "d29bbfb890485dbd5ff5065214a7c6378dba9f68c157197e1d5be0a82c7300c1",
+  "lookup/grade.py": "7ee22c9a82e3750c9a6910719759d8f9e5d1d09ddbbaa75c812edac939650317",
+  "lookup/key.json": "7b8650753a05299dc6ef6bec0a63af66aa4c9e2d4781f23e05bec493424c9dcd",
+  "lookup/make_questions.py": "f373e6ddd86f7fafd41bb3ad9fa4af649e0e91bd9ddd5531f44fcbe04d1b0990",
+  "lookup/prompt.md": "a364e76f172fba5b45479607ec50fd5a5810a5299b4682d6ece83e7ce552d876",
+  "lookup/questions.json": "e69db1623087d19d15cffb6dac4726cc511e4209762828f8c368d4ba13258feb",
+  "lookup/questions.py": "5662e62c7cc37938ffad8718e7444115f483550189869c575fa3056dae1abb99",
+  "lookup/reference/answers.json": "7b8650753a05299dc6ef6bec0a63af66aa4c9e2d4781f23e05bec493424c9dcd",
+  "lookup/scaffold.py": "b84be676f454b409615186e012606c867154ebdac8c9d5c78a5133c2d29e3416",
+  "lookup/stdlib.manifest.json": "cda737b5c5dfd24c0b53455cf08a70d942cd5566721b462778833b69dd440578",
+  "lookup/treequery.py": "0f836e9f9ad962452e11686b0d2600eb0ad3f9bd25c9589f66470d713d56e26d",
+  "lookup/verify_key.py": "6c5c5b8316bca14b08aa3f0423751c48079700557cd70fc724fad1836fae8537",
+  "overhead:run.py": "5eaf6077c1ade980e8fbcf5cad319ce5834883f07b4dbcb724fb2eb631d5720b"
+ },
+ "plugin_commit": "461d66af1c99e2aaff1343e10c93abe624c463c0",
+ "plugin_tree_sha256": "44e056f29a0d5acce9437ca479383701ce365c3a8610649750e2cada88cd2069",
+ "rounds": 3,
+ "run_cap_usd": 1.5,
+ "schedule": [
+  [
+   1,
+   5,
+   "pinned"
+  ],
+  [
+   1,
+   5,
+   "inherit"
+  ],
+  [
+   1,
+   2,
+   "inherit"
+  ],
+  [
+   1,
+   4,
+   "pinned"
+  ],
+  [
+   1,
+   2,
+   "pinned"
+  ],
+  [
+   1,
+   3,
+   "inherit"
+  ],
+  [
+   1,
+   4,
+   "inherit"
+  ],
+  [
+   1,
+   1,
+   "pinned"
+  ],
+  [
+   1,
+   6,
+   "pinned"
+  ],
+  [
+   1,
+   1,
+   "inherit"
+  ],
+  [
+   1,
+   6,
+   "inherit"
+  ],
+  [
+   1,
+   3,
+   "pinned"
+  ],
+  [
+   2,
+   1,
+   "pinned"
+  ],
+  [
+   2,
+   6,
+   "inherit"
+  ],
+  [
+   2,
+   1,
+   "inherit"
+  ],
+  [
+   2,
+   2,
+   "inherit"
+  ],
+  [
+   2,
+   4,
+   "pinned"
+  ],
+  [
+   2,
+   3,
+   "pinned"
+  ],
+  [
+   2,
+   5,
+   "pinned"
+  ],
+  [
+   2,
+   2,
+   "pinned"
+  ],
+  [
+   2,
+   5,
+   "inherit"
+  ],
+  [
+   2,
+   3,
+   "inherit"
+  ],
+  [
+   2,
+   4,
+   "inherit"
+  ],
+  [
+   2,
+   6,
+   "pinned"
+  ],
+  [
+   3,
+   5,
+   "pinned"
+  ],
+  [
+   3,
+   3,
+   "pinned"
+  ],
+  [
+   3,
+   5,
+   "inherit"
+  ],
+  [
+   3,
+   4,
+   "inherit"
+  ],
+  [
+   3,
+   1,
+   "pinned"
+  ],
+  [
+   3,
+   2,
+   "inherit"
+  ],
+  [
+   3,
+   1,
+   "inherit"
+  ],
+  [
+   3,
+   2,
+   "pinned"
+  ],
+  [
+   3,
+   6,
+   "inherit"
+  ],
+  [
+   3,
+   4,
+   "pinned"
+  ],
+  [
+   3,
+   3,
+   "inherit"
+  ],
+  [
+   3,
+   6,
+   "pinned"
+  ]
+ ],
+ "seed": 20261105,
+ "version": 1,
+ "warmup_order": [
+  "pinned",
+  "inherit"
+ ]
+}
