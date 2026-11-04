@@ -1,0 +1,142 @@
+name: Scout shells
+
+# Checks the scout read-only guard against real shells the unit tests cannot cover:
+#   pwsh-linux, pwsh-windows  the strict character set (strict_windows=True) against real PowerShell
+#   zsh-oracle                the POSIX oracle with zsh added to bash, dash and busybox sh
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzz:
+        description: "Strings generated per seed for the PowerShell harness"
+        required: false
+        default: "20000"
+  pull_request:
+    paths:
+      - ".github/workflows/scout-shells.yml"
+      - "scripts/mitosis_hook/guards.py"
+      - "tests/scout_oracle.py"
+      - "tests/scout_pwsh_harness.py"
+
+permissions:
+  contents: read
+
+jobs:
+  pwsh-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Confirm pwsh and print its version
+        shell: bash
+        run: |
+          command -v pwsh
+          pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString(); $PSVersionTable.OS'
+      - name: Harness self-check (a permissive guard must produce violations)
+        run: python tests/scout_pwsh_harness.py --self-check
+      - name: Harness against pwsh
+        run: >-
+          python tests/scout_pwsh_harness.py --shell pwsh --seed ${{ matrix.seed }}
+          --fuzz ${{ inputs.fuzz || '20000' }} --workers 2 --budget 2400
+          --json pwsh-linux-seed${{ matrix.seed }}.json
+      - name: Upload JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwsh-linux-seed${{ matrix.seed }}
+          path: pwsh-linux-seed${{ matrix.seed }}.json
+          if-no-files-found: warn
+
+  pwsh-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Confirm pwsh and powershell and print their versions
+        shell: pwsh
+        run: |
+          Get-Command pwsh, powershell | Format-Table Name, Version, Source
+          pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+          powershell -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+      - name: Harness self-check, pwsh
+        run: python tests/scout_pwsh_harness.py --shell pwsh --self-check
+      - name: Harness self-check, powershell
+        run: python tests/scout_pwsh_harness.py --shell powershell --self-check
+      # Each real run stops starting new strings after 1200 s so that both shells fit in the job limit.
+      - name: Harness against pwsh
+        run: >-
+          python tests/scout_pwsh_harness.py --shell pwsh --seed ${{ matrix.seed }}
+          --fuzz ${{ inputs.fuzz || '20000' }} --workers 2 --budget 1200
+          --json pwsh-windows-pwsh-seed${{ matrix.seed }}.json
+      - name: Harness against powershell (Windows PowerShell 5.1)
+        if: always()
+        run: >-
+          python tests/scout_pwsh_harness.py --shell powershell --seed ${{ matrix.seed }}
+          --fuzz ${{ inputs.fuzz || '20000' }} --workers 2 --budget 1200
+          --json pwsh-windows-powershell-seed${{ matrix.seed }}.json
+      - name: Upload JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwsh-windows-seed${{ matrix.seed }}
+          path: pwsh-windows-*-seed${{ matrix.seed }}.json
+          if-no-files-found: warn
+
+  zsh-oracle:
+    # Why on a runner: the local machine that develops this project also hosts an inference engine and is short
+    # of free memory (a fuzz of this size got another process killed by earlyoom there). A hosted runner has
+    # nothing else to protect. The oracle keeps its safe per-child limit (--child-as-gib 4) and its memory floor.
+    # 4 seeds of 20000 strings each = 80000 strings in total, with bash, dash, busybox sh and zsh together.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Shells for the scout guard oracle (zsh, busybox, bubblewrap)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh busybox-static bubblewrap
+      - name: Does bwrap work on this runner
+        id: bwrap
+        run: |
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces through AppArmor; try to lift that first.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if bwrap --ro-bind / / --dev /dev --unshare-net true; then
+            echo "flag=--bwrap" >> "$GITHUB_OUTPUT"
+            echo "bwrap works, the oracle will run inside it"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "NOTICE: bwrap does not work on this runner, the oracle runs WITHOUT --bwrap"
+          fi
+      - name: Oracle, 20000 strings (bash, dash, busybox, zsh)
+        run: |
+          python tests/scout_oracle.py --fuzz 20000 --seed ${{ matrix.seed }} \
+            --shells "bash,dash,busybox,zsh=$(command -v zsh)" ${{ steps.bwrap.outputs.flag }} \
+            --workers "$(nproc)" --child-as-gib 4 --json "zsh-oracle-seed${{ matrix.seed }}.json"
+      - name: Upload JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zsh-oracle-seed${{ matrix.seed }}
+          path: zsh-oracle-seed${{ matrix.seed }}.json
+          if-no-files-found: warn
