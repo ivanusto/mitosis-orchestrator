@@ -11,6 +11,11 @@ guard accepts is checked against what the shell executed:
   (c) every executed argv equals one segment of _scout_scan (env prefixes, ~ and globs allowed for)
   (d) the fixture tree is unchanged
   (e) the shell reports no syntax error
+  (f) a glob in a slot the guard reads as one word (the value of git -C, the git subcommand, the value of
+      date -d/-r/-f) did not expand to exactly one word. Only these slots are checked: a glob that expands to
+      several words is normal for an operand (`ls a*`), so the oracle cannot call that wrong in general.
+      Known limit: the slot table covers git and date only. Another program whose guard reads a glob word as one
+      option value would need a row in _slot_words; the oracle does not find such a program by itself.
 
 Because stubs exit 0, the right side of `||` never runs: executed is compared as a subset of expected,
 and as an equal set when the command has no `||`. Allowlist-only mode drops (c) for guards that have
@@ -295,13 +300,15 @@ def _word_ok(word: Tuple[str, int, bool], arg: str, home: str) -> bool:
     return arg == value
 
 
-def _args_match(words: List[Tuple[str, int, bool]], args: List[str], home: str) -> bool:
-    """A glob word takes one or more arguments (it expands to every match), any other word takes one."""
+def _args_match(words: List[Tuple[str, int, bool]], args: List[str], home: str,
+                single: Sequence[int] = ()) -> bool:
+    """A glob word takes one or more arguments (it expands to every match), any other word takes one.
+    Words whose index is in `single` take exactly one even when they are globs (see _slot_words)."""
     reach = {0}
-    for word in words:
+    for index, word in enumerate(words):
         nxt = set()
         for j in reach:
-            if word[1] >= 0:
+            if word[1] >= 0 and index not in single:
                 k = j
                 while k < len(args) and _word_ok(word, args[k], home):
                     k += 1
@@ -312,6 +319,34 @@ def _args_match(words: List[Tuple[str, int, bool]], args: List[str], home: str) 
         if not reach:
             return False
     return len(args) in reach
+
+
+def _slot_words(name: str, words: List[Tuple[str, int, bool]]) -> List[int]:
+    """Indexes of glob words (after the program name) that sit where the guard reads one word as the value of an
+    option or as the subcommand, so that a glob expanding to several words would shift what follows:
+    git: a glob before or at the subcommand, such as the value of -C (`git -C r* log` ran `git -C repo rm log`);
+    date: the value of -d, -r or -f. Ordinary operands (`ls a*`) take any number of words and are not slots.
+    _args_match with these forced to one word fails when only a multi-word expansion makes the match work."""
+    slots: List[int] = []
+    if name == "git":
+        i = 0
+        while i < len(words):
+            value = words[i][0]
+            if words[i][1] < 0 and words[i][2] and value == "-C":
+                if i + 1 < len(words) and words[i + 1][1] >= 0:
+                    slots.append(i + 1)
+                i += 2
+            elif words[i][1] < 0 and value.startswith("-"):
+                i += 1
+            else:
+                if words[i][1] >= 0:
+                    slots.append(i)
+                break
+    elif name == "date":
+        for i, (value, glob_at, plain) in enumerate(words[:-1]):
+            if glob_at < 0 and value in ("-d", "--date", "-r", "--reference", "-f", "--file") and words[i + 1][1] >= 0:
+                slots.append(i + 1)
+    return slots
 
 
 def expected_commands(segments: List[List[Tuple[str, int, bool]]]) -> List[Tuple[Tuple[str, int, bool], List[Tuple[str, int, bool]]]]:
@@ -352,6 +387,10 @@ def check_run(command: str, shell: Shell, result: Dict[str, Any], allowed: set, 
             for k in unused:
                 head, rest = expected[k]
                 if head[0] == name and head[1] < 0 and _args_match(rest, args, home):
+                    slots = _slot_words(name, rest)
+                    if slots and not _args_match(rest, args, home, slots):
+                        add("glob-slot", "a glob in an option-value or subcommand slot expanded to several words: "
+                                         "executed %s %r for scanned %r" % (name, args, [w[0] for w in rest]))
                     unused.remove(k)
                     break
             else:

@@ -411,6 +411,23 @@ class TestScoutOracle(unittest.TestCase):
                 with self.subTest(shell=shell.label, cmd=cmd):
                     self.assertTrue(oracle.run_command(cmd, scanner_words=False), cmd)
 
+    def test_glob_in_a_slot_is_caught_and_an_operand_glob_is_not(self):
+        """REVIEW.md cause 7: `git -C r* log` ran `git -C repo rm log` and the oracle showed it clean."""
+        for shell in SHELLS:
+            oracle = self.oracle([shell])
+            box = oracle.box()
+            (box.work / "repo").mkdir()
+            (box.work / "repo" / "f").write_text("x", encoding="utf-8")
+            (box.work / "rm").write_text("x", encoding="utf-8")
+            box.base_tree = scout_oracle._snapshot(box.work, box.home)
+            with self.subTest(shell=shell.label):
+                for cmd in ("git -C r* log", "date -d r*"):
+                    kinds = {v["kind"] for v in oracle.run_command(cmd)}
+                    self.assertIn("glob-slot", kinds, cmd)
+                for cmd in ("git -C repo log", "git log r*", "ls r*", "git -C repo log -- r*"):
+                    self.assertEqual(oracle.run_command(cmd), [], cmd)
+        self.assertFalse(eo.scout_command_is_read_only("git -C r* log")[0], "the guard now denies it as well")
+
     def test_self_check_clean_command_is_clean(self):
         for shell in SHELLS:
             oracle = self.oracle([shell])
