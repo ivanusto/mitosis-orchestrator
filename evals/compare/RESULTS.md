@@ -1,5 +1,7 @@
 # Results: explicit /orchestrate, per task type
 
+> **Note, 2026-11-04.** These runs used the earlier default, where the primary was denied after 3 direct edits or a test run after an edit. Since 2.6.0 the default is advice (`*_MITOSIS_FASTPATH_MODE=advise`), so these numbers do not describe the new default. They were not rerun.
+
 Run under `PROTOCOL.md` (sealed). Plugin commit `afefb43` (`afefb432b15d73c6cf93640e26f7924602a5e7b0`); export sha256 `6fb7c063533e504203958f3918912b8b653fb4b28039853af35beb5d588b7711` (from `SEAL.json`).
 
 Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, no capped run, no timeout, no leak suspect. Spend 14.13 USD including 2 warm-ups.

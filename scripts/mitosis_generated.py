@@ -43,7 +43,7 @@ REPORT_FORMAT_SCOUT = 'REPORT FORMAT:\nReturn only these four headers (plus up t
 REPORT_FORMAT_WORKER = 'REPORT FORMAT:\nReturn only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: <comma-separated paths or NONE>\nVERIFICATION: <one sentence stating the command run and its exit result>\nNOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>'
 REPORT_BLOCK_REASON = "[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: <comma-separated paths or NONE>\nVERIFICATION: <one sentence stating the command run and its exit result>\nNOTES: <one sentence or up to 10 '- ' bullets; when BLOCKED or FAILED, workers include a file://.../*.log URI and scouts say what was denied or missing>"
 COMPAT = {
-    'claude': {'verified': '2.1.317', 'verified_on': '2026-11-04', 'method': 'interactive and headless run'},
+    'claude': {'verified': '2.1.318', 'verified_on': '2026-11-04', 'method': 'headless run of advice, enforce and built-in pinning'},
     'codex': {'verified': '0.166.0', 'verified_on': '2026-11-04', 'method': 'installed plugin run after hook review'},
-    'agy': {'verified': '1.4.6', 'verified_on': '2026-10-26', 'method': 'live run through invoke_subagent', 'note': '`agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.'},
+    'agy': {'verified': '1.5.0', 'verified_on': '2026-11-04', 'method': 'headless run of the edit budget and advice', 'note': '`agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.'},
 }

@@ -1,5 +1,7 @@
 # Results: where does the plugin's extra cost come from?
 
+> **Note, 2026-11-04.** These runs used the earlier default, where the primary was denied after 3 direct edits or a test run after an edit. Since 2.6.0 the default is advice (`*_MITOSIS_FASTPATH_MODE=advise`), so these numbers do not describe the new default. They were not rerun.
+
 Run under `PROTOCOL.md` (sealed). Plugin commit `368dc34` (`368dc3428e45ce834cd2db61c23e0c1d3039d82e`). Plugin tree sha256 `2e9090aa43131f8bc2b1d2fadd2a7827c928a5530436c1fad3b650277e4917fa` (from `SEAL.json`). Seed 20261104.
 
 Lookup task, three arms x three repeats, Claude Code, `opus` at `medium`, one machine. All 9 scored runs succeeded. Ledger total 6.99 USD (including the three probe runs; budget 10.00 USD). Numbers below are from the runner's `report` output.

@@ -125,9 +125,9 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 
 | Platform | Verified version | Verified on | Method |
 | --- | --- | --- | --- |
-| Claude Code | 2.1.317 | 2026-11-04 | interactive and headless run |
+| Claude Code | 2.1.318 | 2026-11-04 | headless run of advice, enforce and built-in pinning |
 | Codex CLI | 0.166.0 | 2026-11-04 | installed plugin run after hook review |
-| agy | 1.4.6 | 2026-10-26 | live run through invoke_subagent |
+| agy | 1.5.0 | 2026-11-04 | headless run of the edit budget and advice |
 
 - agy: `agy plugin validate --strict` warns that hooks/hooks.json is not loaded. That file is for Claude Code; agy reads hooks.json at the plugin root.
 <!-- END GENERATED: compat -->
@@ -137,7 +137,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.5.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.6.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -209,7 +209,7 @@ Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook
 ## Bundled Components & Guardrails
 
 ### 1. Lifecycle Enforcement Hooks ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
-Zero-dependency Python 3.8+ standard library hook engine (entry script plus the [`scripts/mitosis_hook/`](./scripts/mitosis_hook) package) enforcing orchestration discipline across every turn (~30 ms per call). On Claude Code the `PreToolUse` matcher is limited to the tools the engine actually inspects (`Agent`, `Task`, `Bash`, `Read`, `NotebookRead`, `Write`, `Edit`, `NotebookEdit`, `SendMessage`), so `Grep` / `Glob` / `WebFetch` / MCP calls no longer pay the hook start-up cost:
+Zero-dependency Python 3.8+ standard library hook engine (entry script plus the [`scripts/mitosis_hook/`](./scripts/mitosis_hook) package) on every turn (~30 ms per call). Model pinning and the scout read-only layer are enforced; delegation of the primary's own edits and tests is advice by default (`*_MITOSIS_FASTPATH_MODE`). On Claude Code the `PreToolUse` matcher is limited to the tools the engine actually inspects (`Agent`, `Task`, `Bash`, `Read`, `NotebookRead`, `Write`, `Edit`, `NotebookEdit`, `SendMessage`), so `Grep` / `Glob` / `WebFetch` / MCP calls no longer pay the hook start-up cost:
 
 | Hook Event | Guardrail / Behavior |
 | :--- | :--- |
@@ -360,6 +360,12 @@ Earlier rounds (1.6.0 to 1.7.0), cells read correct/40, dangerous:
 | holdout v4 (40) | blind, scored once, not tuned | 25/40, 8 | 33/40, 0 |
 
 The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets each had 4 to 9 dangerous misroutes on v1.6.0. The first 1.7.0 round fitted the training sets but barely moved the blind score. All six remaining dangerous v3 misses came from the short-prompt fallback, so 1.7.0 changed it to send prompts with no lookup signal to the worker (a cost error instead of a failed scout run), and added run, CLI and docs-lookup signals. The 7 remaining v4 errors were lookups sent to the worker (cost, not failure): read-only questions that name debug, migration or build words. 2.0.0 fixes that class in the rule layer (see the table above).
+
+---
+
+## What changed in 2.6.0
+
+**After updating.** The primary is no longer blocked for editing more than 3 files in a turn or for running tests after an edit: it gets one piece of advice per kind per turn. Set `*_MITOSIS_FASTPATH_MODE=enforce` to get the denials back. On Codex, open Codex once and accept the hook review. On Claude Code, start a new session. Details: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 

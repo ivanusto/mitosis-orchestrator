@@ -1,8 +1,45 @@
 # Changelog
 
-## Unreleased
+## 2.6.0 - 2026-11-04
 
-Documentation and evals only. No plugin code changed and no new version.
+**After updating, do this.** On Codex, open Codex once and accept the hook review, then run `python3 scripts/mitosis-doctor.py`. On Claude Code, start a new session. **To keep the old blocking behaviour, set `*_MITOSIS_FASTPATH_MODE=enforce`.**
+
+### Behaviour changes
+- **The primary's edit budget and edit-then-test check now advise by default.** `*_MITOSIS_FASTPATH_MODE` takes `enforce`, `advise` (default) or `off`. Advice appears once per kind per turn and never blocks. `*_ALLOW_DIRECT_FASTPATH=1` still means off. Reason: the measured runs below do not support forcing delegation. Model pinning, the scout read-only layer, the log and transcript read guard and the circuit breaker are unchanged.
+- **A test runner is no longer detected in text that only names it**, such as `git commit -m "add pytest"`, `grep pytest file` or a heredoc body. A string given to a shell (`bash -c "pytest"`), a nested command and a background job are still read. This applies to both modes.
+- **New scout denials on the strict rule set.** A single-dash word with `.` or `:` is denied (see Security).
+
+### Added
+- `CLAUDE_MITOSIS_PIN_BUILTINS=1`, off by default: `Explore` goes to the scout tier with no routing, escalation or report contract, and `general-purpose` is routed as an untyped call. `Plan` and an explicit model are untouched. With the flag on, Explore does not get the scout Bash allowlist. Quality on a cheaper model was not measured and no saving is claimed. On one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend.
+- `spec/compat.toml` records the CLI versions this release was verified on. It is generated into both READMEs and shown by doctor as the info row `<platform>.cli_verified`. A newer CLI never changes the exit code.
+- Doctor row `claude.heartbeat.builtin` and heartbeat counter `builtin_stops`: counts by a fixed list of names. Rows in `mitosis-cost-report.py --fleet` are marked `unpinned`, and an agent on another model than the primary no longer counts as unpinned.
+- `tests/scout_pwsh_harness.py` and the workflow `Scout shells`: real PowerShell and a large zsh oracle on GitHub runners, so that a large fuzz does not load a local machine.
+- Scout: `git branch --merged` and `--contains` in one exact shape, `git branch [-a -r -v -vv -i -q] --merged|--contains [REV]`. `--merged=REV` and `--contains=REV` are now denied. Checked on real git 2.43.0: no allowed shape and no near miss wrote.
+
+### Fixed
+- **agy: the edit budget did almost nothing.** `PreInvocation` fires on every model call, so the budget reset at each step, and agy 1.5.0 sends `write_file` and `edit_file` with `Path`, which the budget did not read. It now resets when `invocationNum` returns to 0 and counts those tools. `edit_file` and `create_file` joined the mutation list.
+- **Codex: `CODEX_MITOSIS_AUTO_ALLOW=1` failed the hook.** Codex 0.166 marks an `allow` without `updatedInput` as Failed, and the workspace guard sent exactly that, so it never auto-approved. On Codex the guard now only denies. Found in the Codex source (`pre_tool_use.rs`); the failure itself was not run.
+
+### Security
+- **The strict scout rules had never met a real PowerShell.** Run on pwsh 7.6.9 (Linux, Windows) and Windows PowerShell 5.1: no accepted string wrote a file or started another program. Real pwsh does pass `-o.x` as `-o` and `.x`, and after `--` also `-o:x` as `-o:` and `x`, so the words the guard read were not always the words a program got. The forbidden options were already denied in those spellings, so no exploit was found. Strict mode now denies those words. `--output.x` stays one argument and is not affected. Aliases on Windows (`cat`, `diff`, `echo`, `ls`, `pwd`, `sort`) resolve to read-only cmdlets, and the option tables do not apply to them.
+
+### Measured use behind this release
+- Delegation lowered primary context growth by 30% and raised total cost by 71% (one calibration run per arm, `evals/long/RESULTS.md`).
+- A rough estimate from one machine's interactive sessions, 2026-10-23 to 2026-11-04: net tokens saved by workers between about 1% and 8%, as an upper bound, since it assumes everything in a worker's context would have stayed in the primary's. This is arithmetic, not a measurement, and the calibration run points the other way.
+- `evals/compare` and `evals/overhead` were run under the old default and were not rerun. Each RESULTS file now says so.
+
+### Corrections
+- Earlier notes said the complete Windows suite was not in CI, and that zsh was not covered. Both have been in CI: `hooks-windows` runs the full suite, and the oracle test covers zsh when it is installed.
+
+### Decided against
+- The report cap stays at 1,600. On workers since Claude Code 2.1.311, 2,400 would remove 3 of 33 blocks in a replay of the rejected reports, because `too_long` is checked first and hides line-count failures, and a block costs little.
+
+### Not covered
+The agy circuit breaker still resets on every model call, so it rarely fires there; fixing it would add denials and is left for a later decision. On agy, the advice was confirmed in the transcript as an `EPHEMERAL_MESSAGE`, but the model did not quote it in the one live run. VERIFICATION_PLACEHOLDER
+
+## Unreleased before 2.6.0
+
+Documentation and evals only.
 - Corrected the 2.5.0 overhead numbers: the 1.4% output share was wrong, because the stream undercounts output tokens. Output accounts for about 45% of the `/orchestrate` difference. The outcome NO TRIM is unchanged.
 - Added `evals/long/`: a chained long-session calibration harness and one run per arm, not a verdict. Over the six stages that compare, delegation lowered primary context growth by 30% and raised total cost by 71%. See `evals/long/RESULTS.md`.
 

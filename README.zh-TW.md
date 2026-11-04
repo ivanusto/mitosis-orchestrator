@@ -125,9 +125,9 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 | 平台 | 已驗證版本 | 驗證日期 | 方式 |
 | --- | --- | --- | --- |
-| Claude Code | 2.1.317 | 2026-11-04 | 互動與 headless 實跑 |
+| Claude Code | 2.1.318 | 2026-11-04 | 以 headless 實跑提醒、拒絕與內建代理釘定 |
 | Codex CLI | 0.166.0 | 2026-11-04 | 完成 hook review 後以已安裝外掛實跑 |
-| agy | 1.4.6 | 2026-10-26 | 透過 invoke_subagent 實跑 |
+| agy | 1.5.0 | 2026-11-04 | 以 headless 實跑改檔預算與提醒 |
 
 - agy：`agy plugin validate --strict` 會警告 hooks/hooks.json 未被載入。該檔供 Claude Code 使用；agy 讀的是外掛根目錄的 hooks.json。
 <!-- END GENERATED: compat -->
@@ -137,7 +137,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.5.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.6.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -209,7 +209,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 ## 核心組件與安全防護機制
 
 ### 1. 生命週期強制守衛 ([`hooks.json`](./hooks.json) · [`hooks/hooks.json`](./hooks/hooks.json) · [`scripts/enforce-orchestrator.py`](./scripts/enforce-orchestrator.py))
-零外部依賴（僅 Python 3.8+ 標準函式庫；入口腳本加上 [`scripts/mitosis_hook/`](./scripts/mitosis_hook) 套件），每次呼叫約 30 毫秒，於每個代理生命週期自動把關。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
+零外部依賴（僅 Python 3.8+ 標準函式庫；入口腳本加上 [`scripts/mitosis_hook/`](./scripts/mitosis_hook) 套件），每次呼叫約 30 毫秒，於每個代理生命週期運作。模型釘定與 scout 唯讀層是強制的；主核自己改檔與跑測試是否委派，預設只提醒（`*_MITOSIS_FASTPATH_MODE`）。Claude Code 端的 `PreToolUse` matcher 只涵蓋引擎真正檢查的工具（`Agent`、`Task`、`Bash`、`Read`、`NotebookRead`、`Write`、`Edit`、`NotebookEdit`、`SendMessage`），`Grep` / `Glob` / `WebFetch` / MCP 呼叫不再付 hook 啟動成本：
 
 | Hook 事件 | 防護機制與行為說明 |
 | :--- | :--- |
@@ -366,6 +366,12 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | holdout v4（40） | 盲測，只評分一次，未調校 | 25/40，8 | 33/40，0 |
 
 1.5.1 的「零危險」結果沒有推廣到新資料：三組全新的盲測集在 v1.6.0 上各有 4 到 9 筆危險誤判。1.7.0 第一輪調校擬合了訓練集，但盲測分數幾乎沒有變動。v3 剩下的六筆危險誤判全部來自短提示詞的退路規則，因此 1.7.0 改為把沒有查詢訊號的提示詞送給執行者（代價是成本誤差，而不是偵察者執行失敗），並新增執行、CLI 與文件查詢的訊號。v4 當時剩下的 7 筆錯誤都是把查詢送給執行者（只多花成本，不會失敗），也就是提到 debug、migration 或 build 等字眼的唯讀問題；2.0.0 已在規則層修正這一類（見上表）。
+
+---
+
+## 2.6.0 有什麼變動
+
+**更新後。** 主核每回合改超過 3 個檔案或改檔後跑測試，不再被拒絕，改為每種情況每回合提醒一次。要恢復拒絕，請設 `*_MITOSIS_FASTPATH_MODE=enforce`。Codex 請開啟一次並接受 hook review。Claude Code 請開新的 session。詳見 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
