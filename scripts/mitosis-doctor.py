@@ -611,6 +611,27 @@ def check_heartbeat(ctx: Ctx, platform: str, installed: Optional[str]) -> None:
     else:
         ctx.add(platform, "heartbeat.age", OK, "last hook event %s ago" % age_text(now - last))
     check_report_rejections(ctx, platform, data)
+    check_builtin_stops(ctx, platform, data)
+
+
+BUILTIN_STOP_NAMES = ("Explore", "Plan", "general-purpose", "other")
+
+
+def check_builtin_stops(ctx: Ctx, platform: str, data: Dict[str, Any]) -> None:
+    """Informational only: built-in agent stops by allowlisted name. Never a warning, no saving claimed."""
+    raw = data.get("builtin_stops")
+    pairs = []
+    if isinstance(raw, dict):
+        pairs = [(k, raw[k]) for k in BUILTIN_STOP_NAMES
+                 if isinstance(raw.get(k), int) and not isinstance(raw.get(k), bool) and raw[k] > 0]
+    if pairs:
+        text = ", ".join("%s=%d" % (k, n) for k, n in pairs)
+        ctx.add(platform, "heartbeat.builtin", OK,
+                "info: Claude Code built-in agent stops by type: %s; set CLAUDE_MITOSIS_PIN_BUILTINS=1 to pin Explore "
+                "and general-purpose (opt-in, quality impact not measured)" % text)
+    else:
+        ctx.add(platform, "heartbeat.builtin", OK,
+                "info: no built-in agent stop recorded; CLAUDE_MITOSIS_PIN_BUILTINS=1 is an opt-in to pin Explore and general-purpose")
 
 
 def _class_counts(value: Any) -> List[Tuple[str, int]]:

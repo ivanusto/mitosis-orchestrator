@@ -27,6 +27,7 @@ from .report import REPORT_PROBLEM_CLASSES
 SCHEMA = 1
 THROTTLE_SECONDS = 60.0
 MAX_NAMES = 16
+BUILTIN_STOP_NAMES = ("Explore", "Plan", "general-purpose", "other")
 _NAME_RE = re.compile(r"[^A-Za-z0-9_.:/-]")
 _CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -73,7 +74,8 @@ def _bump(bucket: Dict[str, int], key: str, n: int = 1) -> None:
 
 def note(*, unhandled: Optional[str] = None, failure: Optional[str] = None,
          pin: Optional[str] = None, report: Optional[bool] = None,
-         report_problem: Optional[str] = None, report_scout: bool = False) -> None:
+         report_problem: Optional[str] = None, report_scout: bool = False,
+         builtin: Optional[str] = None) -> None:
     """Queue counters from anywhere in a hook. Cheap; flushed by record_event()."""
     try:
         if not enabled():
@@ -94,6 +96,9 @@ def note(*, unhandled: Optional[str] = None, failure: Optional[str] = None,
         if report is False and report_problem in REPORT_PROBLEM_CLASSES:
             name = "report_bad_scout" if report_scout else "report_bad_worker"
             _bump(_PENDING.setdefault(name, {}), report_problem)
+        # Built-in agent stops by type: a fixed allowlist of names, counts only.
+        if builtin in BUILTIN_STOP_NAMES:
+            _bump(_PENDING.setdefault("builtin_stops", {}), builtin)
     except Exception:
         pass
 
@@ -193,6 +198,7 @@ def record_event(payload: Any, mode: str, *, error_class: Optional[str] = None,
             "report": _merge_counts(old.get("report"), pending.get("report", {}), ("ok", "bad")),
             "report_bad_scout": _merge_map(old.get("report_bad_scout"), pending.get("report_bad_scout", {})),
             "report_bad_worker": _merge_map(old.get("report_bad_worker"), pending.get("report_bad_worker", {})),
+            "builtin_stops": _merge_map(old.get("builtin_stops"), pending.get("builtin_stops", {})),
             "last_error": old.get("last_error") if isinstance(old.get("last_error"), dict) else None,
         }
         if error_class:

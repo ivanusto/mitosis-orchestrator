@@ -323,6 +323,29 @@ class TestHeartbeat(DoctorCase):
         self.assertEqual(checks["claude.heartbeat.report"]["status"], "OK")
         self.assertIn("no rejected", checks["claude.heartbeat.report"]["message"])
 
+    def test_builtin_row_is_informational_and_allowlisted(self):
+        self.fx.heartbeat("claude", builtin_stops={"Explore": 4, "general-purpose": 1, "evil name": 9, "Plan": 0},
+                          free_text={"secret": MARKER})
+        rc, out, _ = self.fx.run("--platform", "claude")
+        checks = self.fx.checks("--platform", "claude")
+        row = checks["claude.heartbeat.builtin"]
+        self.assertEqual(row["status"], "OK")
+        self.assertIn("Explore=4", row["message"])
+        self.assertIn("general-purpose=1", row["message"])
+        self.assertNotIn("evil", row["message"])
+        self.assertNotIn("Plan", row["message"])
+        self.assertIn("CLAUDE_MITOSIS_PIN_BUILTINS", row["message"])
+        self.assertNotIn(MARKER, out)
+        self.assertEqual(self.fx.last_rc, 0)
+
+    def test_builtin_row_without_counts_or_with_junk(self):
+        for value in (None, ["x"], {"Explore": True, "Plan": -1}):
+            extra = {} if value is None else {"builtin_stops": value}
+            self.fx.heartbeat("claude", **extra)
+            row = self.fx.checks("--platform", "claude")["claude.heartbeat.builtin"]
+            self.assertEqual(row["status"], "OK")
+            self.assertIn("no built-in agent stop recorded", row["message"])
+
     def test_old_heartbeat_is_unknown(self):
         self.fx.heartbeat("claude", last_event_at=int(time.time()) - 15 * 86400)
         checks = self.fx.checks("--platform", "claude")

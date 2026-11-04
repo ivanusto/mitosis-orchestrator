@@ -420,6 +420,29 @@ class TestFleet(unittest.TestCase):
         self.assertTrue(r["zero_haiku"])
         self.assertEqual(r["agent_calls"], 1)
 
+    def test_builtin_on_another_model_is_not_unpinned(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z")])
+        self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="Explore")
+        self.sub("s", "2", [a_rec(self.P, "x2", "2026-10-23T10:02:00Z")], meta="Plan")
+        r = self.fleet()
+        rows = {x["agent_type"]: x for x in r["subagents"]}
+        self.assertFalse(rows["Explore"]["unpinned"])
+        self.assertTrue(rows["Plan"]["unpinned"])
+
+    def test_rows_marked_unpinned(self):
+        write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z")])
+        self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-worker")
+        self.sub("s", "2", [a_rec(self.P, "x2", "2026-10-23T10:02:00Z")], meta="Explore")
+        r = self.fleet()
+        rows = {x["agent_type"]: x for x in r["subagents"]}
+        self.assertFalse(rows["mitosis-orchestrator:flash-worker"]["unpinned"])
+        self.assertTrue(rows["Explore"]["unpinned"])
+        text = cr.render_fleet_text(r)
+        explore_line = [ln for ln in text.splitlines() if ln.strip().startswith("Explore")][0]
+        self.assertTrue(explore_line.endswith("unpinned"))
+        worker_line = [ln for ln in text.splitlines() if "flash-worker" in ln][0]
+        self.assertFalse(worker_line.endswith("unpinned"))
+
     def test_haiku_clears_zero_haiku_flag(self):
         write_jsonl(self.proj / "s.jsonl", [a_rec(self.P, "m1", "2026-10-23T10:00:00Z")])
         self.sub("s", "1", [a_rec(self.S, "x1", "2026-10-23T10:01:00Z")], meta="mitosis-orchestrator:flash-worker")

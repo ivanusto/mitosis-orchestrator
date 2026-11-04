@@ -20,6 +20,7 @@ from ..common import (
     is_claude_code_payload,
     is_codex_hook_payload,
 )
+from .. import heartbeat
 from ..guards import _iter_strings
 from ..models import _delegation_hint, claude_tier_effort, claude_tier_model
 from .codex import _codex_agent_key, _is_opaque_message
@@ -68,6 +69,19 @@ def _claude_subagent_in_scope(subagent_type: str) -> Tuple[bool, str]:
     return False, f"unknown agent type '{raw}' left untouched"
 
 
+def _pin_builtins_enabled() -> bool:
+    """CLAUDE_MITOSIS_PIN_BUILTINS=1 opts in to pinning Claude Code's Explore and general-purpose agents."""
+    return _get_env("CLAUDE_MITOSIS_PIN_BUILTINS", default="0") == "1"
+
+
+def _pinnable_builtin(subagent_type: str) -> str:
+    """'explore' or 'general-purpose' for an unprefixed built-in type when the flag is on, else ''."""
+    bare = (subagent_type or "").strip().lower()
+    if bare in ("explore", "general-purpose") and _pin_builtins_enabled():
+        return bare
+    return ""
+
+
 def _passthrough_tier(subagent_type: str, model_req: str) -> str:
     bare = subagent_type.split(":")[-1].strip().lower()
     if bare == SCOUT_TYPE:
@@ -108,16 +122,26 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     if _get_env("CLAUDE_MITOSIS_PIN_SUBAGENTS", default="1") == "0":
         return _passthrough("subagent pinning disabled (CLAUDE_MITOSIS_PIN_SUBAGENTS=0)")
 
-    in_scope, scope_reason = _claude_subagent_in_scope(subagent_type)
-    if not in_scope:
-        return _passthrough(scope_reason)
+    builtin = _pinnable_builtin(subagent_type)
+    if builtin:
+        if model_req in CLAUDE_SUBAGENT_MODELS:
+            return _passthrough(f"explicit model '{model_req}' honoured")
+        if builtin == "explore":
+            return _pin_explore(payload, tool_name, args, description, workspace, prompt)
+    else:
+        in_scope, scope_reason = _claude_subagent_in_scope(subagent_type)
+        if not in_scope:
+            return _passthrough(scope_reason)
 
-    # Untyped call with an explicit, valid Claude model: honour the caller's choice.
-    if not subagent_type and model_req in CLAUDE_SUBAGENT_MODELS:
-        return _passthrough(f"explicit model '{model_req}' honoured")
+        # Untyped call with an explicit, valid Claude model: honour the caller's choice.
+        if not subagent_type and model_req in CLAUDE_SUBAGENT_MODELS:
+            return _passthrough(f"explicit model '{model_req}' honoured")
+
+    # A pinned general-purpose call is routed, recorded and escalated exactly like an untyped one.
+    routed_type = "" if builtin else subagent_type
 
     prefix = ""
-    bare_type = subagent_type
+    bare_type = routed_type
     if ":" in bare_type:
         prefix_part, bare_type = bare_type.split(":", 1)
         prefix = f"{prefix_part}:"
@@ -127,7 +151,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
     internal_model = "flash_lite" if model_req in ("haiku", "flash_lite") else ("flash" if model_req in ("sonnet", "flash") else model_req)
 
     item = {
-        "TypeName": subagent_type,
+        "TypeName": routed_type,
         "Role": description,
         "Prompt": prompt,
         "Workspace": workspace,
@@ -173,7 +197,7 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         updated_input["prompt"] = append_report_format(prompt, target_tier)
         effort_note += ", REPORT FORMAT appended"
 
-    target_type = type_override or subagent_type
+    target_type = type_override or routed_type
     _record_routing(payload, decision, claude_model, updated_input.get("effort") or claude_effort, "claude",
                     target_type or (SCOUT_TYPE if target_tier == "flash_lite" else WORKER_TYPE))
     spawns = [{
@@ -185,6 +209,8 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
         "workspace": workspace,
         "active_branch": workspace == "branch",
     }]
+    if builtin:
+        spawns[0]["builtin"] = builtin
     if esc_info:
         spawns[0]["escalated"] = True
     state.setdefault("pending_spawns", []).extend(spawns)
@@ -196,6 +222,54 @@ def _handle_claude_task_or_agent(payload: Dict[str, Any], tool_name: str, args: 
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
             "permissionDecisionReason": reason_msg,
+            "updatedInput": updated_input,
+        }
+    }
+
+
+def _pin_explore(payload: Dict[str, Any], tool_name: str, args: Dict[str, Any], description: str,
+                 workspace: str, prompt: str) -> Dict[str, Any]:
+    """Opt-in pin of the built-in Explore agent to the scout model and effort.
+
+    Deliberately skips routing, apply_escalation (an armed escalation must survive) and the REPORT FORMAT
+    (the report contract is not enforced for built-ins). Recorded so pin verification and stop pairing work.
+    """
+    claude_model = claude_tier_model("flash_lite")
+    updated_input = copy.deepcopy(args)
+    updated_input["model"] = claude_model
+    caller_effort = str(args.get("effort") or "").strip().lower()
+    if caller_effort in CLAUDE_EFFORT_LEVELS:
+        effort: Optional[str] = caller_effort
+        effort_note = f"effort {caller_effort} (caller)"
+    else:
+        effort = claude_tier_effort("flash_lite")
+        if effort:
+            updated_input["effort"] = effort
+            effort_note = f"effort {effort}"
+        else:
+            if caller_effort:
+                updated_input.pop("effort", None)
+            effort_note = "effort unpinned"
+    reason = "built-in Explore pinned (CLAUDE_MITOSIS_PIN_BUILTINS=1)"
+    decision = Decision("flash_lite", None, effort, 1.0, "rule", "builtin-pin", reason)
+    _record_routing(payload, decision, claude_model, effort, "claude", "Explore")
+    state = load_state(payload)
+    state.setdefault("pending_spawns", []).append({
+        "role": description or "Explore",
+        "type": str(args.get("subagent_type") or args.get("subagentType") or "Explore").strip(),
+        "model": "flash_lite",
+        "tier": "flash_lite",
+        "pinned_model": claude_model,
+        "workspace": workspace,
+        "active_branch": workspace == "branch",
+        "builtin": "explore",
+    })
+    save_state(payload, state)
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": f"Mitosis Orchestrator pinned built-in Explore: {claude_model}, {effort_note} ({reason})",
             "updatedInput": updated_input,
         }
     }
@@ -279,6 +353,12 @@ def _pending_spawn_index(pending: List[Dict[str, Any]], hint: str, from_spawn: b
     if from_spawn:
         # The id comes from an Agent tool response, so this is a real launch. Its type may differ from the
         # pending one (the hook overrode it). A typed built-in call left unpinned has no pending entry.
+        if bare == "general-purpose" and _pin_builtins_enabled():
+            # CLAUDE_MITOSIS_PIN_BUILTINS=1: only a general-purpose call this plugin pinned (recorded untyped).
+            for i, spawn in enumerate(pending):
+                if spawn.get("builtin") == "general-purpose":
+                    return i
+            return None
         if bare and not plugin_hint:
             return None
         accepted = lambda t: not t or _is_plugin_agent_type(t)  # noqa: E731
@@ -353,6 +433,7 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     agent_id = str(payload.get("agent_id") or "").strip().lower()
     agent_type = str(payload.get("agent_type") or "").strip()
     record = _claude_register_agent(state, agent_id, agent_type)
+    _note_builtin_stop(agent_type)
     cleared = False
     if record is not None:
         record["alive"] = False
@@ -404,6 +485,18 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         _claude_escalate_on_stop(state, record, report, agent_id)
     save_state(payload, state)
     return result
+
+
+def _note_builtin_stop(agent_type: str) -> None:
+    """Heartbeat counter of built-in agent stops. Only an allowlisted name is ever stored, never text."""
+    try:
+        bare = _bare_agent_type(agent_type)
+        if _is_plugin_agent_type(agent_type) or bare not in CLAUDE_BUILTIN_AGENT_TYPES:
+            return
+        name = {"explore": "Explore", "plan": "Plan", "general-purpose": "general-purpose"}.get(bare, "other")
+        heartbeat.note(builtin=name)
+    except Exception:
+        pass
 
 
 def _claude_verify_pin(record: Optional[Dict[str, Any]], payload: Dict[str, Any]) -> str:

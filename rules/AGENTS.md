@@ -108,6 +108,7 @@ All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*`
 - **`*_MITOSIS_PRIMARY_MODEL=<name>`**: Target primary frontier model when pinning (defaults: `Gemini 4 Argon (High)`, `opus`, `gpt-6.1-sol`).
 - **`AGY_ALLOW_NON_MITOSIS_PRIMARY=1`** / **`*_MITOSIS_ALLOW_NON_PRIMARY=1`**: Silence session-start and per-turn non-frontier primary model warnings.
 - **`CLAUDE_MITOSIS_PIN_SUBAGENTS=0`**: Stop rewriting `Agent` calls in Claude Code entirely.
+- **`CLAUDE_MITOSIS_PIN_BUILTINS=1`**: Opt in (default off) to pin the built-in `Explore` agent to the scout model and effort and to route `general-purpose` like an untyped call. Explicit models are honoured and `Plan` is untouched. Quality impact of a cheaper model on these built-ins has not been measured and no saving is claimed; on one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. `Explore` does not get the scout Bash allowlist and its stops do not block or escalate; its read-only limit comes from Claude Code, not this plugin.
 - **`CLAUDE_MITOSIS_SCOUT_MODEL` / `CLAUDE_MITOSIS_WORKER_MODEL`**: Claude Code model per tier (defaults `haiku` / `sonnet`; accepts `haiku`, `sonnet`, `opus`, `fable`).
 - **`CLAUDE_MITOSIS_PIN_EFFORT=0`**: Stop adding `effort` to pinned Claude Code `Agent` calls.
 - **`CLAUDE_MITOSIS_SCOUT_EFFORT` / `CLAUDE_MITOSIS_WORKER_EFFORT`**: Claude Code effort per tier (defaults `low` / `medium`).

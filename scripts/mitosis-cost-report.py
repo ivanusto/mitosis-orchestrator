@@ -678,16 +678,17 @@ def collect_fleet(
             continue
         usd = sum(_cost_parts(e["usage"], price, subagent_cache_ttl).values())
         sub_usd += usd
-        cell = spend.setdefault((e["type"], e["model"]), {"usd": 0.0})
+        cell = spend.setdefault((e["type"], e["model"]), {"usd": 0.0, "pinned_usd": 0.0, "unpinned_usd": 0.0})
         cell["usd"] += usd
         fm = file_models.setdefault((e["sid"], e["agent"]), {})
         fm[e["model"]] = fm.get(e["model"], 0) + 1
         if e["type"].startswith(PINNED_PREFIX):
             pinned = True
-        elif e["type"] == "unknown":
-            pinned = e["model"] != primary_model.get(e["sid"])
         else:
-            pinned = False
+            # An agent on another model than the session's primary did not inherit it: a caller or
+            # CLAUDE_MITOSIS_PIN_BUILTINS chose that model.
+            pinned = e["model"] != primary_model.get(e["sid"])
+        cell["pinned_usd" if pinned else "unpinned_usd"] += usd
         if pinned:
             pinned_usd += usd
         else:
@@ -699,8 +700,14 @@ def collect_fleet(
         counts[(atype, model)] = counts.get((atype, model), 0) + 1
     by_type = []
     for key in sorted(set(spend) | set(counts), key=lambda k: (-spend.get(k, {"usd": 0.0})["usd"], k)):
+        cell = spend.get(key)
+        if cell is not None:
+            # Same classification as pinned_usd/unpinned_usd above, per row.
+            unpinned = cell["unpinned_usd"] > 0 and cell["pinned_usd"] == 0
+        else:
+            unpinned = not key[0].startswith(PINNED_PREFIX) and key[0] != "unknown"
         by_type.append({"agent_type": key[0], "model": key[1], "count": counts.get(key, 0),
-                        "usd": spend.get(key, {"usd": 0.0})["usd"]})
+                        "usd": cell["usd"] if cell else 0.0, "unpinned": unpinned})
     primary_usd = sum(split.values())
     total_usd = primary_usd + sub_usd
     sub_total = pinned_usd + unpinned_usd
@@ -753,7 +760,7 @@ def render_fleet_text(r: Dict[str, Any]) -> str:
     lines.append(f"  subagent USD {r['subagent_usd']:,.2f}  total {r['total_usd']:,.2f}  subagent share {pct(r['subagent_share'])}")
     lines.append(f"  {'agent type':<42}{'model':<24}{'count':>6}{'USD':>10}")
     for row in r["subagents"]:
-        lines.append(f"  {row['agent_type']:<42}{row['model']:<24}{row['count']:>6}{row['usd']:>10.2f}")
+        lines.append(f"  {row['agent_type']:<42}{row['model']:<24}{row['count']:>6}{row['usd']:>10.2f}" + ("  unpinned" if row.get("unpinned") else ""))
     lines.append(f"  pinned subagent spend {r['pinned_usd']:,.2f} ({pct(r['pinned_share'])}), unpinned {r['unpinned_usd']:,.2f} ({pct(r['unpinned_share'])})")
     lines.append(f"  mitosis dispatches {r['mitosis_dispatches']}  zero-haiku flag: {'YES' if r['zero_haiku'] else 'no'}")
     if r["unpriced_models"]:
