@@ -175,7 +175,7 @@ class TestAgy(Base):
         for inv in (1, 2):
             eo.handle_pre_invocation(self.agy("x", {}, inv=inv))
             state = eo.load_state(self.agy("x", {}))
-            self.assertIn(str(self.ws / "f0.py"), state["turn_edited_files"])
+            self.assertIn(str((self.ws / "f0.py").resolve()), state["turn_edited_files"])
             eo.handle_pre_tool_use(self.agy("write_to_file", self.agy_edit(5), inv=inv))
             eo.handle_pre_tool_use(self.agy("write_to_file", self.agy_edit(0), inv=inv))
         os.environ["AGY_MITOSIS_FASTPATH_MODE"] = "enforce"
