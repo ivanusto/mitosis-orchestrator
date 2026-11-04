@@ -29,3 +29,9 @@ These are the behaviours that matter for a security review. They are documented 
 ## Opt-in pinning of built-in agents
 
 `CLAUDE_MITOSIS_PIN_BUILTINS=1` (off by default) lets the PreToolUse hook set `model` and `effort` on Claude Code's built-in `Explore` agent and route `general-purpose` like an untyped call. With it on, `Explore` runs on the scout model but does not get the scout Bash allowlist, and its stops do not block or escalate; the SendMessage guard still applies. Its read-only limit comes from Claude Code's own tool list for that agent, not from this plugin. The quality impact of a cheaper model on these built-ins has not been measured and no saving is claimed. The heartbeat counts built-in agent stops by fixed name only (`Explore`, `Plan`, `general-purpose`, `other`), never prompts, paths or text.
+
+## Payload capture for test fixtures
+
+`MITOSIS_CAPTURE_PAYLOADS=<directory>` makes the hook append every call it receives, and its result, to `<directory>/payloads.jsonl`. **That file is raw**: it holds your prompts, the assistant's replies, file paths, user and host names, session ids, command lines and tool output exactly as the CLI sent them. It is off by default, the hook writes nothing unless you set the variable, and the directory and file are created private (`0700`, `0600`). Unset it when you are done and delete the directory.
+
+A raw capture must never be committed, attached to an issue or shared. To turn one into a test fixture, run it through `scripts/sanitize-payloads.py`, which keeps key names and a short allowlist of values and replaces everything else with placeholders, then read the result before you publish it. `tests/test_fixture_privacy.py` rejects home paths, the local user and host name, keys, e-mail addresses, unmapped ids and opaque Codex tokens in `tests/fixtures/payloads`. The sanitizer is a safeguard, not a guarantee: review every fixture diff.

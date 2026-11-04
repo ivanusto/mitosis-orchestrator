@@ -1,0 +1,2 @@
+{"_meta": {"cli_version": "source-0.166.0", "platform": "codex", "provenance": "older CLI, not 0.166", "sanitizer_version": 1, "scenario": "apply-patch"}}
+{"mode": "pre-tool-use", "payload": {"cwd": "__WS__", "hook_event_name": "PreToolUse", "model": "gpt-5.6-terra", "permission_mode": "bypassPermissions", "session_id": "__ID1__", "tool_input": {"command": "*** Begin Patch\n*** Update File: a.txt\n@@\n+x\n*** End Patch"}, "tool_name": "apply_patch", "tool_use_id": "__ID3__", "transcript_path": "__TRANSCRIPT__", "turn_id": "__ID2__"}, "result": {}}

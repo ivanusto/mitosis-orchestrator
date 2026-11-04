@@ -128,6 +128,9 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | Claude Code | 2.1.318 | 2026-11-04 | 以 headless 實跑提醒、拒絕與內建代理釘定 |
 | Codex CLI | 0.166.0 | 2026-11-04 | 完成 hook review 後以已安裝外掛實跑 |
 | agy | 1.5.0 | 2026-11-04 | 以 headless 實跑改檔預算與提醒 |
+
+- Claude Code：2.1.318 是 npm 的 `latest` 標籤。當天 npm 的 `stable` 標籤是 2.1.311，未實跑。
+- agy：print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)

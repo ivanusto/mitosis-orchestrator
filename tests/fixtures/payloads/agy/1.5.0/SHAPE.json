@@ -1,0 +1,416 @@
+{
+  "cli_version": "1.5.0",
+  "modes": {
+    "post-tool-use": {
+      "invoke_subagent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.error": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.stepIdx": [
+          "int"
+        ],
+        "payload.toolCall": [
+          "dict"
+        ],
+        "payload.toolCall.args": [
+          "dict"
+        ],
+        "payload.toolCall.args.Model": [
+          "str"
+        ],
+        "payload.toolCall.args.Prompt": [
+          "str"
+        ],
+        "payload.toolCall.args.Role": [
+          "str"
+        ],
+        "payload.toolCall.args.TypeName": [
+          "str"
+        ],
+        "payload.toolCall.name": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      },
+      "run_command": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.error": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.stepIdx": [
+          "int"
+        ],
+        "payload.toolCall": [
+          "dict"
+        ],
+        "payload.toolCall.args": [
+          "dict"
+        ],
+        "payload.toolCall.args.CommandLine": [
+          "str"
+        ],
+        "payload.toolCall.args.WaitMsBeforeAsync": [
+          "int"
+        ],
+        "payload.toolCall.args.toolSummary": [
+          "str"
+        ],
+        "payload.toolCall.name": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-invocation": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.initialNumSteps": [
+          "int"
+        ],
+        "payload.invocationNum": [
+          "int"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-tool-use": {
+      "invoke_subagent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.stepIdx": [
+          "int"
+        ],
+        "payload.toolCall": [
+          "dict"
+        ],
+        "payload.toolCall.args": [
+          "dict"
+        ],
+        "payload.toolCall.args.Model": [
+          "str"
+        ],
+        "payload.toolCall.args.Prompt": [
+          "str"
+        ],
+        "payload.toolCall.args.Role": [
+          "str"
+        ],
+        "payload.toolCall.args.TypeName": [
+          "str"
+        ],
+        "payload.toolCall.name": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.decision": [
+          "str"
+        ]
+      },
+      "run_command": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.stepIdx": [
+          "int"
+        ],
+        "payload.toolCall": [
+          "dict"
+        ],
+        "payload.toolCall.args": [
+          "dict"
+        ],
+        "payload.toolCall.args.CommandLine": [
+          "str"
+        ],
+        "payload.toolCall.args.WaitMsBeforeAsync": [
+          "int"
+        ],
+        "payload.toolCall.args.toolSummary": [
+          "str"
+        ],
+        "payload.toolCall.name": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.decision": [
+          "str"
+        ],
+        "result.reason": [
+          "str"
+        ]
+      },
+      "write_file": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.stepIdx": [
+          "int"
+        ],
+        "payload.toolCall": [
+          "dict"
+        ],
+        "payload.toolCall.args": [
+          "dict"
+        ],
+        "payload.toolCall.args.Content": [
+          "str"
+        ],
+        "payload.toolCall.args.Path": [
+          "str"
+        ],
+        "payload.toolCall.name": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.decision": [
+          "str"
+        ],
+        "result.reason": [
+          "str"
+        ]
+      }
+    },
+    "session-start": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.injectSteps": [
+          "list"
+        ],
+        "result.injectSteps[]": [
+          "dict"
+        ],
+        "result.injectSteps[].systemMessage": [
+          "dict"
+        ],
+        "result.injectSteps[].systemMessage.systemMessage": [
+          "str"
+        ]
+      }
+    },
+    "stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.error": [
+          "str"
+        ],
+        "payload.executionNum": [
+          "int"
+        ],
+        "payload.fullyIdle": [
+          "bool"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.terminationReason": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.decision": [
+          "str"
+        ]
+      }
+    }
+  },
+  "platform": "agy",
+  "scenarios": [
+    "failing-commands",
+    "subagent-call",
+    "write-file"
+  ],
+  "shape_version": 1
+}

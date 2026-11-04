@@ -332,7 +332,11 @@ def cli_verified_message(platform: str, cli_line: Optional[str], entry: Any) -> 
     shown = ".".join(str(x) for x in have)
     if have <= _version_token(entry["verified"]):
         return "info: %s CLI %s is not newer than the version verified on %s (%s)" % (platform, shown, ver, on)
-    return "info: the %s CLI %s is newer than the last version verified (%s on %s); not an error, just not tested" % (platform, shown, ver, on)
+    message = "info: the %s CLI %s is newer than the last version verified (%s on %s); not an error, just not tested" % (platform, shown, ver, on)
+    fixtures = entry.get("fixtures")
+    if isinstance(fixtures, str) and fixtures:
+        message += "; compare its hook payloads with the fixtures for %s using scripts/payload-shape.py" % safe(fixtures, 32)
+    return message
 
 
 def check_cli_verified(ctx: Ctx, platform: str, cli_line: Optional[str]) -> None:

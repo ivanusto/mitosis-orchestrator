@@ -385,6 +385,14 @@ class TestCliVerified(DoctorCase):
     def msg(self, line):
         return doctor.cli_verified_message("codex", line, self.ENTRY)
 
+    def test_newer_cli_points_at_the_fixtures_and_stays_info(self):
+        text = doctor.cli_verified_message("agy", "9.9.9", {"verified": "1.5.0", "verified_on": "2026-11-04", "fixtures": "1.5.0"})
+        self.assertTrue(text.startswith("info:"))
+        self.assertIn("fixtures for 1.5.0", text)
+        self.assertIn("payload-shape.py", text)
+        self.assertNotIn("fixtures", doctor.cli_verified_message("agy", "9.9.9", {"verified": "1.5.0", "verified_on": "2026-11-04"}))
+        self.assertNotIn("fixtures", doctor.cli_verified_message("agy", "1.5.0", {"verified": "1.5.0", "verified_on": "2026-11-04", "fixtures": "1.5.0"}))
+
     def test_older_equal_newer_unreadable_prerelease(self):
         self.assertIn("not newer than the version verified on 0.166.0 (2026-11-04)", self.msg("codex-cli 0.165.9"))
         self.assertIn("not newer than the version verified", self.msg("codex-cli 0.166.0"))
