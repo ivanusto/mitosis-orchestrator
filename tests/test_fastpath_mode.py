@@ -52,6 +52,11 @@ class Base(unittest.TestCase):
         p.update(extra)
         return p
 
+    def real_codex(self, name, args):
+        # The keys Codex 0.166 sends: no artifactDirectoryPath.
+        return {"session_id": self.sid, "turn_id": "t1", "hook_event_name": "PreToolUse", "cwd": str(self.ws),
+                "tool_name": name, "tool_input": args}
+
     def agy(self, name, args, inv=1):
         return {"conversationId": self.sid, "artifactDirectoryPath": str(self.art),
                 "workspacePaths": [str(self.ws)], "modelName": "Gemini 4 Argon (Medium)",
@@ -143,6 +148,24 @@ class TestHookPlatforms(Base):
         hso = res["hookSpecificOutput"]
         self.assertEqual(hso["permissionDecision"], "deny")
         self.assertNotIn("additionalContext", hso)
+
+    def test_codex_patch_envelope_names_only_its_files(self):
+        patch = ("*** Begin Patch\n*** Update File: src/a.py\n*** Move to: src/b.py\n@@\n-x\n+++ fake\n+*** Add File: fake2\n"
+                 "*** Add File: c d.txt\n+x\n*** Delete File: e.py\n*** End Patch")
+        self.assertEqual(eo._extract_apply_patch_files({"command": patch}), ["src/a.py", "src/b.py", "c d.txt", "e.py"])
+
+    def test_codex_real_payload_counts_edits_and_advises_once(self):
+        os.environ["CODEX_MITOSIS_MAX_DIRECT_EDITS"] = "3"
+        results = []
+        for name in ("a.txt", "b.txt", "c.txt", "d.txt", "e.txt"):
+            command = "*** Begin Patch\n*** Add File: %s\n+x\n*** End Patch" % name
+            results.append(eo.handle_pre_tool_use(self.real_codex("apply_patch", {"command": command})))
+        advised = [r for r in results if "additionalContext" in str(r)]
+        self.assertEqual(len(advised), 1)
+        self.assertIn("Advice, not a block", str(results[3]))
+        os.environ["CODEX_MITOSIS_FASTPATH_MODE"] = "enforce"
+        res = eo.handle_pre_tool_use(self.real_codex("apply_patch", {"command": "*** Begin Patch\n*** Add File: f.txt\n+x\n*** End Patch"}))
+        self.assertEqual(res["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_legacy_codex_payload_gets_no_advice(self):
         os.environ["CODEX_MITOSIS_MAX_DIRECT_EDITS"] = "0"

@@ -18,6 +18,7 @@
 
 ### Fixed
 - **agy: the edit budget did almost nothing.** `PreInvocation` fires on every model call, so the budget reset at each step, and agy 1.5.0 sends `write_file` and `edit_file` with `Path`, which the budget did not read. It now resets when `invocationNum` returns to 0 and counts those tools. `edit_file` and `create_file` joined the mutation list.
+- **Codex: the edit budget never counted a patch.** Codex 0.166 sends `apply_patch` as `{"command": "*** Begin Patch ..."}`. The parser did not read `command` and did not know that envelope, so the budget stayed at 0 and neither the limit nor the edit-then-test check ever fired on Codex, whatever the mode. Found by a live run of this release. This also means a path in a patch is now seen by the workspace guard.
 - **Codex: `CODEX_MITOSIS_AUTO_ALLOW=1` failed the hook.** Codex 0.166 marks an `allow` without `updatedInput` as Failed, and the workspace guard sent exactly that, so it never auto-approved. On Codex the guard now only denies. Found in the Codex source (`pre_tool_use.rs`); the failure itself was not run.
 
 ### Security
@@ -35,7 +36,7 @@
 - The report cap stays at 1,600. On workers since Claude Code 2.1.311, 2,400 would remove 3 of 33 blocks in a replay of the rejected reports, because `too_long` is checked first and hides line-count failures, and a block costs little.
 
 ### Verification
-- 951 tests in CI (Python 3.11, 3.12, 3.13; `hooks-windows` runs the complete suite on Windows); `hooks-py38` and lint pass. `routing.py` is unchanged in the range.
+- 953 tests in CI (Python 3.11, 3.12, 3.13; `hooks-windows` runs the complete suite on Windows); `hooks-py38` and lint pass. `routing.py` is unchanged in the range.
 - Oracle on GitHub runners, 4 seeds x 20,000 strings = 80,000: 7,828 accepted, 6,566 unique, 0 violations on bash, dash, busybox and zsh.
 - PowerShell on GitHub runners, 2 seeds x 20,181 generated strings per shell: pwsh 7.6.9 on Linux and Windows and Windows PowerShell 5.1 ran about 3,100 to 3,200 accepted strings per seed, with no write, no other program and no argument mismatch. Discrimination: a guard that accepts everything gave 19 to 21 violations on the same harness.
 - Live on Claude Code 2.1.318, headless: advice reached the model once per kind and did not block; `enforce` restored both denials; `CLAUDE_MITOSIS_PIN_BUILTINS=1` ran Explore on haiku at low effort, and without the flag it inherited the primary's model. The environment variables `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT` did not override the pin.

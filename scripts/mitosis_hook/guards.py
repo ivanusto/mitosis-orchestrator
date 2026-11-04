@@ -31,12 +31,17 @@ def _extract_apply_patch_files(patch_text_or_args: Any) -> List[str]:
             for v in list_val:
                 if isinstance(v, str) and v.strip():
                     files.append(v.strip())
-        for k in ("patch", "diff", "content", "patch_text"):
+        for k in ("patch", "diff", "content", "patch_text", "command", "input"):  # Codex 0.166 sends command
             val = patch_text_or_args.get(k)
             if isinstance(val, str):
                 text += "\n" + val
     elif isinstance(patch_text_or_args, str):
         text = patch_text_or_args
+
+    if re.search(r"^\s*\*\*\*\s+Begin Patch\b", text, re.MULTILINE):
+        # Codex envelope: only these headers name files. Body lines may look like any diff header.
+        files.extend(re.findall(r"^\s*\*\*\*\s+(?:Add File|Update File|Delete File|Move to):\s*([^\r\n]+)$", text, re.MULTILINE))
+        text = ""
 
     if text:
         for m in re.finditer(r"^\s*diff\s+--git\s+[a-z]/(\S+)\s+[a-z]/(\S+)", text, re.MULTILINE):
