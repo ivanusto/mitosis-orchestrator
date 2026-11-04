@@ -6,7 +6,7 @@ that carries no failure signal go unnoticed. Every fixture under tests/fixtures/
 holds the shapes a real CLI sent (see scripts/sanitize-payloads.py); this module feeds them to the handlers
 in process and asserts on the real counters in the state file.
 
-Provenance: agy 1.5.0 and Claude Code 2.1.318 fixtures are recorded. Codex fixtures under source-0.166.0
+Provenance: agy 1.5.0 and Claude Code 2.1.318 fixtures are recorded. Codex fixtures under 0.166.0 are recorded too; those under source-0.166.0
 come from older Codex runs (their _meta says so) until the live capture at the end of the release.
 Run: python -m unittest discover tests"""
 
@@ -137,8 +137,10 @@ class TestFixtureSet(Base):
                 self.assertIsInstance(meta["sanitizer_version"], int)
                 self.assertFalse({"date", "time", "timestamp", "host", "hostname"} & set(meta))
                 self.assertTrue(records)
-                if meta["platform"] == "codex":
+                if path.parent.name.startswith("source-"):  # shapes from older CLIs, not a recording of this version
                     self.assertIn("not 0.166", meta.get("provenance", ""))
+                else:
+                    self.assertNotIn("provenance", meta)
 
     def test_every_fixture_replays_without_error(self):
         for path in all_fixtures():
@@ -218,7 +220,12 @@ class TestCodexAllowShape(Base):
                             self.assertIn("updatedInput", hso, result)
                         if tool_of(record["payload"]) == "Bash" and "agent_id" in record["payload"]:
                             seen += 1
-                            self.assertEqual(result, {}, "a scout's ls -la inside the workspace")
+                            payload = record["payload"]
+                            if payload.get("agent_type") == "explorer" and (payload.get("tool_input") or {}).get("command") == "__CMD__":
+                                # A command the sanitizer did not keep, here the scout's touch: not on its read-only list.
+                                self.assertEqual(hso.get("permissionDecision"), "deny", result)
+                            else:
+                                self.assertEqual(result, {}, "a scout's read-only command, or a worker's command, inside the workspace")
                     _support.release_state_locks()
         self.assertGreater(seen, 0, "no recorded Codex scout command was replayed")
 
