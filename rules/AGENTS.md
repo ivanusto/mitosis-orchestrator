@@ -117,6 +117,7 @@ All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*`
 - **`*_MITOSIS_ALLOW_DIRECT_LOGS=1`**: Allow primary agent direct inspection of raw `.log` and transcripts.
 - **`*_MITOSIS_FASTPATH_MODE=advise|enforce|off`**: Fast-path budget mode (default `advise`: never blocks, one advice note per kind per turn; `enforce` restores the denials; `off` disables). On agy the budget is per user turn.
 - **`*_MITOSIS_ALLOW_DIRECT_FASTPATH=1`**: Same as `*_MITOSIS_FASTPATH_MODE=off`, with no tracking.
-- **`*_MITOSIS_CIRCUIT_BREAKER=0`**: Disable the 2-failure circuit breaker.
+- **`*_MITOSIS_CIRCUIT_BREAKER_MODE=advise|enforce|off`**: Circuit breaker mode after 2 failed commands in a row in one turn (default `advise`: one note on agy, never blocks; `enforce` denies until the next turn).
+- **`*_MITOSIS_CIRCUIT_BREAKER=0`**: Disable the circuit breaker; wins over the mode.
 - **`*_MITOSIS_DEBUG=1`**: Enable verbose JSON diagnostic logging to `mitosis_orchestrator_debug.log`.
 - **`MITOSIS_CODEX_YOLO=1`**: Run Codex subagents from the MCP server without sandboxing (default: scouts `read-only`, workers `workspace-write`).

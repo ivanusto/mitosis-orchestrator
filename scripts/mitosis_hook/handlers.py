@@ -39,6 +39,7 @@ from .guards import (
     command_stays_in_workspace,
     scout_command_is_read_only,
 )
+from .pin_verify import _tail_records
 from .models import (
     POLICY_NOTICE,
     _delegation_hint,
@@ -183,12 +184,15 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not agy or isinstance(inv, bool) or not isinstance(inv, int) or inv == 0:
         state["turn_edited_files"] = []
         state["fastpath_advised"] = []
-    state["consecutive_failures"] = 0
+        state["consecutive_failures"] = 0
+        state.pop("breaker_steps", None)
     agy_steps: List[Dict[str, Any]] = []
     if agy:
         # agy primary: read newly delivered subagent reports (arms escalation, flags invalid ones).
         scan_new_messages(payload, state)
         agy_steps = invalid_report_steps(state)
+        _breaker_scan_agy_transcript(payload, state)
+        _breaker_advise_agy(payload, state)
         for text in state.pop("fastpath_pending_advice", None) or []:
             agy_steps.append({"ephemeralMessage": text})
     save_state(payload, state)
@@ -292,9 +296,9 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
     outside = [t for t in targets if not _within_roots(t, roots)]
     if outside:
         return _ask(f"Mitosis Orchestrator: {outside[0]!r} is outside the workspace.", payload=payload)
-    # "allow" alone does not satisfy Antigravity's permission system (headless
-    # runs still auto-deny), so grant the matching read_file/write_file rule
-    # for exactly these in-workspace paths.
+    # agy 1.5.0 print mode ignores these grants: write_file in a home folder is denied with the exact
+    # rule sent here, under decision allow and under ask, while the same rule in --settings works. Sent
+    # for interactive runs, where they were not measured. Headless needs --mode accept-edits or a rule.
     action = "write_file" if (WRITE_TOOL_RE.search(tool_name) or tool_name in MUTATION_TOOLS) else "read_file"
     return _allow("Mitosis Orchestrator: path is inside the workspace.", overrides=[f"{action}({t})" for t in targets], payload=payload)
 
@@ -338,15 +342,12 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     # load_state (locking) themselves after classification.
     state = _peek_state(payload)
 
-    # Circuit breaker: if consecutive failures >= 2 and breaker is not disabled ("0"),
-    # block retry loops on commands and subagents.
-    if _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER", "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") != "0":
+    # Circuit breaker, enforce mode only: block retry loops on commands and subagents.
+    # Advise mode tells the primary at the next model call on agy instead (_breaker_advise_agy).
+    if _breaker_mode() == "enforce":
         fails = int(state.get("consecutive_failures") or 0)
-        if fails >= 2 and tool_name in (
-            "run_command", "invoke_subagent", "Bash", "Task", "Agent",
-            "shell", "exec_command", "local_shell", "spawn_agent",
-            "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"
-        ):
+        if fails >= BREAKER_THRESHOLD and tool_name in BREAKER_TOOLS:
+            heartbeat.note(breaker="denied")
             return _deny(
                 f"[Mitosis Orchestrator] Circuit breaker tripped after {fails} consecutive failure(s). "
                 "Stop retrying and report the blocker to the user.",
@@ -533,6 +534,125 @@ def _fastpath_mode() -> str:
     return mode if mode in ("enforce", "advise", "off") else "advise"
 
 
+BREAKER_THRESHOLD = 2
+BREAKER_TOOLS = (
+    "run_command", "invoke_subagent", "Bash", "Task", "Agent",
+    "shell", "exec_command", "local_shell", "spawn_agent",
+    "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker",
+)
+_BREAKER_COMMAND_TOOLS = ("run_command", "Bash", "shell", "exec_command", "local_shell")
+_BREAKER_EXIT_RE = re.compile(r"(?:exit status|exited with code)\s+(\d+)")
+# agy writes these for a call that never ran. The first would otherwise let the breaker's own denial feed itself.
+_BREAKER_NEUTRAL_ERRORS = ("permission check failed", "tool call denied by pre-tool hook")
+_BREAKER_STEP_CAP = 64
+_BREAKER_COMMAND_CAP = 4000
+
+
+def _breaker_mode() -> str:
+    """advise (default), enforce or off. *_MITOSIS_CIRCUIT_BREAKER=0 means off and wins over the mode."""
+    if _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER", "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") == "0":
+        return "off"
+    mode = _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER_MODE", "CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE", "AGY_MITOSIS_CIRCUIT_BREAKER_MODE", default="advise").lower()
+    return mode if mode in ("enforce", "advise", "off") else "advise"
+
+
+def _breaker_command_signal(command: str, exit_code: int, payload: Dict[str, Any]) -> str:
+    """fail, neutral or ok for a finished command.
+
+    A read-only command says nothing about a retry loop: exit 1 is grep finding no match, and exit 0
+    must not clear the streak either, or a failing test, a cat and a failing test would never reach 2.
+    A read-only command that exits 2 or more did fail (a bad path, a bad pattern).
+    """
+    read_only = bool(command) and scout_command_is_read_only(command, strict_windows=_windows_mode(allowed_roots(payload)))[0]
+    if exit_code == 0:
+        return "neutral" if read_only else "ok"
+    if read_only and exit_code == 1:
+        return "neutral"
+    return "fail"
+
+
+def _breaker_signal(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    """Classify a finished call from what the payload itself carries."""
+    error = payload.get("error")
+    if isinstance(error, str) and error.startswith(_BREAKER_NEUTRAL_ERRORS):
+        return "neutral"
+    command = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "") if tool_name in _BREAKER_COMMAND_TOOLS else ""
+    if not _tool_failed(tool_name, payload):
+        return _breaker_command_signal(command, 0, payload) if tool_name in _BREAKER_COMMAND_TOOLS else "ok"
+    if tool_name not in _BREAKER_COMMAND_TOOLS:
+        return "fail"
+    result = payload.get("toolResult") or payload.get("tool_result") or payload.get("result")
+    code: Any = None
+    if isinstance(result, dict):
+        code = next((result.get(k) for k in ("exitCode", "exit_code", "returncode") if result.get(k) is not None), None)
+    if not isinstance(code, int):
+        match = _BREAKER_EXIT_RE.search(json.dumps(error if error else result, default=str))
+        code = int(match.group(1)) if match else None
+    return "fail" if code is None or code == 0 else _breaker_command_signal(command, code, payload)
+
+
+def _breaker_apply(state: Dict[str, Any], signal: str) -> None:
+    if signal == "fail":
+        state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
+    elif signal == "ok":
+        state["consecutive_failures"] = 0
+    else:
+        heartbeat.note(breaker="neutral")
+
+
+def _breaker_track(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any], state: Dict[str, Any]) -> None:
+    """PostToolUse. agy 1.5.0 sends error="" and no result for a command that exits non-zero, and its
+    transcript gets the step only after this hook, so keep the command and read the exit code at the
+    next PreInvocation (_breaker_scan_agy_transcript)."""
+    has_result = any(payload.get(k) for k in ("toolResult", "tool_result", "result"))
+    step = payload.get("stepIdx")
+    if tool_name == "run_command" and _is_agy_payload(payload) and not payload.get("error") and not has_result \
+            and isinstance(step, int) and not isinstance(step, bool):
+        command = str(_get(args, "CommandLine", "commandLine", "command", "cmd", default="") or "")
+        steps = state.get("breaker_steps")
+        if not isinstance(steps, dict):
+            steps = state["breaker_steps"] = {}
+        if len(steps) < _BREAKER_STEP_CAP:
+            steps[str(step)] = command[:_BREAKER_COMMAND_CAP]
+        return
+    _breaker_apply(state, _breaker_signal(tool_name, args, payload))
+
+
+def _breaker_scan_agy_transcript(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
+    """Turn the commands kept by _breaker_track into failures, in step order, once their results are written."""
+    steps = state.get("breaker_steps")
+    if not isinstance(steps, dict) or not steps:
+        return
+    for record in _tail_records(payload.get("transcriptPath")):
+        key = str(record.get("step_index"))
+        if key not in steps:
+            continue
+        command = str(steps.pop(key))
+        code = record.get("exit_code")
+        if not isinstance(code, int) or isinstance(code, bool):
+            # The header comes first; command output later in the step may quote the same words.
+            match = _BREAKER_EXIT_RE.search(str(record.get("content") or "")[:300])
+            code = int(match.group(1)) if match else None
+        if code is None:  # still running in the background, or denied before it ran
+            heartbeat.note(breaker="neutral")
+            continue
+        _breaker_apply(state, _breaker_command_signal(command, code, payload))
+
+
+def _breaker_advise_agy(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
+    """Advise mode on agy: one note per user turn, delivered with the next model call."""
+    if _breaker_mode() != "advise" or int(state.get("consecutive_failures") or 0) < BREAKER_THRESHOLD:
+        return
+    text = (
+        f"[Mitosis Orchestrator] Advice, not a block: {state.get('consecutive_failures')} commands failed in a row "
+        "this turn. Stop and find the cause before retrying, or report the blocker to the user. "
+        "Set *_MITOSIS_CIRCUIT_BREAKER_MODE=enforce to turn this into a denial."
+    )
+    if "circuit_breaker" not in (state.get("fastpath_advised") or []):
+        _queue_advice(payload, state, "circuit_breaker", text)
+        heartbeat.note(breaker="advised")
+
+
 def _max_direct_edits() -> int:
     raw = _get_env("CODEX_MITOSIS_MAX_DIRECT_EDITS", "CLAUDE_MITOSIS_MAX_DIRECT_EDITS", "AGY_MITOSIS_MAX_DIRECT_EDITS", "AGY_ARGON_MAX_DIRECT_EDITS", default="3")
     try:
@@ -547,6 +667,15 @@ def _is_agy_payload(payload: Dict[str, Any]) -> bool:
 
 def _fastpath_advice(payload: Dict[str, Any], state: Dict[str, Any], kind: str, what: str) -> Optional[str]:
     """Once per kind per turn. Returns text to attach now (Claude/Codex hooks); queues it on agy."""
+    return _queue_advice(payload, state, kind, (
+        f"[Mitosis Orchestrator] Advice, not a block: {what}. Delegating to "
+        f"{_delegation_hint(payload, 'flash')} protects this context but usually costs more in total, "
+        "so do it only when this context matters. Set *_MITOSIS_FASTPATH_MODE=enforce to turn this into a denial."
+    ))
+
+
+def _queue_advice(payload: Dict[str, Any], state: Dict[str, Any], kind: str, text: str) -> Optional[str]:
+    """Once per kind per turn. Returns the text to attach now on Claude/Codex; queues it on agy and returns None."""
     hook = is_claude_code_payload(payload) or is_codex_hook_payload(payload)
     agy = _is_agy_payload(payload)
     if not (hook or agy):
@@ -557,11 +686,6 @@ def _fastpath_advice(payload: Dict[str, Any], state: Dict[str, Any], kind: str, 
     if kind in advised:
         return None
     advised.append(kind)
-    text = (
-        f"[Mitosis Orchestrator] Advice, not a block: {what}. Delegating to "
-        f"{_delegation_hint(payload, 'flash')} protects this context but usually costs more in total, "
-        "so do it only when this context matters. Set *_MITOSIS_FASTPATH_MODE=enforce to turn this into a denial."
-    )
     if agy:
         pending = state.get("fastpath_pending_advice")
         if not isinstance(pending, list):
@@ -758,15 +882,8 @@ def handle_post_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
         escalation_note = _claude_escalate(state, payload)
 
     # Track consecutive failures for the circuit breaker
-    if tool_name in (
-        "run_command", "invoke_subagent", "Bash", "Task", "Agent",
-        "shell", "exec_command", "local_shell", "spawn_agent",
-        "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker"
-    ):
-        if failed:
-            state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
-        else:
-            state["consecutive_failures"] = 0
+    if tool_name in BREAKER_TOOLS:
+        _breaker_track(tool_name, tool_args, payload, state)
 
     save_state(payload, state)
     if escalation_note:
@@ -970,6 +1087,7 @@ def _debug_log(payload: Dict[str, Any], mode: str, result: Dict[str, Any]) -> No
         "state": {
             "pending": len(state.get("pending_spawns") or []),
             "subagents": sorted((state.get("subagents") or {}).keys())[:16],
+            "consecutiveFailures": state.get("consecutive_failures"),
         },
         "modelName": payload.get("modelName") or payload.get("model_name") or payload.get("model"),
         "invocationNum": payload.get("invocationNum"),

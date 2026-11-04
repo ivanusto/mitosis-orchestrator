@@ -15,7 +15,8 @@ pre-invocation
     Checks the live session model (payload.modelName) on every turn. If it is not
     a frontier model, injects a one-time ephemeral warning per invocation so the
     primary agent asks the user to switch models. Resets per-turn tracking
-    (turn_edited_files, consecutive_failures).
+    (turn_edited_files, consecutive_failures) when invocationNum returns to 0.
+    Reads the exit code of finished commands and queues the circuit breaker's advice.
 
 pre-tool-use
     invoke_subagent   -> context-classifies every subagent into flash / flash_lite
@@ -29,8 +30,8 @@ pre-tool-use
                          model="flash" / model="flash_lite".
     define_subagent   -> forces enable_subagent_tools=False (no nested spawning).
     manage_subagents  -> marks killed branch workers as cleaned up.
-    circuit breaker   -> denies run_command and invoke_subagent when consecutive
-                         failures reach >= 2.
+    circuit breaker   -> in enforce mode, denies run_command and invoke_subagent when
+                         consecutive failures reach >= 2 in one user turn.
     context hygiene   -> blocks direct inspection of .log and transcript.jsonl
                          files by the primary agent (delegates to flash-lite-scout).
     fast-path budget  -> tracks direct workspace edits (max 3 by default) and flags
@@ -46,8 +47,8 @@ pre-tool-use
 
 post-tool-use
     Rolls back pending spawns when invoke_subagent fails; otherwise pairs pending
-    spawns with the conversationIds that appear in the transcript. Tracks
-    consecutive failures across run_command and invoke_subagent for the circuit breaker.
+    spawns with the conversationIds that appear in the transcript. Keeps each
+    run_command so the next pre-invocation can read its exit code from the transcript.
 
 stop
     When the turn is fully idle and Workspace:"branch" workers are still active,
@@ -65,7 +66,8 @@ Environment variables:
     AGY_MITOSIS_ALLOW_DIRECT_LOGS=1     allow primary agent to read raw logs and transcripts
     AGY_MITOSIS_FASTPATH_MODE=<mode>    advise (default) | enforce (deny) | off, for the fast-path budget
     AGY_MITOSIS_ALLOW_DIRECT_FASTPATH=1 same as FASTPATH_MODE=off (no tracking)
-    AGY_MITOSIS_CIRCUIT_BREAKER=0       disable the 2-failure circuit breaker
+    AGY_MITOSIS_CIRCUIT_BREAKER=0       disable the circuit breaker (wins over the mode)
+    AGY_MITOSIS_CIRCUIT_BREAKER_MODE=<m> advise (default) | enforce (deny) | off
     CLAUDE_MITOSIS_PIN_SUBAGENTS=0      (Claude Code) stop rewriting Agent calls entirely
     CLAUDE_MITOSIS_SCOUT_MODEL=<m>      (Claude Code) scout model (default: haiku; haiku|sonnet|opus|fable)
     CLAUDE_MITOSIS_WORKER_MODEL=<m>     (Claude Code) worker model (default: sonnet)

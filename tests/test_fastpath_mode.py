@@ -224,12 +224,14 @@ class TestAgy(Base):
         eo.handle_pre_invocation(p)
         self.assertEqual(eo.load_state(p)["turn_edited_files"], [])
 
-    def test_consecutive_failures_reset_every_call(self):
+    def test_consecutive_failures_reset_only_on_a_new_turn(self):
         p = self.agy("x", {}, inv=2)
         state = eo.load_state(p)
         state["consecutive_failures"] = 2
         eo.save_state(p, state)
         eo.handle_pre_invocation(p)
+        self.assertEqual(eo.load_state(p).get("consecutive_failures", 0), 2)
+        eo.handle_pre_invocation(self.agy("x", {}, inv=0))
         self.assertEqual(eo.load_state(p).get("consecutive_failures", 0), 0)
 
     def test_advice_survives_frontier_warning_path(self):
