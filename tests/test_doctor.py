@@ -457,7 +457,8 @@ class TestCliVerified(DoctorCase):
                 shutil.copy2(str(src), str(tree / name))
         cmd = [sys.executable, str(tree / "scripts" / "sync-generated.py"), "--check"]
         self.assertEqual(subprocess.run(cmd, capture_output=True, text=True).returncode, 0)
-        edit(tree / "spec" / "compat.toml", 'verified = "2.1.317"', 'verified = "2.1.999"')
+        current = re.search(r'verified = "[^"]+"', (tree / "spec" / "compat.toml").read_text(encoding="utf-8")).group(0)
+        edit(tree / "spec" / "compat.toml", current, 'verified = "9.9.999"')
         proc = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("scripts/mitosis_generated.py", proc.stdout)

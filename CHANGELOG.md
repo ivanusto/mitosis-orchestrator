@@ -34,8 +34,16 @@
 ### Decided against
 - The report cap stays at 1,600. On workers since Claude Code 2.1.311, 2,400 would remove 3 of 33 blocks in a replay of the rejected reports, because `too_long` is checked first and hides line-count failures, and a block costs little.
 
+### Verification
+- 951 tests in CI (Python 3.11, 3.12, 3.13; `hooks-windows` runs the complete suite on Windows); `hooks-py38` and lint pass. `routing.py` is unchanged in the range.
+- Oracle on GitHub runners, 4 seeds x 20,000 strings = 80,000: 7,828 accepted, 6,566 unique, 0 violations on bash, dash, busybox and zsh.
+- PowerShell on GitHub runners, 2 seeds x 20,181 generated strings per shell: pwsh 7.6.9 on Linux and Windows and Windows PowerShell 5.1 ran about 3,100 to 3,200 accepted strings per seed, with no write, no other program and no argument mismatch. Discrimination: a guard that accepts everything gave 19 to 21 violations on the same harness.
+- Live on Claude Code 2.1.318, headless: advice reached the model once per kind and did not block; `enforce` restored both denials; `CLAUDE_MITOSIS_PIN_BUILTINS=1` ran Explore on haiku at low effort, and without the flag it inherited the primary's model. The environment variables `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_EFFORT` did not override the pin.
+- Live on agy 1.5.0, headless: `invocationNum` runs 0, 1, 2 within a turn and returns to 0 on the next, four `write_file` calls were counted, and the advice was injected at the next model call.
+- Doctor adds no WARN or FAIL on a healthy install.
+
 ### Not covered
-The agy circuit breaker still resets on every model call, so it rarely fires there; fixing it would add denials and is left for a later decision. On agy, the advice was confirmed in the transcript as an `EPHEMERAL_MESSAGE`, but the model did not quote it in the one live run. VERIFICATION_PLACEHOLDER
+The agy circuit breaker still resets on every model call, so it rarely fires there; fixing it would add denials and is left for a later decision. On agy, the advice was confirmed in the transcript as an `EPHEMERAL_MESSAGE`, but the model did not quote it in the one live run. `CODEX_TRUST_VERIFIED` still lists only 0.166. The strict mode rules were not run through a real Codex session on a host with pwsh. The harness treats an alias as safe from a fixed list of read-only cmdlets; that list was read by hand. As always, every method so far has found something the one before it missed, so this is not a claim that nothing is left.
 
 ## Unreleased before 2.6.0
 
