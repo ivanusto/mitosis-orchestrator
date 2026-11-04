@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -220,7 +221,7 @@ class TestModes(Base):
 
     def test_bad_mode_means_advise(self):
         os.environ["AGY_MITOSIS_CIRCUIT_BREAKER_MODE"] = "banana"
-        self.assertEqual(eo.handlers._breaker_mode(), "advise")
+        self.assertEqual(eo.handlers._breaker_mode(self.base()), "advise")
 
     def test_breaker_denial_does_not_feed_itself(self):
         os.environ["AGY_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
@@ -228,6 +229,147 @@ class TestModes(Base):
         self.run_command("pytest", 1)
         eo.handle_post_tool_use(self.base(error="tool call denied by pre-tool hook: x", stepIdx=50, toolCall={"args": {"CommandLine": "pytest"}, "name": "run_command"}))
         self.assertEqual(self.fails(), 2)
+
+
+def _post(base, command, step, error=""):
+    return eo.handle_post_tool_use(base(error=error, stepIdx=step, toolCall={"args": {"CommandLine": command}, "name": "run_command"}))
+
+
+class TestReviewFixes(Base):
+    def test_b1_agy_subagent_spawn_is_neutral(self):
+        self.run_command("pytest", 1)
+        eo.handle_post_tool_use(self.base(error="", stepIdx=40, toolCall={"args": {"Prompt": "x"}, "name": "invoke_subagent"}))
+        self.assertEqual(self.fails(), 1)
+        self.run_command("pytest", 1)
+        self.assertEqual(self.fails(), 2)
+
+    def test_b1_other_platform_spawn_unchanged(self):
+        sid = str(uuid.uuid4())
+        p = {"session_id": sid, "hook_event_name": "PostToolUse", "tool_name": "Task", "cwd": self.tmp.name,
+             "tool_input": {"prompt": "x"}, "tool_response": {"content": "done"}}
+        eo.handle_post_tool_use({**p, "error": "boom"})
+        self.assertEqual(eo.load_state(p).get("consecutive_failures", 0), 1)
+        eo.handle_post_tool_use(p)
+        self.assertEqual(eo.load_state(p).get("consecutive_failures", 0), 0)
+
+    def stop_continue(self, user_input):
+        state = eo.load_state(self.base())
+        state["pending_spawns"] = [{"role": "worker", "active_branch": True}]
+        eo.save_state(self.base(), state)
+        _support.release_state_locks()
+        result = eo.handle_stop(self.base(lastUserInput=user_input, fullyIdle=True))
+        _support.release_state_locks()
+        return result
+
+    def test_b2_stop_continue_keeps_the_count_for_the_same_input(self):
+        self.run_command("pytest", 1)
+        self.run_command("pytest", 1)
+        self.assertEqual(self.stop_continue("x").get("decision"), "continue")
+        eo.handle_pre_invocation(self.base(invocationNum=0, lastUserInput="x"))
+        self.assertEqual(self.fails(), 2)
+        self.assertNotIn("breaker_keep_for_input", eo.load_state(self.base()))
+        # the stored value is single use: the next restart at 0 is a new turn
+        eo.handle_pre_invocation(self.base(invocationNum=0, lastUserInput="x"))
+        self.assertEqual(self.fails(), 0)
+
+    def test_b2_keeps_the_advised_flag_and_resets_for_a_new_input(self):
+        self.run_command("pytest", 1)
+        self.run_command("pytest", 1)
+        self.stop_continue("x")
+        eo.handle_pre_invocation(self.base(invocationNum=0, lastUserInput="x"))
+        self.assertIn("circuit_breaker", eo.load_state(self.base()).get("fastpath_advised", []))
+        self.stop_continue("x")
+        eo.handle_pre_invocation(self.base(invocationNum=0, lastUserInput="something else"))
+        self.assertEqual(self.fails(), 0)
+
+    def test_b3_cd_prefix_and_predicates_are_neutral(self):
+        self.run_command("cd sub && grep x f", 1)
+        self.run_command("cd sub && cd deep && grep x f", 1)
+        self.run_command("test -f missing", 1)
+        self.run_command("[ -f missing ]", 1)
+        self.run_command("command -v nope", 1)
+        self.run_command("which nope", 1)
+        self.assertEqual(self.fails(), 0)
+
+    def test_b3_compound_predicate_is_not_neutral(self):
+        self.run_command("test -f x && pytest", 1)
+        self.assertEqual(self.fails(), 1)
+        self.run_command("cd sub && pytest", 1)
+        self.assertEqual(self.fails(), 2)
+
+    def test_b4_mode_reads_the_current_platform_only(self):
+        os.environ["CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
+        self.run_command("pytest", 1)
+        self.run_command("pytest", 1)
+        self.assertNotEqual(self.try_command().get("decision"), "deny")
+        self.assertEqual(eo.handlers._breaker_mode(self.base()), "advise")
+        claude = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Bash"}
+        codex = {"session_id": "s", "turn_id": "t", "hook_event_name": "PreToolUse", "tool_name": "Bash"}
+        self.assertEqual(eo.handlers._breaker_mode(claude), "enforce")
+        self.assertEqual(eo.handlers._breaker_mode(codex), "advise")
+        os.environ["CODEX_MITOSIS_CIRCUIT_BREAKER_MODE"] = "off"
+        self.assertEqual(eo.handlers._breaker_mode(codex), "off")
+        self.assertEqual(eo.handlers._breaker_mode(), "off")  # platform unknown: the old order, CODEX first
+
+    def test_b4_switch_is_platform_first_then_falls_back(self):
+        os.environ["CLAUDE_MITOSIS_CIRCUIT_BREAKER"] = "0"
+        self.assertEqual(eo.handlers._breaker_mode(self.base()), "off")  # unset on agy: old order finds it
+        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER"] = "1"
+        self.assertEqual(eo.handlers._breaker_mode(self.base()), "advise")
+        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER"] = "0"
+        os.environ["CLAUDE_MITOSIS_CIRCUIT_BREAKER"] = "1"
+        self.assertEqual(eo.handlers._breaker_mode(self.base()), "off")
+
+    def test_b5_steps_hold_booleans_and_old_strings_are_not_read_only(self):
+        _post(self.base, "grep x f", 7)
+        _post(self.base, "pytest", 8)
+        steps = eo.load_state(self.base())["breaker_steps"]
+        self.assertEqual(steps, {"7": True, "8": False})
+        _post(self.base, "grep x f " + "y" * 5000, 9)
+        self.assertIs(eo.load_state(self.base())["breaker_steps"]["9"], False)
+        state = eo.load_state(self.base())
+        state["breaker_steps"] = {"10": "grep x f"}  # state written by an older version
+        eo.save_state(self.base(), state)
+        _support.release_state_locks()
+        self.write_step(10, "GENERIC", "Command exited with code 1.\n")
+        eo.handle_pre_invocation(self.base(invocationNum=3))
+        self.assertEqual(self.fails(), 1)
+
+    def test_b6_cap_evicts_the_oldest(self):
+        for step in range(100, 170):
+            _post(self.base, "pytest", step)
+        steps = eo.load_state(self.base())["breaker_steps"]
+        self.assertEqual(len(steps), 64)
+        self.assertNotIn("100", steps)
+        self.assertIn("169", steps)
+
+    def test_b7_off_does_no_tracking_and_no_tail_read(self):
+        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER_MODE"] = "off"
+        _post(self.base, "pytest", 7)
+        self.assertNotIn("breaker_steps", eo.load_state(self.base()))
+        eo.handle_post_tool_use(self.base(error="exit status 2", stepIdx=8, toolCall={"args": {"CommandLine": "pytest"}, "name": "run_command"}))
+        self.assertEqual(self.fails(), 0)
+        os.environ.pop("AGY_MITOSIS_CIRCUIT_BREAKER_MODE")
+        _post(self.base, "pytest", 9)
+        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER"] = "0"
+        with mock.patch.object(eo.handlers, "_tail_records") as tail:
+            eo.handle_pre_invocation(self.base(invocationNum=1))
+        tail.assert_not_called()
+        self.assertEqual(self.fails(), 0)
+
+    def test_b8_transcript_header_only(self):
+        _post(self.base, "pytest", 7)
+        self.write_step(7, "GENERIC", "Created At: x\nexit status 1\n")
+        eo.handle_pre_invocation(self.base(invocationNum=1))
+        self.assertEqual(self.fails(), 0)
+        _post(self.base, "pytest", 8)
+        self.write_step(8, "GENERIC", "Command exited with code -1.\n")
+        eo.handle_pre_invocation(self.base(invocationNum=2))
+        self.assertEqual(self.fails(), 1)
+
+    def test_b8_error_text_accepts_a_negative_code(self):
+        eo.handle_post_tool_use(self.base(error="exit status -1", stepIdx=3, toolCall={"args": {"CommandLine": "pytest"}, "name": "run_command"}))
+        self.assertEqual(self.fails(), 1)
 
 
 class TestOtherPlatformsUnchanged(unittest.TestCase):

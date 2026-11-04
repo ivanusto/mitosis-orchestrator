@@ -26,6 +26,7 @@ from .common import (
 )
 from . import heartbeat
 from .guards import (
+    HEURISTIC_REFUSAL_PREFIX,
     _iter_strings,
     PATH_ARG_KEYS,
     PATH_LIST_ARG_KEYS,
@@ -185,9 +186,15 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     inv = payload.get("invocationNum", 0)
     # agy fires PreInvocation on every model call; its invocationNum returns to 0 on a new user turn.
     if not agy or isinstance(inv, bool) or not isinstance(inv, int) or inv == 0:
+        # After a Stop-hook "continue" agy restarts at invocationNum 0 with the same user input: not a new turn.
+        kept = state.pop("breaker_keep_for_input", None)
+        resumed = agy and kept is not None and kept == payload.get("lastUserInput")
+        advised = state.get("fastpath_advised")
+        keep_advised = ["circuit_breaker"] if resumed and isinstance(advised, list) and "circuit_breaker" in advised else []
         state["turn_edited_files"] = []
-        state["fastpath_advised"] = []
-        state["consecutive_failures"] = 0
+        state["fastpath_advised"] = keep_advised
+        if not resumed:
+            state["consecutive_failures"] = 0
         state.pop("breaker_steps", None)
     agy_steps: List[Dict[str, Any]] = []
     if agy:
@@ -290,6 +297,8 @@ def _handle_workspace_guard(payload: Dict[str, Any], tool_name: str, args: Dict[
         ok, why = command_stays_in_workspace(cmd, cwd, roots)
         if ok:
             return _allow("Mitosis Orchestrator: command stays inside the workspace.", overrides=[f"command({cmd})"], payload=payload)
+        if why.startswith(HEURISTIC_REFUSAL_PREFIX) and is_codex_hook_payload(payload):
+            return _no_opinion(payload)  # a guess must not become a hard deny: _ask is a deny on Codex
         return _ask(f"Mitosis Orchestrator: {why}.", payload=payload)
 
     if tool_name == "apply_patch":
@@ -363,7 +372,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Circuit breaker, enforce mode only: block retry loops on commands and subagents.
     # Advise mode tells the primary at the next model call on agy instead (_breaker_advise_agy).
-    if _breaker_mode() == "enforce":
+    if _breaker_mode(payload) == "enforce":
         fails = int(state.get("consecutive_failures") or 0)
         if fails >= BREAKER_THRESHOLD and tool_name in BREAKER_TOOLS:
             heartbeat.note(breaker="denied")
@@ -560,29 +569,88 @@ BREAKER_TOOLS = (
     "mitosis_invoke_subagent", "mitosis_scout", "mitosis_worker",
 )
 _BREAKER_COMMAND_TOOLS = ("run_command", "Bash", "shell", "exec_command", "local_shell")
-_BREAKER_EXIT_RE = re.compile(r"(?:exit status|exited with code)\s+(\d+)")
+_BREAKER_EXIT_RE = re.compile(r"(?:exit status|exited with code)\s+(-?\d+)")
+# The agy transcript header is "Command exited with code N."; "exit status" is not part of it.
+_BREAKER_TRANSCRIPT_EXIT_RE = re.compile(r"Command exited with code (-?\d+)")
 # agy writes these for a call that never ran. The first would otherwise let the breaker's own denial feed itself.
 _BREAKER_NEUTRAL_ERRORS = ("permission check failed", "tool call denied by pre-tool hook")
 _BREAKER_STEP_CAP = 64
 _BREAKER_COMMAND_CAP = 4000
+_BREAKER_CD_RE = re.compile(r"^\s*cd\s+[^\s;&|<>$`()'\"\\]+\s*&&\s*")
+_BREAKER_SHELL_META_RE = re.compile(r"[;&|<>$`()\\\n\r{}*?~]")
 
 
-def _breaker_mode() -> str:
-    """advise (default), enforce or off. *_MITOSIS_CIRCUIT_BREAKER=0 means off and wins over the mode."""
-    if _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER", "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER", default="1") == "0":
-        return "off"
-    mode = _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER_MODE", "CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE", "AGY_MITOSIS_CIRCUIT_BREAKER_MODE", default="advise").lower()
+def _breaker_prefix(payload: Optional[Dict[str, Any]]) -> str:
+    """Env prefix of the platform this payload came from, "" when it cannot be told."""
+    if not isinstance(payload, dict):
+        return ""
+    if is_codex_payload(payload):
+        return "CODEX"
+    if is_claude_code_payload(payload):
+        return "CLAUDE"
+    if _is_agy_payload(payload):
+        return "AGY"
+    return ""
+
+
+def _own_env(*names: str) -> str:
+    for name in names:
+        val = os.environ.get(name)
+        if val is not None and val.strip() != "":
+            return val.strip()
+    return ""
+
+
+def _breaker_mode(payload: Optional[Dict[str, Any]] = None) -> str:
+    """advise (default), enforce or off. *_MITOSIS_CIRCUIT_BREAKER=0 means off and wins over the mode.
+
+    With a payload of a known platform only that platform's variables are read for the mode, and its
+    CIRCUIT_BREAKER variable is read first, then the cross-platform order. Otherwise: the old order."""
+    prefix = _breaker_prefix(payload)
+    legacy = ("CODEX_MITOSIS_CIRCUIT_BREAKER", "CLAUDE_MITOSIS_CIRCUIT_BREAKER", "AGY_MITOSIS_CIRCUIT_BREAKER", "AGY_ARGON_CIRCUIT_BREAKER")
+    if prefix:
+        own = (f"{prefix}_MITOSIS_CIRCUIT_BREAKER",) + (("AGY_ARGON_CIRCUIT_BREAKER",) if prefix == "AGY" else ())
+        switch = _own_env(*own) or _get_env(*legacy, default="1")
+        if switch == "0":
+            return "off"
+        mode = (_own_env(f"{prefix}_MITOSIS_CIRCUIT_BREAKER_MODE") or "advise").lower()
+    else:
+        if _get_env(*legacy, default="1") == "0":
+            return "off"
+        mode = _get_env("CODEX_MITOSIS_CIRCUIT_BREAKER_MODE", "CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE", "AGY_MITOSIS_CIRCUIT_BREAKER_MODE", default="advise").lower()
     return mode if mode in ("enforce", "advise", "off") else "advise"
 
 
-def _breaker_command_signal(command: str, exit_code: int, payload: Dict[str, Any]) -> str:
+def _breaker_read_only(command: str, payload: Dict[str, Any]) -> bool:
+    """True when the command only asks a question, so exit 1 (or 0) says nothing about a retry loop."""
+    if not command or len(command) > _BREAKER_COMMAND_CAP:
+        return False
+    rest = command
+    while True:
+        stripped = _BREAKER_CD_RE.sub("", rest, count=1)
+        if stripped == rest:
+            break
+        rest = stripped
+    rest = rest.strip()
+    if not rest:
+        return False
+    if scout_command_is_read_only(rest, strict_windows=_windows_mode(allowed_roots(payload)))[0]:
+        return True
+    if _BREAKER_SHELL_META_RE.search(rest):
+        return False
+    words = rest.split()
+    if words[0] == "test" or (words[0] == "[" and words[-1] == "]"):
+        return True
+    return (words[0] == "command" and len(words) >= 3 and words[1] == "-v") or (words[0] == "which" and len(words) >= 2)
+
+
+def _breaker_command_signal(read_only: bool, exit_code: int) -> str:
     """fail, neutral or ok for a finished command.
 
     A read-only command says nothing about a retry loop: exit 1 is grep finding no match, and exit 0
     must not clear the streak either, or a failing test, a cat and a failing test would never reach 2.
     A read-only command that exits 2 or more did fail (a bad path, a bad pattern).
     """
-    read_only = bool(command) and scout_command_is_read_only(command, strict_windows=_windows_mode(allowed_roots(payload)))[0]
     if exit_code == 0:
         return "neutral" if read_only else "ok"
     if read_only and exit_code == 1:
@@ -597,7 +665,10 @@ def _breaker_signal(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any
         return "neutral"
     command = str(_get(args, "command", "CommandLine", "commandLine", "cmd", default="") or "") if tool_name in _BREAKER_COMMAND_TOOLS else ""
     if not _tool_failed(tool_name, payload):
-        return _breaker_command_signal(command, 0, payload) if tool_name in _BREAKER_COMMAND_TOOLS else "ok"
+        if tool_name in _BREAKER_COMMAND_TOOLS:
+            return _breaker_command_signal(_breaker_read_only(command, payload), 0)
+        # agy only reports that a spawn was accepted: it neither counts nor clears.
+        return "neutral" if _is_agy_payload(payload) else "ok"
     if tool_name not in _BREAKER_COMMAND_TOOLS:
         return "fail"
     result = payload.get("toolResult") or payload.get("tool_result") or payload.get("result")
@@ -607,7 +678,7 @@ def _breaker_signal(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any
     if not isinstance(code, int):
         match = _BREAKER_EXIT_RE.search(json.dumps(error if error else result, default=str))
         code = int(match.group(1)) if match else None
-    return "fail" if code is None or code == 0 else _breaker_command_signal(command, code, payload)
+    return "fail" if code is None or code == 0 else _breaker_command_signal(_breaker_read_only(command, payload), code)
 
 
 def _breaker_apply(state: Dict[str, Any], signal: str) -> None:
@@ -621,8 +692,10 @@ def _breaker_apply(state: Dict[str, Any], signal: str) -> None:
 
 def _breaker_track(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any], state: Dict[str, Any]) -> None:
     """PostToolUse. agy 1.5.0 sends error="" and no result for a command that exits non-zero, and its
-    transcript gets the step only after this hook, so keep the command and read the exit code at the
-    next PreInvocation (_breaker_scan_agy_transcript)."""
+    transcript gets the step only after this hook, so keep whether the command was read-only and read
+    the exit code at the next PreInvocation (_breaker_scan_agy_transcript)."""
+    if _breaker_mode(payload) == "off":
+        return
     has_result = any(payload.get(k) for k in ("toolResult", "tool_result", "result"))
     step = payload.get("stepIdx")
     if tool_name == "run_command" and _is_agy_payload(payload) and not payload.get("error") and not has_result \
@@ -631,8 +704,10 @@ def _breaker_track(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any]
         steps = state.get("breaker_steps")
         if not isinstance(steps, dict):
             steps = state["breaker_steps"] = {}
-        if len(steps) < _BREAKER_STEP_CAP:
-            steps[str(step)] = command[:_BREAKER_COMMAND_CAP]
+        key = str(step)
+        while key not in steps and len(steps) >= _BREAKER_STEP_CAP:
+            steps.pop(next(iter(steps)))  # evict the oldest: the newest command is the one that matters
+        steps[key] = _breaker_read_only(command, payload)
         return
     _breaker_apply(state, _breaker_signal(tool_name, args, payload))
 
@@ -640,27 +715,27 @@ def _breaker_track(tool_name: str, args: Dict[str, Any], payload: Dict[str, Any]
 def _breaker_scan_agy_transcript(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
     """Turn the commands kept by _breaker_track into failures, in step order, once their results are written."""
     steps = state.get("breaker_steps")
-    if not isinstance(steps, dict) or not steps:
+    if not isinstance(steps, dict) or not steps or _breaker_mode(payload) == "off":
         return
     for record in _tail_records(payload.get("transcriptPath")):
         key = str(record.get("step_index"))
         if key not in steps:
             continue
-        command = str(steps.pop(key))
+        read_only = steps.pop(key) is True  # an older state held the command text: not read-only
         code = record.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
             # The header comes first; command output later in the step may quote the same words.
-            match = _BREAKER_EXIT_RE.search(str(record.get("content") or "")[:300])
+            match = _BREAKER_TRANSCRIPT_EXIT_RE.search(str(record.get("content") or "")[:300])
             code = int(match.group(1)) if match else None
         if code is None:  # still running in the background, or denied before it ran
             heartbeat.note(breaker="neutral")
             continue
-        _breaker_apply(state, _breaker_command_signal(command, code, payload))
+        _breaker_apply(state, _breaker_command_signal(read_only, code))
 
 
 def _breaker_advise_agy(payload: Dict[str, Any], state: Dict[str, Any]) -> None:
     """Advise mode on agy: one note per user turn, delivered with the next model call."""
-    if _breaker_mode() != "advise" or int(state.get("consecutive_failures") or 0) < BREAKER_THRESHOLD:
+    if _breaker_mode(payload) != "advise" or int(state.get("consecutive_failures") or 0) < BREAKER_THRESHOLD:
         return
     text = (
         f"[Mitosis Orchestrator] Advice, not a block: {state.get('consecutive_failures')} commands failed in a row "
@@ -1010,6 +1085,8 @@ def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
         save_state(payload, state)
         return {"decision": "allow"}
     reminded.append(key)
+    if payload.get("lastUserInput") is not None:
+        state["breaker_keep_for_input"] = payload.get("lastUserInput")
     save_state(payload, state)
     return {
         "decision": "continue",

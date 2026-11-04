@@ -102,6 +102,25 @@ class CodexWorkdir(unittest.TestCase):
         self.assertEqual(self.bash("ls", self.outside), {})
         self.assertEqual(self.bash("cat ../../x", self.repo / "sub"), {})
 
+    def test_g3_heuristic_refusal_is_no_opinion_on_codex(self):
+        os.environ["CODEX_MITOSIS_AUTO_ALLOW"] = "1"
+        self.prompt()
+        self.assertEqual(self.bash("cd; rm x", self.repo / "sub"), {})
+        self.assertEqual(self.bash("cd .. && cat ../a", self.repo / "sub"), {})
+
+    def test_g3_a_path_that_escapes_still_denies_on_codex(self):
+        os.environ["CODEX_MITOSIS_AUTO_ALLOW"] = "1"
+        self.prompt()
+        self.assertTrue(self.denied(self.bash("cat ../../x", self.repo / "sub")))
+
+    def test_g3_claude_still_asks(self):
+        os.environ["CLAUDE_MITOSIS_AUTO_ALLOW"] = "1"
+        p = {"session_id": self.sid, "hook_event_name": "PreToolUse", "cwd": str(self.repo / "sub"),
+             "tool_name": "Bash", "tool_input": {"command": "cd; rm x"}}
+        r = handlers.handle_pre_tool_use(p)
+        _support.release_state_locks()
+        self.assertEqual((r.get("hookSpecificOutput") or {}).get("permissionDecision"), "ask")
+
 
 class StepsAfterCd(unittest.TestCase):
     """From a subfolder each .. stays inside, read from cwd, but the shell has already moved."""
@@ -132,6 +151,63 @@ class StepsAfterCd(unittest.TestCase):
     def test_without_cd_each_path_stands_alone(self):
         self.assertTrue(self.ok("cat ../a ../b"))
         self.assertTrue(self.ok("git log v1..v2"))
+
+
+class DirectoryChangeWords(unittest.TestCase):
+    """cwd /w/sub, root /w: a conservative word check, never a shell parser."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name).resolve() / "w"
+        self.sub = self.repo / "sub"
+        self.sub.mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def ok(self, command):
+        return guards.command_stays_in_workspace(command, str(self.sub), [self.repo])
+
+    def test_g1_forms_that_change_directory(self):
+        for command in (
+            'sh -c "cd .. && rm ../x"', "bash -c 'cd ..; rm ../x'", "eval 'cd ..; rm ../x'",
+            "echo `cd ..; rm ../x`", "\\cd .. && rm ../x", "'cd' .. && rm ../x", '"cd" .. && rm ../x',
+            "chdir .. && rm ../x", "popd && rm ../x", "git -C .. -C .. clean -fdx", "make -C .. -C .. clean",
+            "tar -C .. -C .. -xf a.tar", "env -C .. rm ../x",
+            "python3 -c \"import os;os.chdir('..');os.remove('../x')\"",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.ok(command)[0])
+
+    def test_g1_cd_without_a_plain_target(self):
+        for command in ("cd; rm ../x", "cd - && rm ../x", "cd $OLDPWD && rm ../x",
+                        'cd "$(dirname "$PWD")" && rm ../x', "cd && rm -rf proj", "cd `pwd` && ls"):
+            with self.subTest(command=command):
+                ok, why = self.ok(command)
+                self.assertFalse(ok)
+                self.assertTrue(why.startswith(guards.HEURISTIC_REFUSAL_PREFIX), why)
+
+    def test_g1_plain_commands_stay_allowed(self):
+        for command in ("cd sub && ls", "cd .. && cat README.md", "cat ../a ../b", "git log v1..v2"):
+            with self.subTest(command=command):
+                self.assertTrue(self.ok(command)[0])
+
+
+class WindowsDirectoryChange(unittest.TestCase):
+    def ok(self, command):
+        return guards.command_stays_in_workspace(command, "C:\\repo\\sub", [Path("C:\\repo")])
+
+    def test_g2_chdir_with_a_dotdot_segment(self):
+        for command in ("cd sub && type ..\\x", "cd /d sub & type ../x", "CD sub && type ..\\x", "pushd sub && dir ..\\x",
+                        "Set-Location sub; Get-Content ..\\x", "sl sub; Remove-Item ../x", "chdir sub && del ..\\x",
+                        "cd .. ; del ..\\x", "cd /d .. && type ..\\x"):
+            with self.subTest(command=command):
+                self.assertFalse(self.ok(command)[0])
+
+    def test_g2_other_commands_unaffected(self):
+        self.assertTrue(self.ok("cd sub && dir")[0])
+        self.assertTrue(self.ok("cd ..\\b")[0])  # the target alone is judged from the real cwd
+        self.assertTrue(self.ok("type C:\\repo\\x")[0])
 
 
 if __name__ == "__main__":

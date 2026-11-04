@@ -229,7 +229,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
 | `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |
 | `PreToolUse` · **快捷修改預算 (Fast-Path Budget)** | 限制主代理單回合直接修改工作區檔案上限 `3` 個（`*_MITOSIS_MAX_DIRECT_EDITS` 可調），並標記主代理在同回合直接修改檔案後執行測試框架。模式由 `*_MITOSIS_FASTPATH_MODE` 決定：`advise`（預設）不阻擋，每種情況每回合只附一則簡短建議；`enforce` 恢復與舊版相同的拒絕；`off` 停用預算。agy 自此版本起以使用者回合為單位計算（`invocationNum` 回到 0 時重置）。測試框架偵測會忽略引號內文字、heredoc 內容，以及 `grep`、`git`、`cat` 等命令。 |
-| `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 同一個使用者回合內連續 `2` 個指令失敗後，由 `*_MITOSIS_CIRCUIT_BREAKER_MODE` 決定：`advise`（預設）在 agy 加一則提醒、不阻擋；`enforce` 拒絕 `run_command`、`Bash` 與子代理派工直到下一回合；`off` 停用。agy 的 PostToolUse 不帶退出碼，所以在下一次模型呼叫時從逐字稿讀取。唯讀指令 exit 0 或 1（例如 `grep` 沒有命中）不計入也不清除連續次數。agy 子代理內不執行 hook，所以 worker 自己的測試循環不計入。**Claude Code 與 Codex 從未計入真實失敗**，因為它們的 payload 沒有計數器讀取的欄位，熔斷器在這兩個平台沒有作用。 |
+| `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 同一個使用者回合內連續 `2` 個指令失敗後，由 `*_MITOSIS_CIRCUIT_BREAKER_MODE` 決定：`advise`（預設）在 agy 加一則提醒、不阻擋；`enforce` 拒絕 `run_command`、`Bash` 與子代理派工直到下一回合；`off` 停用。agy 的 PostToolUse 不帶退出碼，所以在下一次模型呼叫時從逐字稿讀取。唯讀指令 exit 0 或 1（例如 `grep` 沒有命中）不計入也不清除連續次數，單獨一句 `test`、`[ ]`、`command -v` 或 `which` 這類提問也一樣。在 agy 上，子代理呼叫同樣不計入也不清除，因為 agy 只回報派工已被接受。agy 子代理內不執行 hook，所以 worker 自己的測試循環不計入。**Claude Code 與 Codex 從未計入真實失敗**，因為它們的 payload 沒有計數器讀取的欄位，熔斷器在這兩個平台沒有作用。 |
 | `PreToolUse` · **工作區範圍守衛 (Workspace Guard)** | 選用（`*_MITOSIS_AUTO_ALLOW=1`）：工作區內的檔案讀寫與安全命令自動放行（僅限 Claude Code 與 agy；Codex 會拒絕沒有 `updatedInput` 的放行，因此在 Codex 上守衛只會拒絕）；跨出工作區、提權或危險指令轉為詢問（`ask`；Codex 沒有 `ask`，改為 `deny`）。未啟用時不表態：Claude Code 端回傳 `{}`，沿用使用者原本的權限規則與提示（1.5.0 以前回傳 `allow`，會略過權限提示）。 |
 | `PostToolUse` · `PostToolUseFailure`（Claude Code） | 配對新建子代理中繼資料，並更新連續失敗計數。擷取 `SubagentHandback` 回報（auto mode）。失敗的 Bash 以 `PostToolUseFailure` 送達，只計數、僅供觀察。 |
 | `SubagentStop` / `Stop` | 回合閒置且仍有存活的分支工作樹時，提醒主代理先合併或捨棄變更並清理。Claude Code 與 Codex（僅限已綁定的子代理，Codex 以 `CODEX_MITOSIS_ENFORCE_REPORT=0` 關閉）的 `SubagentStop` 另會檢查 `flash-lite-scout` / `flash-worker` 是否以四標頭回報結尾，不符時每個子代理退回一次要求重寫（`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 關閉）。 |
@@ -479,7 +479,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_ESCALATE` | `1` | 設為 `0` 時關閉失敗升級（預設：偵察者回報 `STATUS: FAILED` 或 `BLOCKED` 後，下一次路由到偵察者的派發改由執行者處理，只升級一次，限 3 次派發或 30 分鐘內）。 |
 | `*_MITOSIS_ESCALATE_PRIMARY` | `0` | 設為 `1` 時，失敗的執行者之後的下一次派發改用主核模型（僅 Claude Code）。 |
 | `*_MITOSIS_APPEND_REPORT_FORMAT` | `1` | 設為 `0` 時，不再為缺少 `REPORT FORMAT` 區塊的子代理提示詞自動補上（agy `invoke_subagent`、Claude Code `Agent`）。 |
-| `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。agy 1.5.0 的 print 模式不理會守衛給的授權：headless 寫檔請用 `agy --mode accept-edits`，或在 `--settings` 加 `write_file(<完整絕對路徑>)` 規則（`**`、`*` 不會比對）。只有實際路徑在 `/tmp` 下才不需要這兩者。 |
+| `*_MITOSIS_AUTO_ALLOW` | `0` | 設為 `1` 時啟用互動模式下的工作區範圍自動放行守衛。agy 1.5.0 的 print 模式不理會守衛給的授權：headless 寫檔請用 `agy --mode accept-edits`，或在 `--settings` 加 `write_file(<完整絕對路徑>)` 規則（`**`、`*` 不會比對）。只有實際路徑在 `/tmp` 下才不需要這兩者。此守衛只是讀取指令文字的便利功能，不是安全邊界：shell 語法可以騙過它，例如 `cat ../"../x"`、大括號展開、萬用字元與符號連結。 |
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise`（預設，未知值亦同）不阻擋，每種情況每回合附一次建議；`enforce` 恢復單回合修改上限與「修改後跑測試」的拒絕；`off` 停用預算。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |

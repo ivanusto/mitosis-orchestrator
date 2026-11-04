@@ -482,11 +482,11 @@ def main() -> None:
     finally:
         _release_state_locks()
     _debug_log(payload, mode, result)
-    capture.write(capture_snapshot, mode, result)
 
     sys.stdout.write(json.dumps(result) + "\n")
     sys.stdout.flush()
     _heartbeat(payload, mode, error_class, replacement_chars)
+    capture.write(capture_snapshot, mode, result)  # after the response: a capture problem must not delay it
     _flush_otel()  # after the response and after the locks are released
 
 

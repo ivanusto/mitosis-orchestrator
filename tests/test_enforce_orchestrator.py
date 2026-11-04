@@ -1248,7 +1248,7 @@ class TestClaudeCodeToolGuards(ClaudeHookBase):
         self.assertEqual(res, {})  # pass-through: no permission verdict
 
     def test_claude_circuit_breaker(self):
-        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
+        os.environ["CLAUDE_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
         eo.handle_post_tool_use(dict(self.payload, tool_name="Bash", error="bash error 1"))
         eo.handle_post_tool_use(dict(self.payload, tool_name="Bash", tool_result={"exit_code": 1, "output": "failed"}))
         st = eo.load_state(self.payload)
@@ -1528,7 +1528,7 @@ class TestCodexEngine(HookBase):
         self.assertIn("Branch worktrees are still active", res_tree.get("reason", ""))
 
     def test_circuit_breaker_codex_tools(self):
-        os.environ["AGY_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
+        os.environ["CODEX_MITOSIS_CIRCUIT_BREAKER_MODE"] = "enforce"
         state = eo.load_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name})
         state["consecutive_failures"] = 2
         eo.save_state({"thread_id": "thr_test", "artifactDirectoryPath": self.tmp.name}, state)

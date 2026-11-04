@@ -966,7 +966,36 @@ def scout_command_is_read_only(command: str, strict_windows: bool = False) -> Tu
     return True, ""
 
 
-_CHANGES_DIR_RE = re.compile(r"(?:^|[\s;&|(])(?:cd|pushd)(?:\s|$)")
+# A conservative word check, not a shell parser: a directory change is any word cd, pushd, chdir or popd
+# (quoted, escaped, inside sh -c or a backtick, or os.chdir) and the options -C, --directory and --chdir.
+_CHANGES_DIR_RE = re.compile(
+    r"(?<![\w.-])(?:cd|pushd)(?![\w.-])"
+    r"|(?<![\w-])(?:chdir|popd)(?![\w-])"
+    r"|(?:^|\s)(?:-C|--directory|--chdir|--cwd)(?![\w-])"
+)
+_CD_WORD_RE = re.compile(r"(?<![\w.-])(?:cd|pushd|chdir)(?![\w.-])")
+_POPD_RE = re.compile(r"(?<![\w-])popd(?![\w-])")
+_WIN_CHDIR_RE = re.compile(r"(?<![\w.-])(?:cd|chdir|pushd|set-location|sl)(?![\w-])", re.I)
+# The target of the directory change itself is judged by _check_windows_paths from the real cwd; what
+# follows a change is read from a cwd that has moved, so only a .. segment outside the target counts.
+_WIN_CHDIR_TARGET_RE = re.compile(
+    r"(?<![\w.-])(?:cd|chdir|pushd|set-location|sl)(?![\w-])(?:\s+/d)?(?:\s*(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+))?", re.I
+)
+_WIN_DOTDOT_SEGMENT_RE = re.compile(r"(?:^|[\\/\s\"'=:(,])\.\.[\\/]|[\\/]\.\.(?:[\\/\s\"')]|$)")
+# Reasons that start with this come from a guess about the command text, not from a path that was seen to
+# escape. Codex turns "ask" into a denial, so for Codex these give no opinion instead.
+HEURISTIC_REFUSAL_PREFIX = "cannot verify the working directory: "
+
+
+def _directory_change_unknown(command: str) -> str:
+    """Reason when the command moves to a directory this check cannot name, else ''."""
+    if _POPD_RE.search(command):
+        return "popd returns to a directory that was not seen"
+    for m in _CD_WORD_RE.finditer(command):
+        arg = re.split(r"[;&|\n)]", command[m.end():], maxsplit=1)[0].strip(" \t'\"")
+        if not arg or arg == "-" or "$" in arg or "`" in arg:
+            return "a directory change without a plain target"
+    return ""
 
 
 def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tuple[bool, str]:
@@ -985,9 +1014,12 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
             return False, why
     win_mode = _windows_mode(roots)
     if win_mode:
+        original = command
         ok, why, command = _check_windows_paths(command, cwd, roots)
         if not ok:
             return False, why
+        if _WIN_CHDIR_RE.search(original) and _WIN_DOTDOT_SEGMENT_RE.search(_WIN_CHDIR_TARGET_RE.sub(" ", original)):
+            return False, HEURISTIC_REFUSAL_PREFIX + "a directory change with a .. segment may leave the workspace"
     home = os.path.expanduser("~")
     for m in ABS_PATH_TOKEN_RE.finditer(command):
         token = m.group(1)
@@ -1002,6 +1034,9 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
             return False, f"path {token!r} is outside the workspace"
     if win_mode:
         return True, ""
+    unknown = _directory_change_unknown(command)
+    if unknown:
+        return False, HEURISTIC_REFUSAL_PREFIX + unknown
     base = Path(os.path.expanduser(cwd)).resolve() if cwd else (roots[0] if roots else Path.cwd())
     levels_up = 0
     for m in DOTDOT_TOKEN_RE.finditer(command):
@@ -1016,7 +1051,7 @@ def command_stays_in_workspace(command: str, cwd: str, roots: List[Path]) -> Tup
         for _ in range(levels_up):
             candidate = candidate.parent
         if not _within_roots(str(candidate), roots):
-            return False, "relative paths after a directory change may escape the workspace"
+            return False, HEURISTIC_REFUSAL_PREFIX + "relative paths after a directory change may escape the workspace"
     return True, ""
 
 
