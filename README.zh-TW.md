@@ -66,7 +66,7 @@ codex plugin marketplace add ~/mitosis-orchestrator
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 # 接著在 ~/.codex/config.toml 的 [features] 設 hooks = true，開啟 Codex 並在 /hooks 核准外掛 hook
 
-# 更新（重新 add 會刷新外掛快照）。接著開一次 Codex，若要求 review hook 請接受：
+# 更新（重新 add 會刷新外掛快照）。每次更新都需要 hook review：請開一次 Codex 並接受。
 # 接受前 `codex exec` 只會顯示 `hook: ... Failed`，工作照常繼續但沒有守衛，即使 hooks 檔沒有變動也一樣
 git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
@@ -123,7 +123,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.4.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.5.0)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -186,7 +186,7 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未核准的 hook 不會執行，工作階段仍會繼續，也就沒有守衛。外掛更新後，即使 hooks 檔沒有變動，Codex 也可能要求重新 review，所以更新後請確認 `hook:` 行顯示 `Completed`。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
+請在 `config.toml` 啟用 hooks 功能，接著開啟 Codex，在 `/hooks` 核准外掛 hook；未核准的 hook 不會執行，工作階段仍會繼續，也就沒有守衛。**在 Codex 上，每次外掛更新都需要 review**，即使 hooks 檔沒有變動，因為 Codex 對整個外掛目錄計算雜湊（排除 `__pycache__`、`.venv`、`*.pyc` 與 `*.egg-info`）。更新後：執行 `python3 scripts/mitosis-doctor.py`（接受前會回報 `trust.bundle` FAIL，這是正確的），開啟 Codex 並接受 review，再執行一次 doctor（OK），並確認 `hook:` 行顯示 `Completed`。MCP server、agent 角色與 profile 仍需執行 `setup-codex.py`。
 
 Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `collaboration<工具名>`（`collaborationspawn_agent`、`collaborationfollowup_task`、`collaborationsend_message`），而且 `message` 是加密字串。1.8.0 起 hook 會去掉 namespace 前綴，用 `task_name` 登記每個子代理（也就是 `followup_task` / `send_message` 的 `target`）；因為讀不到內容，送給偵察子代理的追加指令改為直接拒絕，不再逐字檢查。2.0 起，子代理自己的 hook（帶的是 `agent_id`，不是 `task_name`）會透過子代理 rollout 的第一行（`session_meta.agent_path`）綁定到對應紀錄，否則綁定到同角色中唯一尚未綁定的紀錄；`SubagentStop` 會更新該筆紀錄（stops、`last_turn_id`、`report_ok`）。2.1 起，若已綁定的偵察或執行子代理最後訊息不是四標頭回報（常見原因是尖端模型在讀不到的 `spawn_agent` 訊息裡自訂了標頭），會退回一次（`{"decision":"block"}`，Codex 讓子代理重答，第二次 `SubagentStop` 帶 `stop_hook_active: true`）。已於 Codex 0.163 驗證：`SubagentStop` 退回後，子代理會重新回答，主代理收到的是修正後的回報。代理定義檔註明四標頭優先於任務訊息，SessionStart 提示也會告訴主代理不要自訂回報標頭。在 Codex 執行環境設定 `CODEX_MITOSIS_DEBUG=1`，每次 hook 呼叫（原始工具名、輸入鍵、state）都會記到 `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`。
 
@@ -222,10 +222,11 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 - **效果。** 下一次路由到偵察者的派發改由執行者處理（規則 `escalation`），只升級一次，限 3 次派發或 30 分鐘內。已升級的派發不會再次升級。未指定類型的呼叫不會被加上 `subagent_type`，只會被指定模型。
 - **選用。** `*_MITOSIS_ESCALATE_PRIMARY=1`（僅 Claude Code）會讓失敗的執行者之後的下一次派發改用主核模型。`*_MITOSIS_ESCALATE=0` 關閉升級。
 - **無頭驗證。** 被要求讀取不存在檔案的偵察者回報 `BLOCKED`，同一個標為偵察者的重新派發改以 sonnet 的 `mitosis-orchestrator:flash-worker` 執行（該工作階段花費 0.25 美元）。
+- 2.5.0 起，當不會再有重試時，偵察者宣告的 `BLOCKED` 或 `FAILED` 不需要日誌 URI 就會被採信（先前它無法通過驗證，在互動式 Claude Code 的背景路徑上也不會啟動升級）。`CLAUDE_MITOSIS_ENFORCE_REPORT=0` 不再關閉背景升級，未指定型別的已釘定代理也會升級，包在程式碼區塊裡的回報會觸發，`COMPLETED` 回報內被引用的 `- STATUS: FAILED` 行則不會。執行者仍須附 URI。
 - 2.3 起背景 `Agent` 啟動（`{"isAsync": true, "agentId": ...}`）也會被登記，因此 `SendMessage` 的偵察者防護看得到它們。
 
 ### 2. 有界四標頭子代理回報合約 (Bounded 4-Header Report Contract)
-所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結）：
+所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，執行者在狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結；偵察者是唯讀的，無法寫日誌，所以它宣告的 `BLOCKED` 或 `FAILED` 不需要連結也會被接受）：
 
 <!-- BEGIN GENERATED: report-format -->
 ```markdown
@@ -354,17 +355,33 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 
 ---
 
+## 2.5.0 有什麼變動
+
+**更新後。** Codex 請開啟一次並接受 hook review；接受前 doctor 會顯示 `trust.bundle` FAIL。Claude Code 請開新的 session。詳見 [CHANGELOG.md](./CHANGELOG.md)。
+
+**偵察者指令檢查（安全性）。** 白箱審查找到 7 個成因共 28 個案例，檢查會放行寫入儲存庫、或可能導致執行程式的指令：`git config --get --no-get core.x val`（git 2.46 之前會寫入設定；之後 `core.fsmonitor` 會讓 `git status` 執行程式）、`git branch --list --no-list`、`git tag --format --list`、經由 `--show-signature`、`%G` 與 `%(signature` 啟動 gpg、`--diff-merges=remerge`、`file -z`、ugrep 的 `---`，以及 `git -C` 位置的萬用字元。經 MCP server 啟動的 Codex 偵察者有作業系統沙箱（`--sandbox read-only`）；Claude Code 的偵察者沒有。見 [SECURITY.md](./SECURITY.md)。
+
+**Codex hook 信任。** 每次外掛更新都需要 review（Codex 對整個外掛目錄計算雜湊）。Doctor 現在離線判定，所以健康的 Codex 可以回傳 0。
+
+**失敗升級。** 當不會再有重試時，偵察者宣告的 `BLOCKED` 或 `FAILED` 不需要日誌 URI 就會被採信（它無法寫日誌）。
+
+**更正。** `write_stdin` 無法靠修改 matcher 解決（Codex 不會把它送給 hook）；fish 不會出現這個問題。
+
+**額外開銷實驗。** 在短的 lookup 任務上，`/orchestrate` 比關閉組高 19.3%（未完全分離），已載入的外掛為 0.0%；靜態前綴約解釋前者的四分之一。不主張省錢。
+
+---
+
 ## 外掛是否真的生效？（2.4.0）
 
 2.4.0 關心的是外掛是否真的生效，而不是路由準確度。
 
 **實測使用情形。** 一台機器，2026-10-23 至 2026-11-02，互動式 Claude Code，使用 `mitosis-cost-report.py --fleet`：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%）；Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中有 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。限制：單一使用者、單一機器、11 天、牌價。
 
-**Doctor。** `python3 scripts/mitosis-doctor.py` 逐平台檢查已安裝的外掛，輸出 OK、WARN、FAIL、UNKNOWN 或 SKIP。它以各平台的 payload（含 cp950 主控台下的中文文字）執行每個安裝的實際 hook 指令鏈，並讀取 heartbeat。無法判定的項目一律是 UNKNOWN，絕不是 OK。結束碼 0 表示全部 OK 或 SKIP，1 表示有 WARN 或 UNKNOWN，2 表示有 FAIL。健康的 Codex 或 agy 安裝仍會回傳 1，因為 Codex 的信任雜湊與 agy 子代理的模型無法檢查。旗標：`--platform`、`--json`、`--root`、`--home`，以及 `--live`（實際跑一個 session，會花錢）。測試以故障注入重現它要抓的問題：Codex 命名空間、agy 扁平參數、cp950 與缺少 Python。
+**Doctor。** `python3 scripts/mitosis-doctor.py` 逐平台檢查已安裝的外掛，輸出 OK、WARN、FAIL、UNKNOWN 或 SKIP。它以各平台的 payload（含 cp950 主控台下的中文文字）執行每個安裝的實際 hook 指令鏈，並讀取 heartbeat。無法判定的項目一律是 UNKNOWN，絕不是 OK。結束碼 0 表示全部 OK 或 SKIP，1 表示有 WARN 或 UNKNOWN，2 表示有 FAIL。2.5.0 起 doctor 以本機檔案重新計算 Codex hook 信任雜湊（`trust.<event>` 列為宣告雜湊，`trust.bundle` 列為內容雜湊；舊的 `trust_hash` UNKNOWN 列已移除）。相符即為定論；不相符時，只有雜湊方式已對照原始碼確認的 Codex 版本（0.166，POSIX）才是確定的 FAIL，其他版本為 UNKNOWN。所以健康的 Codex 安裝現在可以回傳 0，agy 仍回傳 1，因為其子代理的模型無法檢查。更新後在 Codex 接受 review 之前，`trust.bundle` 會是 FAIL。資訊列 `heartbeat.report`（被拒回報的類別）與 `codex.scout_shell_rules`（Codex 偵察者適用哪一組規則）不會產生 WARN。旗標：`--platform`、`--json`、`--root`、`--home`，以及 `--live`（實際跑一個 session，會花錢）。測試以故障注入重現它要抓的問題：Codex 命名空間、agy 扁平參數、cp950 與缺少 Python。
 
 **釘定驗證。** Claude Code 在 `SubagentStop` 比對釘定的模型與子代理 transcript，並在主核的 `Stop` 警告一次（`SubagentStop` 上的 `systemMessage` 不會顯示）。Codex 比對子代理 rollout 最後一個 `turn_context`，只記錄狀態。agy 無法驗證。`CLAUDE_MITOSIS_VERIFY_PIN=0` 與 `CODEX_MITOSIS_VERIFY_PIN=0` 可關閉。
 
-**Heartbeat。** 每次 hook 執行都會更新使用者快取目錄下的 `heartbeat-<platform>.json`：只有計數器與工具名稱，沒有提示詞、路徑或訊息。`MITOSIS_HEARTBEAT=0` 關閉，`MITOSIS_HEARTBEAT_DIR` 改位置。
+**Heartbeat。** 每次 hook 執行都會更新使用者快取目錄下的 `heartbeat-<platform>.json`：只有計數器與工具名稱，沒有提示詞、路徑或訊息。2.5.0 起另有 `report_bad_scout` 與 `report_bad_worker`：依原因類別（固定的類別名稱清單，絕不含回報內容）、按每次停止計數的被拒子代理回報。`MITOSIS_HEARTBEAT=0` 關閉，`MITOSIS_HEARTBEAT_DIR` 改位置。
 
 **成本報表。** `--fleet`（可搭配 `--since`、`--until`、`--entrypoint`）回報委派率、每個子代理實際使用的模型與未釘定支出。專案目錄編碼錯誤已修正：任何含底線的工作目錄在預設模式下都會失敗，`smoke-claude.py` 也一樣。
 
@@ -392,11 +409,26 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | fix | 0.8240 | 0.8159 | 開啟組低 1% | INCONCLUSIVE |
 
 1. 判定依照封存的規則。依事先登記的行動，技能現在說明何時不該使用，2.5 也不投資在委派率上。
-2. 它量到什麼：開啟組 9 次中有 7 次即使明確使用 `/orchestrate` 也沒有派出任何子代理，子代理成本一次為 0.05 美元、另一次為 0.35 美元。所以額外成本多半來自載入技能與 hook 情境，而不是子代理。這是由 `Agent` 次數與主核成本推論而來，並非對委派本身的量測。
+2. 它量到什麼：開啟組 9 次中有 7 次即使明確使用 `/orchestrate` 也沒有派出任何子代理，子代理成本一次為 0.05 美元、另一次為 0.35 美元，所以額外成本不是子代理造成的。本項先前曾推論額外成本「多半來自載入技能與 hook 情境」，那是由 `Agent` 次數與主核成本推出的，並非量測。2.5 的額外開銷實驗（下方）量測了這件事，依其封存公式只解釋約四分之一，其餘未能判定。
 3. 限制：每組 n=3、3 次未校正的比較，ops 只是剛好越過 10% 線，絕對差距約 0.05 美元。任務很短（尖峰情境 40K 至 90K，真實 session 的中位數為 274K），所以對長 session 與情境保護不置一詞。
 4. 第一次嘗試在一次計分後停止，因為防竄改檢查把 hook 寫出的位元組碼當成變更。測試工具修正並重新封存；那次執行（成功，0.70 美元，關閉組）被捨棄，沒有重用。
 
 這些結果不支持任何「此外掛省錢」的說法。本實驗沒有量測的是：隔離主核情境，以及對真正可平行的工作做平行處理。
+
+### 額外成本從哪裡來？（額外開銷實驗，2.5）
+
+事先登記於 `evals/overhead/PROTOCOL.md`，以外掛 commit `368dc34` 封存。同樣的 lookup 任務，三個組別（外掛關閉；外掛已載入但不使用 `/orchestrate`；`/orchestrate`）乘以三次重複，`opus` `medium`，單一機器，6.99 美元，9 次全部成功。詳見 `evals/overhead/RESULTS.md`。
+
+| 組別 | 中位數（美元） | 相對關閉組 | 比較標籤 |
+| :--- | ---: | :--- | :--- |
+| 關閉 | 0.6442 | | |
+| 已載入 | 0.6444 | +0.0002（0.0%） | INCONCLUSIVE |
+| `/orchestrate` | 0.7684 | +0.1242（+19.3%），未完全分離 | INCONCLUSIVE |
+
+- 依封存規則的結果：NO TRIM。第一次呼叫的前綴相對關閉組多 786 token（已載入）與 3,238 token（`/orchestrate`）。
+- 依封存公式，前綴多出的文字解釋 `/orchestrate` 差額的 24.5%，輸出 token 解釋 1.4%。token 分解與有效成本在每個組別都留下可見的缺口。所以載入技能與 hook 情境約解釋四分之一，其餘未能判定。
+- 尖峰情境中位數：關閉組 58.6K，`/orchestrate` 66.9K。
+- 上方對照實驗的 +58% 在這次以這個規模執行時沒有重現。先前的 HARM 判定在其自身封存規則下仍然成立。n=3、短任務、單一機器。
 
 ---
 

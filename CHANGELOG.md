@@ -1,5 +1,74 @@
 # Changelog
 
+## 2.5.0 - 2026-11-04
+
+**After updating, do this.** On Codex, open Codex once and accept the hook review, then run `python3 scripts/mitosis-doctor.py`. Until you accept it, doctor reports `trust.bundle` FAIL for Codex and `codex exec` shows `hook: ... Failed` with no guard. That FAIL is correct, not a doctor bug. On Claude Code, start a new session. The scout command check below is a security fix; update.
+
+### Security
+**The scout's shell check allowed commands that wrote to the repository or could lead to running a program.** A white-box review of `scout_command_is_read_only` (28 cases in 7 causes) found them. The review read man pages and source; the three git cases were then verified on real git 2.43.0.
+- `git config --get --no-get core.x val` writes `.git/config` on git before 2.46 (`--no-get` clears the read mode, and two operands then mean set). `core.fsmonitor` set this way makes the allowed `git status` run a program. `--file` makes it write any path.
+- `git branch --list --no-list newb` and `git tag --format --list newt` create refs.
+- Programs started by an option or a placeholder: gpg through `git log --show-signature`, `%G` and `%(signature` in a git format, and `--diff-merges=remerge`; the decompressors behind `file -z`; a ugrep `---FILE` config; a glob in the `git -C` value, which expands into the subcommand slot.
+
+**Affected versions.** `scout_command_is_read_only` was run from detached checkouts of v1.5.1, v2.3.2, v2.4.0 and v2.4.1, one process each, on six commands. No other tag was tested.
+- Allowed by all four: `git config --get --no-get core.x val`, `git tag --format --list newt`, `git log --show-signature`, `git log --diff-merges=remerge`, `file -zS x`.
+- `git branch --list --no-list newb`: denied (as a branch create) by v1.5.1, v2.3.2 and v2.4.0, allowed by v2.4.1.
+
+A Codex scout started through the MCP server runs under `--sandbox read-only`, which is an OS sandbox. A Claude Code scout has none behind this check, and the permission mode of your agent still applied unless `*_MITOSIS_AUTO_ALLOW=1` was set. Update.
+
+### Codex hook trust: root cause and a doctor that can decide
+- **Every plugin update requires a hook review on Codex.** Codex computes a content hash over the whole plugin directory (excluding `__pycache__`, `.venv`, `*.pyc` and `*.egg-info`), so any changed file changes it, whether or not `hooks/` changed. This replaces the earlier wording "may ask again".
+- **Why 2.4.1 looked fine in a test and failed in production.** A config without `trusted_content_hash` is compared with a baseline file under `~/.codex/.hook-trust/`, and a missing baseline is written on the first run. An isolated `CODEX_HOME` therefore passed while the real one failed. Source: Codex 0.166 `plugin_fingerprint.rs` and `plugin_trust.rs`.
+- **Doctor decides this from local files.** Rows `trust.<event>` (declaration hash) and `trust.bundle` (content hash) replace the `trust_hash` UNKNOWN row. A match is conclusive. A mismatch is conclusive (FAIL) only for Codex versions listed in `CODEX_TRUST_VERIFIED` (0.166) on POSIX; on any other version it is UNKNOWN. Doctor never starts Codex.
+- Reproduced offline: the 2.4.1 incident state now gives FAIL where the 2.4.1 doctor said OK. Checked against Codex `hooks/list` with `tests/codex_trust_oracle.py` (manual, not run by the test suite): 7 of 7 on 0.166.
+- Post-update path: update, doctor FAIL, open Codex and accept the review, doctor OK, `hook:` lines show `Completed`. No plugin script writes trust hashes; the acceptance is yours.
+
+### Fixed
+- **Failure escalation.** A scout is read-only and cannot write a log, so a scout that reported `BLOCKED` or `FAILED` without a `file://` log URI failed report validation, and on interactive Claude Code's background path no escalation started. Once no retry can come, the declared status is now trusted. Workers still need the URI. The MCP server applies the same rule.
+- `CLAUDE_MITOSIS_ENFORCE_REPORT=0` no longer turns off background escalation. Untyped pinned agents escalate. A report wrapped in a code fence arms escalation. A quoted `- STATUS: FAILED` line inside a `COMPLETED` report no longer arms it.
+
+### Behaviour changes
+- **PowerShell on a POSIX host.** Codex `exec_command` has a model-set `shell` argument that the hook cannot see. On a POSIX host where `pwsh` or `powershell` is reachable, a Codex scout now gets the strict character set (no quotes, backslashes, redirects, globs, `;` or `&`), so quoted patterns are denied there and the message says why. Read-off: strict mode has not been checked against a real `pwsh`, and PowerShell 7 stays untested.
+- **New denials (scout).** Words starting `---` for `grep`, `egrep` and `fgrep`; `file -z`, `-Z`, `-S`; `git log --diff-merges=...`; `--show-signature`; any `%G` or `%(signature` in `git log`, `show`, `shortlog`, `reflog`, `branch` and `tag` words (this also denies harmless text such as `%%G`); `git config --get --no-*`; too many operands; `--list -f x` (write `--file=x`); `git branch NAME` or `--list` after an option that takes a value; `date -d x*`; `git -C r* ...`. A denial says what to change.
+
+### Correction
+- **`write_stdin`.** Earlier text said a matcher change would fix it. That is false: in Codex 0.166 `write_stdin.rs`, `pre_tool_use_payload` returns None by design, so no matcher can see it. It only sends bytes to a process that already passed the check, and Codex sets `PAGER=cat`, `GIT_PAGER=cat` and `TERM=dumb`.
+- **Fish.** Earlier text said fish is "not modelled". Codex falls back to zsh for fish (`fish_fallback_to_zsh`) and Claude Code selects bash or zsh, so it does not arise.
+
+### Added
+- Heartbeat counters `report_bad_scout` and `report_bad_worker`: rejected subagent reports by reason class (an allowlist of class names, no report content), counted per stop, so a report that is blocked and then fixed counts twice.
+- Doctor rows `heartbeat.report` (rejected report classes) and `codex.scout_shell_rules` (which rule set a Codex scout gets). Both are info rows and never WARN.
+- `tests/scout_oracle.py` and `tests/scout_census.py` default to safe loads: oracle 4 workers, census 2, a 4 GiB per-child limit (`--child-as-gib`, 0 disables), and no new run while MemAvailable is under `--min-available-gib` (default 3; runs not started are counted as `skipped_for_memory`). Reason: a full-speed fuzz with 20 workers is suspected, not proven, of pushing available memory down and getting a local inference process killed on one machine. The oracle also flags a glob in a `git -C`, subcommand or `date` value slot.
+- `evals/overhead/`: pre-registered experiment on where the extra cost of the plugin comes from on a short task (below).
+
+### Overhead experiment
+`evals/overhead/` (sealed; plugin commit `368dc34`), lookup task, 3 arms x 3 repeats, `opus` at `medium`, one machine, 6.99 USD. All 9 runs succeeded.
+
+| arm | median USD | against off | compare label |
+| :--- | ---: | :--- | :--- |
+| off | 0.6442 | | |
+| loaded (plugin present, no `/orchestrate`) | 0.6444 | +0.0002 (0.0%) | INCONCLUSIVE |
+| `/orchestrate` | 0.7684 | +0.1242 (+19.3%), not completely separated | INCONCLUSIVE |
+
+- Outcome by the sealed rule: NO TRIM.
+- First-call prefix (probe): `loaded` +786 tokens and `/orchestrate` +3,238 tokens against off.
+- By the sealed formula the static prefix explains 24.5% of the `/orchestrate` difference and output tokens 1.4%. The token decomposition leaves a visible gap to the effective cost in every arm. So loading the skill and hook context explains about a quarter; the rest is not determined.
+- Median peak context 58.6K (off) against 66.9K (`/orchestrate`).
+- The +58% of the earlier comparison was not reproduced at this size in this run. The earlier HARM verdict stands under its own sealed rule. n=3, short task, one machine.
+- This is not a savings claim. The README, `docs/cost*.md` and a dated note in `evals/compare/RESULTS.md` now say "probably comes from loading the skill and hook context" was an inference, not a measurement.
+
+### Verification
+- 846 tests at `368dc34` (2 skipped), against 755 at 2.4.1.
+- Routing: 1,290 cases, 0 flips against `c887e99`; `routing.py` is unchanged in the range.
+- Oracle fuzz, 4 seeds x 20,000 strings = 80,000: 7,751 accepted, 6,451 unique, 0 violations on bash, dash and busybox sh in bwrap. zsh is not installed. The count is lower than 2.4.1's 280,000 because concurrency was limited.
+- Discrimination: the 2.4.0 guard on 5,000 strings gives 664 oracle violations, so the oracle does tell versions apart.
+- Census: 52 programs, 15,680 accepted runs, 0 violations, 0 network, 6 timeouts (all `file`), 0 `skipped_for_memory`.
+- Blind set 3 (sealed, sha256 `589f6116...94c3`): `c887e99` scored 60/60 and 39/40, and the candidate `368dc34` scored 60/60 and 39/40. This set did not catch what the white-box review caught.
+- Phase 0 measurement of what grows the primary's context was run on one machine (188 interactive sessions). A long-session experiment has not been run.
+
+### Not covered
+PowerShell 7 was not run. Git options were reviewed by hand from man pages, not enumerated, so more options of the same kind may exist. zsh was not run this round. `git status` and `git diff` may refresh `.git/index`; this is accepted (see SECURITY.md). Everything else in the 2.4.1 list still holds: the check reads text and is not a sandbox.
+
 ## 2.4.1 - 2026-11-03
 
 ### Security

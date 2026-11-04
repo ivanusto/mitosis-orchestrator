@@ -11,7 +11,7 @@
 ```bash
 python3 -m unittest discover -s tests
 python3 scripts/sync-generated.py --check
-python3 scripts/mitosis-doctor.py   # after changing hooks or install files (exit 1 is normal for Codex and agy)
+python3 scripts/mitosis-doctor.py   # after changing hooks or install files (a healthy Codex can exit 0 once its hook review is accepted; agy stays UNKNOWN, exit 1)
 ruff check scripts tests
 vermin -t=3.8- --no-tips scripts
 agy plugin validate . --strict

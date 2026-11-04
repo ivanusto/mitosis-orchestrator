@@ -66,8 +66,8 @@ codex plugin marketplace add ~/mitosis-orchestrator
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 # Then set hooks = true under [features] in ~/.codex/config.toml, open Codex and approve the plugin hooks in /hooks
 
-# Update (re-adding refreshes the plugin snapshot). Then open Codex once and accept the hook review if it asks:
-# until you do, `codex exec` shows `hook: ... Failed` and runs with no guard, even if the hooks file did not change
+# Update (re-adding refreshes the plugin snapshot). Every update needs a hook review: open Codex once and accept it.
+# Until you do, `codex exec` shows `hook: ... Failed` and runs with no guard, even if the hooks file did not change
 git -C ~/mitosis-orchestrator pull && python3 ~/mitosis-orchestrator/scripts/setup-codex.py && codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
@@ -123,7 +123,7 @@ Requirements: Python 3.11+ (standard library only; `tomllib` is used by the Code
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.4.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.5.0)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -186,7 +186,7 @@ codex plugin marketplace add <path-to-repo>
 codex plugin add mitosis-orchestrator@mitosis-orchestrator
 ```
 
-Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; a hook that is not approved does not run and the session carries on with no guard. Codex may ask for review again after any plugin update, even when the hooks file did not change, so after updating check that `hook:` lines show `Completed`. `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
+Enable the hooks feature in `config.toml`, then open Codex and approve the plugin hooks in `/hooks`; a hook that is not approved does not run and the session carries on with no guard. **Every plugin update requires a review on Codex**, even when the hooks file did not change, because Codex hashes the whole plugin directory (excluding `__pycache__`, `.venv`, `*.pyc` and `*.egg-info`). After updating: run `python3 scripts/mitosis-doctor.py` (it reports `trust.bundle` FAIL until you accept, which is correct), open Codex and accept the review, run doctor again (OK), and check that `hook:` lines show `Completed`. `setup-codex.py` is still needed for the MCP server, agent roles and profiles.
 
 Codex 0.163 (multi-agent v2) names its agent tools `collaboration<tool>` in hook payloads (`collaborationspawn_agent`, `collaborationfollowup_task`, `collaborationsend_message`) and passes their `message` as an encrypted token. Since 1.8.0 the hook strips the namespace, registers each spawn under its `task_name` (the address `followup_task` / `send_message` use in `target`), and, because the text cannot be read, refuses follow-ups to a scout instead of checking them. Since 2.0 a child's own hooks (which carry an `agent_id`, not the `task_name`) are bound to its record through the first line of the child rollout (`session_meta.agent_path`), else through the only unbound record of the same role; `SubagentStop` updates that record (stops, `last_turn_id`, `report_ok`). Since 2.1 it also sends a bound scout/worker back once (`{"decision":"block"}`; Codex re-runs the child, and the second `SubagentStop` carries `stop_hook_active: true`) when its final message is not the four-header report, which happens when the primary dictates its own headings in the hidden `spawn_agent` message. Verified on Codex 0.163: a `SubagentStop` block makes the child answer again, and the parent receives the corrected report. The agent definitions say the four headers win over the task message, and the SessionStart notice tells the primary not to dictate headings. Set `CODEX_MITOSIS_DEBUG=1` in the environment Codex runs in to log every hook call (raw tool name, input keys, state) to `$TMPDIR/mitosis-orchestrator/<session>/mitosis_orchestrator_debug.log`.
 
@@ -223,9 +223,10 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 - **Opt-in.** `*_MITOSIS_ESCALATE_PRIMARY=1` (Claude Code only) also sends the next dispatch after a failed worker to the primary model. `*_MITOSIS_ESCALATE=0` turns escalation off.
 - **Headless check.** A scout told to read a missing file reported `BLOCKED`, and the same scout-typed re-dispatch ran as `mitosis-orchestrator:flash-worker` on sonnet (0.25 USD session).
 - Since 2.3 background `Agent` launches (`{"isAsync": true, "agentId": ...}`) are also registered, so the `SendMessage` scout guard sees them.
+- Since 2.5.0 a scout's declared `BLOCKED` or `FAILED` is trusted without a log URI once no retry can come (before, it failed validation and, on interactive Claude Code's background path, no escalation started). `CLAUDE_MITOSIS_ENFORCE_REPORT=0` no longer turns off background escalation, untyped pinned agents escalate, a fenced report arms, and a quoted `- STATUS: FAILED` line inside a `COMPLETED` report does not. Workers still need the URI.
 
 ### 2. Bounded 4-Header Subagent Report Contract
-All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`):
+All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and, for workers, a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`; a scout is read-only and cannot write a log, so its declared `BLOCKED` or `FAILED` is accepted without one):
 
 <!-- BEGIN GENERATED: report-format -->
 ```markdown
@@ -348,17 +349,33 @@ The 1.5.1 "zero dangerous" result did not generalise: three fresh blind sets eac
 
 ---
 
+## What changed in 2.5.0
+
+**After updating.** On Codex, open Codex once and accept the hook review; doctor shows `trust.bundle` FAIL until you do. On Claude Code, start a new session. Details: [CHANGELOG.md](./CHANGELOG.md).
+
+**Scout command check (security).** A white-box review found 28 cases in 7 causes where the check allowed a command that writes to the repository or can lead to running a program: `git config --get --no-get core.x val` (writes config on git before 2.46; `core.fsmonitor` then runs a program on `git status`), `git branch --list --no-list`, `git tag --format --list`, gpg through `--show-signature`, `%G` and `%(signature`, `--diff-merges=remerge`, `file -z`, ugrep `---` and a glob in the `git -C` slot. A Codex scout started through the MCP server has an OS sandbox (`--sandbox read-only`); a Claude Code scout has none. See [SECURITY.md](./SECURITY.md).
+
+**Codex hook trust.** Every plugin update needs a review (Codex hashes the whole plugin directory). Doctor now decides this offline, so a healthy Codex can exit 0.
+
+**Failure escalation.** A scout's declared `BLOCKED` or `FAILED` is trusted without a log URI (it cannot write one) once no retry can come.
+
+**Correction.** `write_stdin` cannot be fixed by a matcher change (Codex does not send it to hooks); fish does not arise.
+
+**Overhead experiment.** On a short lookup task `/orchestrate` cost +19.3% against off (not completely separated) and a loaded plugin 0.0%; the static prefix explains about a quarter of the former. No savings claim.
+
+---
+
 ## Is the plugin taking effect? (2.4.0)
 
 2.4.0 is about whether the plugin takes effect, not about routing accuracy.
 
 **Measured use.** One machine, 2026-10-23 to 2026-11-02, interactive Claude Code, `mitosis-cost-report.py --fleet`: 40 sessions, 5,799 primary tool calls, 27 `Agent` calls (0.5%); Bash was 77% of tool calls. The primary cost about 492 USD and subagents about 11.4 USD (2.3%). Of the subagent spend, 23.8% was unpinned (2 `Explore` calls, 2.71 USD), and no subagent ran on haiku. Limit: one user, one machine, 11 days, list prices.
 
-**Doctor.** `python3 scripts/mitosis-doctor.py` checks each installed platform and prints OK, WARN, FAIL, UNKNOWN or SKIP. It runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. Anything it cannot determine is UNKNOWN, never OK. Exit 0 means all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. A healthy Codex or agy install still exits 1, because the Codex trust hash and agy's child model cannot be checked. Flags: `--platform`, `--json`, `--root`, `--home`, and `--live` (runs a real session, costs money). The tests inject the faults it exists to catch: the Codex namespace, the agy flat parameter, cp950 and a missing Python.
+**Doctor.** `python3 scripts/mitosis-doctor.py` checks each installed platform and prints OK, WARN, FAIL, UNKNOWN or SKIP. It runs each install's real hook command chain with per-platform payloads (including Chinese text under a cp950 console) and reads the heartbeat. Anything it cannot determine is UNKNOWN, never OK. Exit 0 means all OK or SKIP, 1 any WARN or UNKNOWN, 2 any FAIL. Since 2.5.0 doctor recomputes the Codex hook trust hashes from local files (rows `trust.<event>` for the declaration hash and `trust.bundle` for the content hash; the old `trust_hash` UNKNOWN row is gone). A match is conclusive. A mismatch is a conclusive FAIL only for Codex versions whose hashing was checked against source (0.166, on POSIX) and UNKNOWN otherwise. So a healthy Codex install can now exit 0, and agy still exits 1 because its child model cannot be checked. Right after an update, `trust.bundle` is FAIL until you accept the review in Codex. Info rows `heartbeat.report` (rejected report classes) and `codex.scout_shell_rules` (which rule set a Codex scout gets) never WARN. Flags: `--platform`, `--json`, `--root`, `--home`, and `--live` (runs a real session, costs money). The tests inject the faults it exists to catch: the Codex namespace, the agy flat parameter, cp950 and a missing Python.
 
 **Pin verification.** Claude Code compares the pinned model with the subagent transcript at `SubagentStop` and warns once on the primary's `Stop` (a `systemMessage` on `SubagentStop` is not displayed). Codex compares with the last `turn_context` of the child rollout and records state only. agy cannot verify. `CLAUDE_MITOSIS_VERIFY_PIN=0` and `CODEX_MITOSIS_VERIFY_PIN=0` turn it off.
 
-**Heartbeat.** Each hook run updates `heartbeat-<platform>.json` in the user cache directory: counters and tool names only, no prompts, paths or messages. `MITOSIS_HEARTBEAT=0` turns it off; `MITOSIS_HEARTBEAT_DIR` moves it.
+**Heartbeat.** Each hook run updates `heartbeat-<platform>.json` in the user cache directory: counters and tool names only, no prompts, paths or messages. Since 2.5.0 it also holds `report_bad_scout` and `report_bad_worker`: rejected subagent reports counted per stop by reason class (a fixed list of class names, never report content). `MITOSIS_HEARTBEAT=0` turns it off; `MITOSIS_HEARTBEAT_DIR` moves it.
 
 **Cost report.** `--fleet` (with `--since`, `--until`, `--entrypoint`) reports dispatch rate, the actual model per subagent and unpinned spend. The project-directory encoding bug is fixed: any working directory with an underscore failed in the default mode, and in `smoke-claude.py`.
 
@@ -386,11 +403,26 @@ Result (Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, none 
 | fix | 0.8240 | 0.8159 | on 1% lower | INCONCLUSIVE |
 
 1. The verdict follows the sealed rule. By the pre-registered action, the skill now says when not to use it, and 2.5 does not invest in dispatch rate.
-2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another. So the extra cost probably comes from loading the skill and hook context rather than from subagents. This is inferred from the `Agent` counts and the primary's cost; it is not a measurement of delegation itself.
+2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another, so subagents do not account for the extra cost. An earlier version of this item inferred that the extra cost "probably comes from loading the skill and hook context". That was an inference from the `Agent` counts and the primary's cost, not a measurement. The 2.5 overhead run (below) measured it and explains only about a quarter by its sealed formula; the rest is not determined.
 3. Limits: n=3 per arm, 3 uncorrected comparisons, and ops only just crosses the 10% line with a difference of about 0.05 USD. The tasks are short (peak context 40K to 90K against a 274K median in real sessions), so this says nothing about long sessions or context protection.
 4. A first attempt stopped after one scored run because the tamper check counted hook-written bytecode as a change. The harness was fixed and resealed; that run (success, 0.70 USD, off arm) was discarded, not reused.
 
 This plugin makes no savings claim. What is not measured here: isolating the primary's context, and parallelism for work that really is parallel.
+
+### Where does the extra cost come from? (overhead experiment, 2.5)
+
+Pre-registered in `evals/overhead/PROTOCOL.md`, sealed at plugin commit `368dc34`. The lookup task again, three arms (plugin off; plugin loaded with no `/orchestrate`; `/orchestrate`) times three repeats, `opus` at `medium`, one machine, 6.99 USD, all 9 runs succeeded. Details: `evals/overhead/RESULTS.md`.
+
+| arm | median USD | against off | compare label |
+| :--- | ---: | :--- | :--- |
+| off | 0.6442 | | |
+| loaded | 0.6444 | +0.0002 (0.0%) | INCONCLUSIVE |
+| `/orchestrate` | 0.7684 | +0.1242 (+19.3%), not completely separated | INCONCLUSIVE |
+
+- Outcome by the sealed rule: NO TRIM. The first-call prefix is +786 tokens (loaded) and +3,238 tokens (`/orchestrate`) against off.
+- By the sealed formula, text added to the prefix explains 24.5% of the `/orchestrate` difference and output tokens 1.4%. The token decomposition leaves a visible gap to the effective cost in every arm. So loading the skill and hook context explains about a quarter; the remainder is not determined.
+- Median peak context was 58.6K (off) and 66.9K (`/orchestrate`).
+- The +58% of the comparison above was not reproduced at this size in this run. The earlier HARM verdict stands under its own sealed rule. n=3, a short task, one machine.
 
 ---
 

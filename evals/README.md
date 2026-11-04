@@ -27,3 +27,5 @@ In the baseline arm, plugin agents (`flash-lite-scout`, `flash-worker`) fail wit
 ## Overhead experiment
 
 `evals/overhead/` (sealed separately from `evals/compare/`) splits the plugin's extra cost on a short task into static prefix text, output tokens and the rest; see its `PROTOCOL.md`.
+
+`evals/compare/run.py`'s seal check now reports `changed: repo:scripts/mitosis_generated.py` (and `new file: RESULTS.md`). That is expected for a closed experiment: the repository moved on after the seal, and the compare runs are finished. Do not reseal it to clear the message.

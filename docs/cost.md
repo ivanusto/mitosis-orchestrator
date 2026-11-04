@@ -99,7 +99,7 @@ Result (Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, none 
 | fix | 0.8240 | 0.8159 | on 1% lower | INCONCLUSIVE |
 
 1. The verdict follows the sealed rule. By the pre-registered action, the skill now says when not to use it, and 2.5 does not invest in dispatch rate.
-2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another. So the extra cost probably comes from loading the skill and hook context rather than from subagents. This is inferred from the `Agent` counts and the primary's cost; it is not a measurement of delegation itself.
+2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another, so subagents do not account for the extra cost. An earlier version of this item inferred that the extra cost "probably comes from loading the skill and hook context". That was an inference from the `Agent` counts and the primary's cost, not a measurement. The 2.5 overhead run (`evals/overhead/RESULTS.md`; summary in the README) measured it and explains only about a quarter by its sealed formula; the rest is not determined.
 3. Limits: n=3 per arm, 3 uncorrected comparisons, and ops only just crosses the 10% line with a difference of about 0.05 USD. The tasks are short (peak context 40K to 90K against a 274K median in real sessions), so this says nothing about long sessions or context protection.
 4. A first attempt stopped after one scored run because the tamper check counted hook-written bytecode as a change. The harness was fixed and resealed; that run (success, 0.70 USD, off arm) was discarded, not reused.
 
