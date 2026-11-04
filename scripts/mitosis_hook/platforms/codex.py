@@ -441,6 +441,11 @@ def codex_bind_agent(state: Dict[str, Any], payload: Dict[str, Any]) -> Optional
     return key
 
 
+def _is_scout_record(rec: Dict[str, Any]) -> bool:
+    """A scout is read-only and cannot write the scratch log a BLOCKED/FAILED report would cite."""
+    return rec.get("type") == SCOUT_TYPE or _record_tier(rec) == "flash_lite"
+
+
 def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
     """Codex SubagentStop fires after every child turn: update only the bound record."""
     key = codex_bind_agent(state, payload)
@@ -451,7 +456,8 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
     rec["stops"] = int(rec.get("stops") or 0) + 1
     rec["last_turn_id"] = payload.get("turn_id")
     if rec.get("type") in (WORKER_TYPE, SCOUT_TYPE):
-        rec["report_ok"] = validate_subagent_report(str(payload.get("last_assistant_message") or "")) is None
+        rec["report_ok"] = validate_subagent_report(
+            str(payload.get("last_assistant_message") or ""), require_log_uri=not _is_scout_record(rec)) is None
         # v2 spawns carry no model, so the role file alone pins the child: this is the only check it worked.
         if _get_env("CODEX_MITOSIS_VERIFY_PIN", default="1") != "0":
             path = payload.get("agent_transcript_path") or payload.get("transcript_path")
@@ -460,18 +466,18 @@ def codex_subagent_stop(payload: Dict[str, Any], state: Dict[str, Any]) -> Optio
 
 
 def codex_escalate(state: Dict[str, Any], key: Optional[str], payload: Dict[str, Any]) -> None:
-    """Start a failure escalation when a bound child's well-formed report says FAILED/BLOCKED.
+    """Start a failure escalation when a bound child's report declares FAILED/BLOCKED.
 
-    Malformed reports are left to codex_report_block (the block wins; the re-answer arrives as a
-    later SubagentStop). Each record escalates at most once and an escalated spawn never does.
+    Callers run it only when codex_report_block did not block: a malformed first answer is sent back
+    and the re-answer arrives as a later SubagentStop (stop_hook_active). Once no retry can come the
+    declared status is trusted. Each record escalates at most once and an escalated spawn never does.
     """
     if key is None:
         return
     rec = state["subagents"][key]
-    if rec.get("type") not in (WORKER_TYPE, SCOUT_TYPE) or rec.get("escalation_sent") or not rec.get("report_ok"):
+    if rec.get("type") not in (WORKER_TYPE, SCOUT_TYPE) or rec.get("escalation_sent"):
         return
-    msg = str(payload.get("last_assistant_message") or "").lstrip()
-    if not re.match(r"STATUS:\s*(?:FAILED|BLOCKED)\b", msg, re.IGNORECASE) or report_failure_status(msg) is None:
+    if report_failure_status(str(payload.get("last_assistant_message") or "")) is None:
         return
     route = escalation_for_record(rec)
     if route is None:
@@ -493,7 +499,8 @@ def codex_report_block(state: Dict[str, Any], key: Optional[str], payload: Dict[
     rec = state["subagents"][key]
     if rec.get("type") not in (WORKER_TYPE, SCOUT_TYPE) or rec.get("report_blocked"):
         return {}
-    error = validate_subagent_report(str(payload.get("last_assistant_message") or ""))
+    error = validate_subagent_report(
+        str(payload.get("last_assistant_message") or ""), require_log_uri=not _is_scout_record(rec))
     if error is None:
         return {}
     rec["report_blocked"] = True

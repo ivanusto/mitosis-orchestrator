@@ -17,6 +17,7 @@ from ..report import (
 from ..routing import decide_subagent
 from ..state import (
     _record_routing,
+    _record_tier,
     apply_escalation,
     escalation_enabled,
     escalation_for_record,
@@ -109,7 +110,8 @@ def scan_new_messages(payload: Dict[str, Any], state: Dict[str, Any]) -> List[Di
                 "model": "flash_lite" if is_scout_meta else "flash",
                 "tier": "flash_lite" if is_scout_meta else "flash",
             })
-        problem = validate_subagent_report(content)
+        problem = validate_subagent_report(content, require_log_uri=not (
+            record.get("type") == SCOUT_TYPE or _record_tier(record) == "flash_lite"))
         status = report_failure_status(content) or ("COMPLETED" if re.search(
             r"^[ \t>*_`-]*STATUS:[ \t*_`]*COMPLETED\b", content, re.IGNORECASE | re.MULTILINE) else "")
         record["report_ok"] = problem is None

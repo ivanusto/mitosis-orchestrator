@@ -377,22 +377,28 @@ def _handle_claude_subagent_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # One save for every outcome (the report_nagged flag is part of the same write).
     result: Dict[str, Any] = {}
-    if _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") != "0":
-        type_name = agent_type or (str(record.get("type") or "") if record else "")
-        if _is_plugin_agent_type(type_name):
-            error = validate_subagent_report(report)
-            if record is not None and report.strip():
-                record["report_ok"] = error is None
-            if error is None:
-                if record is not None:
-                    _claude_escalate_on_stop(state, record, report, agent_id)
-            # A handed-back report is already delivered, and a stop without any report gives nothing to judge.
-            elif payload.get("stop_hook_active") is not True and not handback and "last_assistant_message" in payload:
-                nagged: List[str] = state.setdefault("report_nagged", [])
-                key = agent_id or type_name
-                if key not in nagged:
-                    nagged.append(key)
-                    result = {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
+    type_name = agent_type or (str(record.get("type") or "") if record else "")
+    enforce = _get_env("CLAUDE_MITOSIS_ENFORCE_REPORT", default="1") != "0"
+    # An untyped pinned Agent call stops as general-purpose: no report contract, but a failure still escalates.
+    untyped_pinned = (record is not None and not str(record.get("type") or "").strip()
+                      and bool(record.get("pinned_model")) and _bare_agent_type(agent_type) in ("", "general-purpose"))
+    if _is_plugin_agent_type(type_name):
+        scout = _bare_agent_type(type_name) == SCOUT_TYPE or (record is not None and _record_tier(record) == "flash_lite")
+        error = validate_subagent_report(report, require_log_uri=not scout)
+        if record is not None and report.strip():
+            record["report_ok"] = error is None
+        key = agent_id or type_name
+        # A handed-back report is already delivered, and a stop without any report gives nothing to judge.
+        will_block = (error is not None and enforce and payload.get("stop_hook_active") is not True and not handback
+                      and "last_assistant_message" in payload and key not in state.setdefault("report_nagged", []))
+        if will_block:
+            state["report_nagged"].append(key)
+            result = {"decision": "block", "reason": REPORT_BLOCK_REASON.format(error=error)}
+        elif record is not None:
+            # No retry can follow, so trust the declared status even when the report is malformed.
+            _claude_escalate_on_stop(state, record, report, agent_id)
+    elif untyped_pinned:
+        _claude_escalate_on_stop(state, record, report, agent_id)
     save_state(payload, state)
     return result
 
@@ -415,10 +421,8 @@ def _claude_verify_pin(record: Optional[Dict[str, Any]], payload: Dict[str, Any]
 
 
 def _claude_escalate_on_stop(state: Dict[str, Any], record: Dict[str, Any], message: str, agent_id: str) -> None:
-    """Async Agent calls deliver their report only here: start an escalation for a valid FAILED/BLOCKED one."""
-    if record.get("escalation_sent") or not str(message).lstrip().upper().startswith("STATUS:"):
-        return
-    if report_failure_status(message) is None:
+    """Async Agent calls deliver their report only here: start an escalation for a FAILED/BLOCKED one."""
+    if record.get("escalation_sent") or report_failure_status(message) is None:
         return
     rtype = str(record.get("type") or "")
     if rtype and not _is_plugin_agent_type(rtype):

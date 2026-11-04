@@ -203,6 +203,17 @@ class TestMessageScan(AgyBase):
         self.deliver(WORKER, BAD, mid="m2")
         self.assertEqual(eo.handle_pre_invocation(self.primary()), {})
 
+    def test_scout_blocked_without_log_uri_is_not_an_invalid_report(self):
+        no_uri = "STATUS: BLOCKED\nFILES_CHANGED: NONE\nVERIFICATION: grep was denied\nNOTES: denied: grep -r"
+        self.deliver(SCOUT, no_uri)
+        self.assertEqual(eo.handle_pre_invocation(self.primary()).get("injectSteps"), None)
+        st = self.state()
+        self.assertIs(st["subagents"][SCOUT]["report_ok"], True)
+        self.assertEqual(st["escalation"]["to"], "flash")
+        # a worker with the same report still breaks the contract
+        self.deliver(WORKER, no_uri, mid="w1")
+        self.assertEqual(len(eo.handle_pre_invocation(self.primary())["injectSteps"]), 1)
+
     def test_valid_report_gives_no_notice(self):
         self.deliver(WORKER, GOOD)
         self.assertEqual(eo.handle_pre_invocation(self.primary()), {})

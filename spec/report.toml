@@ -16,12 +16,12 @@ block_reason = """[Mitosis Orchestrator] Your final message must be the bounded 
 STATUS: COMPLETED | BLOCKED | FAILED
 FILES_CHANGED: <comma-separated paths or NONE>
 VERIFICATION: <one sentence stating the command run and its exit result>
-NOTES: <one sentence or up to 10 '- ' bullets; include a file://.../*.log URI when BLOCKED or FAILED>"""
+NOTES: <one sentence or up to 10 '- ' bullets; when BLOCKED or FAILED, workers include a file://.../*.log URI and scouts say what was denied or missing>"""
 
 [scout]
 files_changed = "NONE"
 verification = "<one sentence stating what you searched and how many hits>"
-notes = "<findings as file:// links, one sentence per hit or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>"
+notes = "<findings as file:// links, one sentence per hit or up to 10 bullets; when BLOCKED or FAILED, say what was denied or missing>"
 
 [worker]
 files_changed = "<comma-separated paths or NONE>"
@@ -32,7 +32,7 @@ notes = "<one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, 
 [zh.scout]
 files_changed = "NONE"
 verification = "<一句話說明搜尋範圍與命中數>"
-notes = "<以 file:// 連結列出發現，每筆命中一句話或最多 10 行 `- ` 清單；若 BLOCKED/FAILED 須含 file:// log URI>"
+notes = "<以 file:// 連結列出發現，每筆命中一句話或最多 10 行 `- ` 清單；若 BLOCKED/FAILED 須說明被拒絕或缺少什麼>"
 
 [zh.worker]
 files_changed = "<以逗號分隔的檔案路徑或 NONE>"

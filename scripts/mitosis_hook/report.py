@@ -116,7 +116,7 @@ def _append_report_format_enabled() -> bool:
     return _get_env("AGY_MITOSIS_APPEND_REPORT_FORMAT", default="1") != "0"
 
 
-def validate_subagent_report(text: str) -> Optional[str]:
+def validate_subagent_report(text: str, require_log_uri: bool = True) -> Optional[str]:
     """Validate that a subagent report strictly follows the 4-header bounded format.
 
     Headers required:
@@ -128,7 +128,8 @@ def validate_subagent_report(text: str) -> Optional[str]:
     Constraints:
       - Total length <= 1600 characters.
       - At most 10 bullet lines following NOTES:.
-      - If STATUS is BLOCKED or FAILED, NOTES must include a file:// URI to a .log file.
+      - If STATUS is BLOCKED or FAILED, NOTES must include a file:// URI to a .log file,
+        unless require_log_uri is False (scouts are read-only and cannot write a log).
 
     Returns None if valid, or an error description string if invalid.
     """
@@ -165,7 +166,7 @@ def validate_subagent_report(text: str) -> Optional[str]:
 
     status_match = re.match(r"^STATUS:\s*(\w+)", lines[0], re.IGNORECASE)
     status_val = status_match.group(1).upper() if status_match else ""
-    if status_val in {"BLOCKED", "FAILED"}:
+    if require_log_uri and status_val in {"BLOCKED", "FAILED"}:
         notes_body = lines[3].split(":", 1)[1].strip() if ":" in lines[3] else ""
         combined_notes = " ".join([notes_body] + [b[1:].strip() for b in bullet_lines]).strip()
         if not REPORT_LOG_URI_RE.search(combined_notes):

@@ -29,6 +29,10 @@ OPAQUE = (
 )
 
 
+# A scout is read-only and cannot write a log, so it reports BLOCKED without a file:// URI.
+NO_URI = "STATUS: BLOCKED\nFILES_CHANGED: NONE\nVERIFICATION: grep was denied\nNOTES: denied: grep -r"
+
+
 def report(status):
     return f"STATUS: {status}\nFILES_CHANGED: NONE\nVERIFICATION: ran grep, exit 1\nNOTES: could not do it, log file:///tmp/scratch/task.log"
 
@@ -272,6 +276,74 @@ class ClaudeAsyncEscalationTest(_ClaudeBase):
         p.update(extra)
         return eo.handle_subagent_stop(p)
 
+    def handback_post(self, aid, message):
+        return eo.handle_post_tool_use(self.tool("PostToolUse", "SubagentHandback", {"message": message}, agent_id=aid))
+
+    def test_scout_blocked_without_uri_arms_on_stop(self):
+        aid, _, _ = self.launch()
+        self.assertEqual(self.stop(aid, None, last_assistant_message=NO_URI), {})
+        self.assertEqual(self.state()["escalation"]["to"], "flash")
+
+    def test_scout_blocked_without_uri_arms_through_handback(self):
+        aid, _, _ = self.launch()
+        self.handback_post(aid, NO_URI)
+        out = self.stop(aid, None)  # auto mode: last_assistant_message is empty, the report came by handback
+        self.assertNotEqual(out.get("decision"), "block")
+        self.assertEqual(self.state()["escalation"]["to"], "flash")
+
+    def test_enforce_off_still_escalates(self):
+        os.environ["CLAUDE_MITOSIS_ENFORCE_REPORT"] = "0"
+        aid, _, _ = self.launch()
+        self.assertEqual(self.stop(aid, "BLOCKED"), {})
+        self.assertIn("escalation", self.state())
+
+    def test_fenced_report_arms(self):
+        aid, _, _ = self.launch()
+        self.stop(aid, None, last_assistant_message="```\n" + report("FAILED") + "\n```")
+        self.assertIn("escalation", self.state())
+
+    def test_preamble_blocks_once_then_arms_when_retry_cannot_come(self):
+        aid, _, _ = self.launch()
+        msg = "Here is my report.\n" + NO_URI
+        res = self.stop(aid, None, last_assistant_message=msg)
+        self.assertEqual(res["decision"], "block")
+        self.assertNotIn("escalation", self.state())
+        self.assertEqual(self.stop(aid, None, last_assistant_message=msg, stop_hook_active=True), {})
+        self.assertIn("escalation", self.state())
+
+    def test_preamble_nagged_before_arms_on_next_stop(self):
+        aid, _, _ = self.launch()
+        msg = "Here is my report.\n" + NO_URI
+        self.assertEqual(self.stop(aid, None, last_assistant_message=msg)["decision"], "block")
+        self.assertEqual(self.stop(aid, None, last_assistant_message=msg), {})  # already nagged
+        self.assertIn("escalation", self.state())
+
+    def test_untyped_pinned_agent_escalates_without_nag(self):
+        os.environ["CLAUDE_MITOSIS_ESCALATE_PRIMARY"] = "1"
+        args, pre = self.spawn(None, WORK)
+        self.n += 1
+        aid = f"e{self.n:016x}"
+        resp = {"isAsync": True, "status": "async_launched", "agentId": aid, "description": "x"}
+        eo.handle_post_tool_use(self.tool("PostToolUse", "Agent", pre["updatedInput"], tool_response=resp))
+        rec = self.state()["subagents"][aid]
+        self.assertTrue(rec.get("pinned_model") and not rec.get("type"))
+        self.assertEqual(self.stop(aid, None, agent_type="general-purpose", last_assistant_message="oops\n" + NO_URI), {})
+        self.assertEqual(self.state()["escalation"]["to"], "primary")
+        self.assertNotIn("report_nagged", self.state())
+
+    def test_status_in_notes_of_completed_report_does_not_arm(self):
+        aid, _, _ = self.launch()
+        msg = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: ok\nNOTES:\n- STATUS: FAILED earlier, then fixed"
+        self.assertEqual(self.stop(aid, None, last_assistant_message=msg), {})
+        self.assertNotIn("escalation", self.state())
+
+    def test_worker_without_uri_still_nagged(self):
+        aid, _, _ = self.launch(WORKER_T, WORK)
+        res = self.stop(aid, None, agent_type=WORKER_T, last_assistant_message=NO_URI)
+        self.assertEqual(res["decision"], "block")
+        self.assertIn("file://", res["reason"])
+        self.assertNotIn("escalation", self.state())
+
     def test_async_post_registers_but_does_not_escalate(self):
         aid, _, post = self.launch()
         self.assertEqual(post, {})
@@ -401,8 +473,18 @@ class CodexEscalationTest(_EnvBase):
         res = self.stop(bad)
         self.assertEqual(res["decision"], "block")
         self.assertNotIn("escalation", self.state())
+        # the re-answer (stop_hook_active) cannot be sent back again: the declared status is trusted
         self.assertEqual(self.stop(bad, active=True), {})
-        self.assertNotIn("escalation", self.state())
+        self.assertIn("escalation", self.state())
+
+    def test_scout_blocked_without_uri_is_valid_and_escalates(self):
+        self.spawn("probe", "explorer")
+        self.assertEqual(self.stop(NO_URI), {})
+        self.assertIn("escalation", self.state())
+
+    def test_worker_without_uri_blocked(self):
+        self.spawn("w", "worker")
+        self.assertEqual(self.stop(NO_URI, agent_type="worker")["decision"], "block")
 
     def test_completed_does_not_escalate(self):
         self.spawn("probe", "explorer")

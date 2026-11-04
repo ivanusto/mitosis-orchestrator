@@ -398,7 +398,7 @@ def _record_tier(info: Dict[str, Any]) -> str:
 
 ESCALATION_TTL_SECONDS = 30 * 60
 ESCALATION_SPAWNS = 3
-ESCALATION_STATUS_RE = re.compile(r"^[ \t>*_`-]*STATUS:[ \t*_`]*(FAILED|BLOCKED)\b", re.IGNORECASE | re.MULTILINE)
+_ANY_STATUS_RE = re.compile(r"^[ \t>*_`-]*STATUS:[ \t*_`]*(\w+)", re.IGNORECASE | re.MULTILINE)
 _PRIMARY_ALIASES = ("opus", "fable", "sonnet")
 
 
@@ -412,9 +412,14 @@ def escalate_primary_enabled() -> bool:
 
 
 def report_failure_status(text: str) -> Optional[str]:
-    """'FAILED' or 'BLOCKED' when a report line says so, else None."""
-    m = ESCALATION_STATUS_RE.search(text or "")
-    return m.group(1).upper() if m else None
+    """'FAILED' or 'BLOCKED' when the first STATUS line of the text says so, else None.
+
+    Only the first STATUS line counts, so a quoted `- STATUS: FAILED` in the notes of a COMPLETED
+    report does not arm an escalation; a preamble or code fence before the report is fine.
+    """
+    m = _ANY_STATUS_RE.search(text or "")
+    value = m.group(1).upper() if m else ""
+    return value if value in ("FAILED", "BLOCKED") else None
 
 
 def live_escalation(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:

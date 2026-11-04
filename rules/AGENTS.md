@@ -83,7 +83,7 @@ NOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, in
 
 Scouts omit rules 3 to 5 and always report `FILES_CHANGED: NONE`. Subagent reports must follow the bounded report format:
 - Up to 10 compact bullet lines (`- ` or `* `) under `NOTES:` (total report length capped at ≤ 1,600 chars).
-- When `STATUS` is `BLOCKED` or `FAILED`, `NOTES:` must include a `file://.../*.log` URI pointing to raw failure output in `<scratch_dir>/<task_id>.log` (`<artifactDirectoryPath>/scratch/` on agy).
+- When `STATUS` is `BLOCKED` or `FAILED`, a worker's `NOTES:` must include a `file://.../*.log` URI pointing to raw failure output in `<scratch_dir>/<task_id>.log` (`<artifactDirectoryPath>/scratch/` on agy). A scout is read-only and cannot write a log: it names what was denied or missing, and the hook trusts its declared status.
 The four-header bounded report keeps subagent output cheap to read back; do not ask subagents for unstructured prose summaries. If a prompt is dispatched without a `REPORT FORMAT` block, the hook appends the tier's block automatically (`*_MITOSIS_APPEND_REPORT_FORMAT=0` disables).
 
 ---
