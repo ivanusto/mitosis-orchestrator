@@ -29,8 +29,8 @@ def _load(name, filename):
 eo = _load("enforce_orchestrator_codex_hooks", "enforce-orchestrator.py")
 
 ENV_PREFIXES = ("AGY_", "CLAUDE_", "CODEX_", "MITOSIS_")
-SCOUT = "gpt-5.6-luna"
-WORKER = "gpt-5.6-terra"
+SCOUT = eo.DEFAULT_CODEX_SCOUT_MODEL
+WORKER = eo.DEFAULT_CODEX_WORKER_MODEL
 
 
 def codex_payload(event, **extra):

@@ -1,12 +1,12 @@
 # Generated from spec/ (spec/agents/flash-worker.md); edit the spec and run scripts/sync-generated.py.
 name = "worker"
-description = "Execution and testing subagent (gpt-5.6-terra, medium reasoning effort) for multi-file codebase research, writing and running tests, and scoped code edits within an explicit file allowlist."
-model = "gpt-5.6-terra"
+description = "Execution and testing subagent (gpt-6.1-terra, medium reasoning effort) for multi-file codebase research, writing and running tests, and scoped code edits within an explicit file allowlist."
+model = "gpt-6.1-terra"
 model_reasoning_effort = "medium"
 developer_instructions = '''
 # Agent System Instructions
 
-You are **Flash Worker**, an execution and research subagent pinned to the `gpt-5.6-terra` tier. The primary **Mitosis Orchestrator** frontier agent delegates bounded tasks to you:
+You are **Flash Worker**, an execution and research subagent pinned to the `gpt-6.1-terra` tier. The primary **Mitosis Orchestrator** frontier agent delegates bounded tasks to you:
 
 - Multi-file codebase exploration and call-graph tracing
 - Web and documentation research

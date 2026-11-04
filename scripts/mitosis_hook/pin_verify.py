@@ -86,6 +86,34 @@ def codex_rollout_models(path: Any) -> List[str]:
     return [model] if model else []
 
 
+def codex_rollout_turns(path: Any) -> Tuple[Optional[Tuple[str, str]], Optional[Tuple[str, str]], int]:
+    """(first, last, count) of the turn_context records of a Codex rollout; each is (model, effort).
+
+    A child rollout starts with a copy of its parent's turn_context, so with two or more records the
+    first one is the parent's and the last is the child's. Effort is "" when the record has none
+    (field name `effort`), and a record without a model is skipped.
+    """
+    first: Optional[Tuple[str, str]] = None
+    last: Optional[Tuple[str, str]] = None
+    count = 0
+    for record in _tail_records(path):
+        if record.get("type") != "turn_context":
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        model = payload.get("model")
+        if not isinstance(model, str) or not model:
+            continue
+        effort = payload.get("effort")
+        turn = (model, effort.strip().lower() if isinstance(effort, str) else "")
+        if first is None:
+            first = turn
+        last = turn
+        count += 1
+    return first, last, count
+
+
 def model_matches(expected: str, actual: str) -> bool:
     """A tier alias matches the full id it resolves to ("haiku" and "claude-haiku-5-5")."""
     want, got = expected.strip().lower(), actual.strip().lower()
@@ -109,4 +137,41 @@ def record_pin_verdict(record: Dict[str, Any], expected: Any, models: List[str])
         record["pin_verified"] = verdict
         if actual:
             record["actual_model"] = actual
+    return verdict
+
+
+def record_codex_pin_verdict(record: Dict[str, Any], expected_model: Any, expected_effort: Any,
+                             turns: Tuple[Optional[Tuple[str, str]], Optional[Tuple[str, str]], int]) -> Optional[bool]:
+    """Codex verdict that tells a working pin from inheritance when parent and child share a model.
+
+    An empty role inherits the parent's model and effort, so a matching model alone proves nothing
+    when the primary runs the pinned model too. With a known parent (two or more turn_contexts) and
+    an effort on both sides, a child that differs from the parent in (model, effort) was set by the
+    pin; one equal to the parent and not to the expected effort inherited; one equal to both cannot
+    be told apart (None). Effort never turns a model match into a mismatch except in that inherited
+    case. Without a known parent or without effort the verdict is the model-only one.
+    """
+    first, last, count = turns
+    models = [last[0]] if last else []
+    verdict, _ = pin_verdict(expected_model, models)
+    if verdict is not True or last is None:
+        return record_pin_verdict(record, expected_model, models)
+    note = ""
+    if last[1]:
+        record["actual_effort"] = last[1]
+    want_effort = str(expected_effort or "").strip().lower()
+    if count >= 2 and first is not None and first[1] and last[1] and want_effort:
+        if last != first:
+            verdict = True
+        elif last[1] != want_effort:
+            verdict, note = False, "looks inherited: model and effort equal the parent's, effort is not the pinned %s" % want_effort
+        else:
+            verdict = None
+    if verdict is not None or "pin_verified" not in record:
+        record["pin_verified"] = verdict
+        record["actual_model"] = last[0]
+        if note:
+            record["pin_note"] = note
+        else:
+            record.pop("pin_note", None)
     return verdict

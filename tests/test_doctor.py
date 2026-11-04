@@ -612,6 +612,57 @@ class TestStatic(DoctorCase):
         self.assertEqual(data["codex.role.explorer"]["status"], "WARN")
         self.assertNotIn(MARKER, out)
 
+    def test_codex_role_difference_names_the_fix(self):
+        (self.fx.home / ".codex" / "agents" / "worker.toml").write_text('model = "older-model"\n', encoding="utf-8")
+        row = self.fx.checks("--platform", "codex")["codex.role.worker"]
+        self.assertEqual(row["status"], "WARN")
+        self.assertIn("python3 scripts/setup-codex.py", row["message"])
+
+    def _config_model(self, model):
+        cfg = self.fx.home / ".codex" / "config.toml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace('model = "%s"' % MARKER, 'model = "%s"' % model, 1), encoding="utf-8")
+
+    def test_codex_worker_same_as_primary_is_info_ok(self):
+        self._config_model(models()["codex"]["worker"]["model"])
+        checks = self.fx.checks("--platform", "codex", extra_env={"CODEX_HOME": str(self.fx.home / ".codex")})
+        row = checks["codex.worker_same_as_primary"]
+        self.assertEqual(row["status"], "OK")
+        self.assertIn("only by reasoning effort", row["message"])
+        self.assertNotRegex(row["message"], r"(?i)sav|cheap|faster|better")
+        self.assertEqual(self.fx.last_rc, 0)  # an info row never changes the exit code
+
+    def test_codex_worker_differs_from_primary_has_no_such_row(self):
+        self.assertNotIn("codex.worker_same_as_primary", self.fx.checks("--platform", "codex"))
+
+    def _models_cache(self, slugs):
+        (self.fx.home / ".codex" / "models_cache.json").write_text(
+            json.dumps({"fetched_at": "x", "models": [{"slug": s} for s in slugs]}), encoding="utf-8")
+
+    def test_codex_pinned_models_listed_is_ok(self):
+        m = models()["codex"]
+        self._models_cache([m["scout"]["model"], m["worker"]["model"], "other"])
+        self.assertEqual(self.fx.checks("--platform", "codex")["codex.pinned_models"]["status"], "OK")
+
+    def test_codex_pinned_model_absent_warns_with_rollback(self):
+        m = models()["codex"]
+        self._models_cache([m["scout"]["model"]])
+        checks = self.fx.checks("--platform", "codex")
+        row = checks["codex.pinned_models"]
+        self.assertEqual(row["status"], "WARN")
+        self.assertIn(m["worker"]["model"], row["message"])
+        self.assertIn("CODEX_MITOSIS_WORKER_MODEL=gpt-5.6-terra", row["message"])
+        self.assertEqual(self.fx.last_rc, 1)  # a WARN, like every other warning
+        (self.fx.home / ".codex" / "models_cache.json").unlink()
+        self.fx.checks("--platform", "codex")
+        self.assertEqual(self.fx.last_rc, 0)
+
+    def test_codex_models_cache_missing_or_unreadable_adds_no_row(self):
+        self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
+        (self.fx.home / ".codex" / "models_cache.json").write_text("{not json", encoding="utf-8")
+        self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
+        (self.fx.home / ".codex" / "models_cache.json").write_text('{"models": "x"}', encoding="utf-8")
+        self.assertNotIn("codex.pinned_models", self.fx.checks("--platform", "codex"))
+
     def test_codex_missing_role_file(self):
         (self.fx.home / ".codex" / "agents" / "worker.toml").unlink()
         self.assertFail(self.fx.checks("--platform", "codex"), "codex.role.worker")

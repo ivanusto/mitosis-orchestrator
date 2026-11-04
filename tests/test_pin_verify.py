@@ -443,6 +443,11 @@ class StoredHandbackTest(_NoKeyMixin, _ClaudeBase):
         self.assertTrue(any("SubagentHandback" in m.split("|") for m in matchers), matchers)
 
 
+SCOUT_M = eo.DEFAULT_CODEX_SCOUT_MODEL
+WORKER_M = eo.DEFAULT_CODEX_WORKER_MODEL
+OLD_M = "gpt-5.6-terra"  # a user-set older primary
+
+
 class CodexPinTest(_EnvBase):
     UUID = "01a161ae-4d72-74f2-be05-d8fa31145c60"
 
@@ -452,7 +457,7 @@ class CodexPinTest(_EnvBase):
 
     def payload(self, event, **extra):
         p = {"session_id": self.sid, "transcript_path": "/nonexistent/rollout.jsonl", "cwd": "/tmp",
-             "hook_event_name": event, "model": "gpt-5.6-luna", "permission_mode": "bypassPermissions",
+             "hook_event_name": event, "model": SCOUT_M, "permission_mode": "bypassPermissions",
              "turn_id": "01a15f91-1b97-7e53-a469-8d0ca70908aa"}
         p.update(extra)
         return p
@@ -462,17 +467,26 @@ class CodexPinTest(_EnvBase):
         eo.handle_pre_tool_use(self.payload("PreToolUse", tool_name="collaborationspawn_agent", tool_input=ti,
                                             tool_use_id="call_1"))
 
-    def rollout(self, last_model, bound=True):
-        meta = {"id": self.UUID, "thread_source": "subagent", "agent_role": "explorer"}
+    def rollout(self, last_model, bound=True, parent=(OLD_M, "high"), child_effort="low", role="explorer"):
+        """A child rollout: the parent's turn_context copy (None for no copy), then the child's own."""
+        meta = {"id": self.UUID, "thread_source": "subagent", "agent_role": role}
         if bound:
             meta["agent_path"] = "/root/probe"
-        ctx = lambda m, e: {"type": "turn_context", "payload": {"model": m, "effort": e}}  # noqa: E731
-        recs = [{"type": "session_meta", "payload": meta}, {"type": "session_meta", "payload": dict(meta)},
-                ctx("gpt-5.6-terra", "high"), {"type": "event_msg"}, ctx(last_model, "low")]
+
+        def ctx(model, effort):
+            payload = {"model": model, "cwd": "/tmp", "approval_policy": "never"}
+            if effort is not None:
+                payload["effort"] = effort
+            return {"type": "turn_context", "payload": payload}
+
+        recs = [{"type": "session_meta", "payload": meta}, {"type": "session_meta", "payload": dict(meta)}]
+        if parent is not None:
+            recs += [ctx(*parent), {"type": "event_msg"}]
+        recs.append(ctx(last_model, child_effort))
         return self.jsonl(recs, "rollout.jsonl")
 
-    def stop(self, path):
-        p = self.payload("SubagentStop", stop_hook_active=False, agent_id=self.UUID, agent_type="explorer",
+    def stop(self, path, role="explorer"):
+        p = self.payload("SubagentStop", stop_hook_active=False, agent_id=self.UUID, agent_type=role,
                          last_assistant_message=GOOD, agent_transcript_path=path)
         p.pop("transcript_path")
         return eo.handle_subagent_stop(p)
@@ -480,16 +494,21 @@ class CodexPinTest(_EnvBase):
     def rec(self):
         return eo._read_state_file(eo._state_file(self.payload("Stop")))["subagents"]["probe"]
 
+    def worker_stop(self, last_model, **kw):
+        self.spawn("worker")
+        self.stop(self.rollout(last_model, role="worker", **kw), role="worker")
+        return self.rec()
+
     def test_12_match_ignores_parent_context(self):
         self.spawn()
-        self.stop(self.rollout("gpt-5.6-luna"))
+        self.stop(self.rollout(SCOUT_M))
         r = self.rec()
         self.assertIs(r["pin_verified"], True)
-        self.assertEqual(r["actual_model"], "gpt-5.6-luna")
+        self.assertEqual(r["actual_model"], SCOUT_M)
 
     def test_13_mismatch_no_system_message(self):
         self.spawn()
-        out = self.stop(self.rollout("gpt-5.6-terra"))
+        out = self.stop(self.rollout(OLD_M))
         self.assertIs(self.rec()["pin_verified"], False)
         self.assertNotIn("systemMessage", json.dumps(out))
         self.assertNotIn("systemMessage", out)
@@ -503,7 +522,7 @@ class CodexPinTest(_EnvBase):
         ti = {"task_name": "two", "fork_turns": "none", "message": OPAQUE, "agent_type": "explorer"}
         eo.handle_pre_tool_use(self.payload("PreToolUse", tool_name="collaborationspawn_agent", tool_input=ti,
                                             tool_use_id="call_2"))
-        self.stop(self.rollout("gpt-5.6-terra", bound=False))
+        self.stop(self.rollout(OLD_M, bound=False))
         subs = eo._read_state_file(eo._state_file(self.payload("Stop")))["subagents"]
         for r in subs.values():
             self.assertNotIn("pin_verified", r)
@@ -511,8 +530,82 @@ class CodexPinTest(_EnvBase):
     def test_14b_disabled(self):
         os.environ["CODEX_MITOSIS_VERIFY_PIN"] = "0"
         self.spawn()
-        self.stop(self.rollout("gpt-5.6-terra"))
+        self.stop(self.rollout(OLD_M))
         self.assertNotIn("pin_verified", self.rec())
+
+    def test_15_same_model_working_role(self):
+        # primary and worker share a model; the role set a different effort than the parent's
+        r = self.worker_stop(WORKER_M, parent=(WORKER_M, "high"), child_effort="medium")
+        self.assertIs(r["pin_verified"], True)
+        self.assertEqual(r["actual_effort"], "medium")
+        self.assertNotIn("pin_note", r)
+
+    def test_16_same_model_inherited(self):
+        # the child carries the parent's model and effort, not the pinned effort
+        r = self.worker_stop(WORKER_M, parent=(WORKER_M, "high"), child_effort="high")
+        self.assertIs(r["pin_verified"], False)
+        self.assertIn("inherited", r["pin_note"])
+
+    def test_17_equal_to_expected_and_parent_is_unknown(self):
+        r = self.worker_stop(WORKER_M, parent=(WORKER_M, "medium"), child_effort="medium")
+        self.assertIsNone(r["pin_verified"])
+        self.assertNotIn("pin_note", r)
+
+    def test_17b_indistinguishable_keeps_earlier_evidence(self):
+        rec = {"pin_verified": True, "actual_model": WORKER_M}
+        turns = ((WORKER_M, "medium"), (WORKER_M, "medium"), 2)
+        self.assertIsNone(pv.record_codex_pin_verdict(rec, WORKER_M, "medium", turns))
+        self.assertIs(rec["pin_verified"], True)
+        fresh = {}
+        pv.record_codex_pin_verdict(fresh, WORKER_M, "medium", turns)
+        self.assertIn("pin_verified", fresh)
+        self.assertIsNone(fresh["pin_verified"])
+
+    def test_18_older_primary_with_new_worker(self):
+        r = self.worker_stop(WORKER_M, parent=(OLD_M, "medium"), child_effort="medium")
+        self.assertIs(r["pin_verified"], True)
+        self.assertEqual(r["actual_model"], WORKER_M)
+
+    def test_19_one_turn_context_uses_model_only(self):
+        # parent unknown: even an effort that is not the pinned one stays a match
+        r = self.worker_stop(WORKER_M, parent=None, child_effort="high")
+        self.assertIs(r["pin_verified"], True)
+        self.assertEqual(r["actual_effort"], "high")
+
+    def test_20_no_effort_in_rollout_uses_model_only(self):
+        r = self.worker_stop(WORKER_M, parent=(WORKER_M, None), child_effort=None)
+        self.assertIs(r["pin_verified"], True)
+        self.assertNotIn("actual_effort", r)
+
+    def test_21_effort_difference_alone_is_not_a_mismatch(self):
+        # differs from the parent, and from the pinned effort too: info only
+        r = self.worker_stop(WORKER_M, parent=(WORKER_M, "high"), child_effort="low")
+        self.assertIs(r["pin_verified"], True)
+        self.assertEqual(r["actual_effort"], "low")
+
+    def test_22_model_mismatch_stays_false_with_same_efforts(self):
+        r = self.worker_stop(OLD_M, parent=(OLD_M, "high"), child_effort="medium")
+        self.assertIs(r["pin_verified"], False)
+
+    def test_23_rollout_turns_first_last_and_count(self):
+        path = self.jsonl([
+            {"type": "turn_context", "payload": {"model": "a", "effort": "High"}}, {"type": "event_msg"},
+            {"type": "turn_context", "payload": {"model": "b"}},
+            {"type": "turn_context", "payload": {"effort": "low"}}])
+        self.assertEqual(pv.codex_rollout_turns(path), (("a", "high"), ("b", ""), 2))
+        self.assertEqual(pv.codex_rollout_turns("/nonexistent"), (None, None, 0))
+        self.assertEqual(pv.codex_rollout_models(path), ["b"])
+
+    def test_24_unknown_is_counted_as_unknown_in_heartbeat(self):
+        from mitosis_hook import handlers
+        seen = []
+        orig = handlers.heartbeat.note
+        handlers.heartbeat.note = lambda **kw: seen.append(kw)
+        try:
+            handlers._observe_stop_record({"pin_verified": None, "pinned_model": WORKER_M})
+        finally:
+            handlers.heartbeat.note = orig
+        self.assertEqual(seen, [{"pin": "unknown"}])
 
 
 if __name__ == "__main__":

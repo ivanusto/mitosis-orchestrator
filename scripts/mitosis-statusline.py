@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 STATE_FILENAME = "mitosis_orchestrator_state.json"
-SCOUT_MODELS = {"flash_lite", "haiku", "gpt-5.6-luna"}
+SCOUT_MODELS = {"flash_lite", "haiku", "gpt-5.6-luna", "gpt-6-luna"}
 
 
 def state_path(session_id: str) -> Path:

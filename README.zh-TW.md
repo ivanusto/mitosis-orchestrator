@@ -91,7 +91,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 | 模型廠商 | 支援作為主代理的尖端模型 (Primary Orchestrator) | 自動攔截的輕量級模型 (Small-Tier Filter) |
 | :--- | :--- | :--- |
-| **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
+| **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.1）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
 | **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
@@ -180,14 +180,16 @@ codex exec --profile mitosis-scout "Locate where parse_token is defined"
 
 1. **自動備份**：將 `$CODEX_HOME/config.toml` 複製為 `config.toml.bak`（`$CODEX_HOME` 預設 `~/.codex`）。
 2. **同步規則**：將 `rules/AGENTS.md` 複製至 `$CODEX_HOME/AGENTS.md`。
-3. **安裝角色**：將角色檔安裝至 `$CODEX_HOME/agents/`：`explorer.toml` 與 `flash-lite-scout.toml`（`gpt-5.6-luna`、`low`）、`worker.toml` 與 `flash-worker.toml`（`gpt-5.6-terra`、`medium`）。主代理可透過 `spawn_agent(agent_type=...)` 選用；`flash-*` 角色檔只有執行過這個安裝腳本後才存在。
+3. **安裝角色**：將角色檔安裝至 `$CODEX_HOME/agents/`：`explorer.toml` 與 `flash-lite-scout.toml`（`gpt-6-luna`、`low`）、`worker.toml` 與 `flash-worker.toml`（`gpt-6.1-terra`、`medium`）。主代理可透過 `spawn_agent(agent_type=...)` 選用；`flash-*` 角色檔只有執行過這個安裝腳本後才存在。
 4. **安裝 profile**：將 `mitosis-scout.config.toml` 與 `mitosis-worker.config.toml` 複製至 `$CODEX_HOME/`（Codex 0.134 起 `--profile <name>` 讀取 `$CODEX_HOME/<name>.config.toml`，舊的 `[profiles.*]` 區段已不再生效）。
 5. **注入 MCP**：在 `config.toml` 寫入 `[mcp_servers.mitosis]`，使用執行安裝腳本的 Python 直譯器與 `scripts/mitosis-mcp-server.py` 的絕對路徑。
 6. **完整性驗證**：校驗所有 TOML 並確認檔案存在。
 
 MCP server 執行偵察子代理時使用 `--sandbox read-only`，執行子代理使用 `--sandbox workspace-write`；只有設定 `MITOSIS_CODEX_YOLO=1` 才會改用 `--dangerously-bypass-approvals-and-sandbox`。
 
-1.7.0 起，外掛 hook 會把 `spawn_agent` 呼叫改寫為 Codex 內建的 `explorer`（偵察者）與 `worker` 角色，因為 Codex 0.163 會拒絕未知的 `agent_type`（`unknown agent_type '...'`），而 `flash-*` 角色在只安裝外掛時並不存在。模型與 effort 預設為 `gpt-5.6-luna` / `gpt-5.6-terra` 與 `low` / `medium`，可用 `CODEX_MITOSIS_SCOUT_MODEL`、`CODEX_MITOSIS_WORKER_MODEL`、`CODEX_MITOSIS_SCOUT_EFFORT`、`CODEX_MITOSIS_WORKER_EFFORT` 覆寫。這些值會經過驗證（模型會被嵌入 `codex exec -m` 指令），且沒有 `AGY_` 形式。`setup-codex.py` 會用生效後的值產生角色與 profile TOML，並透過 MCP 的 `env` 表傳給 MCP server。
+1.7.0 起，外掛 hook 會把 `spawn_agent` 呼叫改寫為 Codex 內建的 `explorer`（偵察者）與 `worker` 角色，因為 Codex 0.163 會拒絕未知的 `agent_type`（`unknown agent_type '...'`），而 `flash-*` 角色在只安裝外掛時並不存在。模型與 effort 預設為 `gpt-6-luna` / `gpt-6.1-terra` 與 `low` / `medium`，可用 `CODEX_MITOSIS_SCOUT_MODEL`、`CODEX_MITOSIS_WORKER_MODEL`、`CODEX_MITOSIS_SCOUT_EFFORT`、`CODEX_MITOSIS_WORKER_EFFORT` 覆寫。這些值會經過驗證（模型會被嵌入 `codex exec -m` 指令），且沒有 `AGY_` 形式。`setup-codex.py` 會用生效後的值產生角色與 profile TOML，並透過 MCP 的 `env` 表傳給 MCP server。
+
+**退回先前的模型。** 預設現在是 `gpt-6.1-terra`（執行）與 `gpt-6-luna`（偵察）。這兩者與先前那組之間，尚未量測過品質或成本的比較。要退回先前那組，請執行 `CODEX_MITOSIS_WORKER_MODEL=gpt-5.6-terra CODEX_MITOSIS_SCOUT_MODEL=gpt-5.6-luna python3 scripts/setup-codex.py`，並在 Codex 執行的環境中保持這兩個變數已匯出。否則 hook 會預期 6.x 模型，並對每個子代理回報釘定不符。
 
 ### 外掛 hook（Codex 0.128 以上）
 
@@ -217,7 +219,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreInvocation`（agy）· `UserPromptSubmit`（Claude Code / Codex） | 每回合檢查即時模型；若切換到非尖端模型，每回合提醒一次。同時重設單回合編輯計數（`turn_edited_files`）與連續失敗計數（`consecutive_failures`；agy 只在 `invocationNum` 回到 0 時）。 |
 | `PreToolUse` · `invoke_subagent`（agy） | 自動判定子代理應綁定執行或偵察層級（agy 僅依 `Prompt`、`TypeName`、`Workspace` 判斷，不讀簡短的 `Role` 標籤，以免「Add Scout」之類的標籤被誤判為修改動詞）。agy 1.4.6 每個子代理送出一次扁平呼叫（`Prompt`、`Role`、`TypeName`、`Model`、`Workspace`），而非 `Subagents` 清單；兩種形式皆已支援，且只覆寫有變動的頂層欄位。強訊號（測試、除錯、修改動詞）一律優先於查找關鍵字；偵察子代理被指派修改任務時自動升級為執行子代理；提示詞缺少 `REPORT FORMAT` 區塊時自動補上。 |
 | `PreToolUse` · `Agent`（Claude Code） | **只**改寫本外掛自己的型別（`flash-worker`、`flash-lite-scout`，有無 `mitosis-orchestrator:` 前綴皆可）與未指定型別且 `model: inherit` 的 `Agent` 呼叫。其他外掛的 agent、內建型別（`Explore`、`Plan`、`general-purpose` 等）與明確指定模型的呼叫一律原樣放行。同時釘定 `effort`（scout `low`、worker `medium`；呼叫端自帶的合法值優先；`CLAUDE_MITOSIS_PIN_EFFORT=0` 關閉），並為缺少 `REPORT FORMAT` 區塊的提示詞自動補上（`CLAUDE_MITOSIS_APPEND_REPORT_FORMAT=0` 關閉）。`CLAUDE_MITOSIS_PIN_SUBAGENTS=0` 可整個關閉。選用的 `CLAUDE_MITOSIS_PIN_BUILTINS=1`（預設關閉）會另外釘定內建的 `Explore`（scout 模型與 effort），並把 `general-purpose` 當作未指定型別的呼叫處理；明確指定模型仍會放行，`Plan` 與其他內建型別維持原樣。限制請見環境變數表。 |
-| `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-5.6-luna`（偵察）或 `gpt-5.6-terra`（執行）。Codex 不讓 hook 讀訊息時（0.163 傳的是加密字串），改依呼叫指定的 `agent_type` 決定，訊息原樣保留；沒指定角色的呼叫一律綁到 `worker`。 |
+| `PreToolUse` · `spawn_agent` / `codex exec`（Codex） | 依提示詞分類，將子代理綁定到 `gpt-6-luna`（偵察）或 `gpt-6.1-terra`（執行）。Codex 不讓 hook 讀訊息時（0.163 傳的是加密字串），改依呼叫指定的 `agent_type` 決定，訊息原樣保留；沒指定角色的呼叫一律綁到 `worker`。 |
 | `PreToolUse` · `send_message`（agy / Codex）· `SendMessage`（Claude Code）· `followup_task`（Codex） | 攔截對偵察子代理發送程式碼修改或超過 3 個編號步驟的追加指令；Codex 的 `followup_task` 另外比照新任務分類。Claude Code 端的收件者以 `PostToolUse` / `SubagentStop` 配對到的 agent id 辨識，Codex 端以 `spawn_agent` 時登記的 `task_name` 辨識。hook 讀不到內容的 Codex 追加指令，送給偵察子代理一律拒絕，請改開新的 explorer 或交給 worker。 |
 | `PreToolUse` · 偵察子代理自己的工具（Claude Code / Codex） | `flash-lite-scout` 與 Codex `explorer` 不論提示詞怎麼寫，都不能用 `Write` / `Edit` / `apply_patch`，shell 指令也要通過唯讀白名單。這項檢查讀的是指令文字，讀不準就拒絕，並不是沙盒（見 [SECURITY.md](./SECURITY.md)）。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
@@ -264,8 +266,8 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
 | **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
-| **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-5.6-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
-| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-5.6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
+| **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
+| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
 
 
 ### 信心分級分流與選用判斷器（v1.5.0）
@@ -490,7 +492,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `MITOSIS_JUDGE_ALLOW_HTTP_KEY` | `0` | 設為 `1` 時，金鑰也可經純 http 送往其他主機。 |
 | `MITOSIS_JUDGE_THRESHOLD` · `MITOSIS_JUDGE_MIN_CONFIDENCE` | `0.9` · `0.7` | 規則信心低於前者才詢問判斷器；判斷器信心低於後者視為不確定，退回 `flash`。 |
 | `MITOSIS_JUDGE_TIMEOUT` | `1.5` | 等待判斷器的秒數，逾時退回 `flash`。 |
-| `CODEX_MITOSIS_SCOUT_MODEL` · `CODEX_MITOSIS_WORKER_MODEL` | `gpt-5.6-luna` · `gpt-5.6-terra` | Codex 各階層釘定的模型。只讀環境變數（沒有 `AGY_` 形式）；無效值退回預設。 |
+| `CODEX_MITOSIS_SCOUT_MODEL` · `CODEX_MITOSIS_WORKER_MODEL` | `gpt-6-luna` · `gpt-6.1-terra` | Codex 各階層釘定的模型。只讀環境變數（沒有 `AGY_` 形式）；無效值退回預設。 |
 | `CODEX_MITOSIS_SCOUT_EFFORT` · `CODEX_MITOSIS_WORKER_EFFORT` | `low` · `medium` | Codex 各階層釘定的推理 effort；無效值退回預設。 |
 | `*_MITOSIS_LOCK_TIMEOUT` | `2` | 等待每個 session 狀態鎖的秒數，逾時即放行（前綴 `CLAUDE_`、`CODEX_` 或 `AGY_`）。 |
 | `MITOSIS_OTEL` | `0` | 設為 `1` 時，每個路由決策送出一個 OpenTelemetry `invoke_agent` span（需搭配下列檔案或端點）。 |

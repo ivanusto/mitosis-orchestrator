@@ -22,8 +22,8 @@ spec = importlib.util.spec_from_file_location("eo_codex_exec_rewrite", SCRIPT)
 eo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(eo)
 
-SCOUT = "gpt-5.6-luna"
-WORKER = "gpt-5.6-terra"
+SCOUT = eo.DEFAULT_CODEX_SCOUT_MODEL
+WORKER = eo.DEFAULT_CODEX_WORKER_MODEL
 LOOKUP = "find the parser"
 EDIT = "fix bug in a.py"
 CE = "codex " + "exec"

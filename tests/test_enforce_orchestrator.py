@@ -1339,12 +1339,16 @@ class TestCodexEngine(HookBase):
         self.assertTrue(eo.is_frontier_tier("gpt-6-pro"))
         self.assertFalse(eo.is_frontier_tier("gpt-6-mini"))
         self.assertFalse(eo.is_frontier_tier("gpt-5.6-luna"))
+        self.assertFalse(eo.is_frontier_tier("gpt-6-luna"))
         self.assertFalse(eo.is_frontier_tier("spark-1"))
 
     def test_codex_model_constants(self):
         self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-6.1-sol")
-        self.assertEqual(eo.DEFAULT_CODEX_WORKER_MODEL, "gpt-5.6-terra")
-        self.assertEqual(eo.DEFAULT_CODEX_SCOUT_MODEL, "gpt-5.6-luna")
+        spec = tomllib.loads((Path(__file__).resolve().parent.parent / "spec" / "models.toml").read_text(encoding="utf-8"))
+        self.assertEqual(spec["codex"]["worker"]["model"], "gpt-6.1-terra")
+        self.assertEqual(spec["codex"]["scout"]["model"], "gpt-6-luna")
+        self.assertEqual(eo.DEFAULT_CODEX_WORKER_MODEL, spec["codex"]["worker"]["model"])
+        self.assertEqual(eo.DEFAULT_CODEX_SCOUT_MODEL, spec["codex"]["scout"]["model"])
 
     def test_is_codex_payload(self):
         self.assertTrue(eo.is_codex_payload({"thread_id": "thr_123"}))
@@ -1438,7 +1442,7 @@ class TestCodexEngine(HookBase):
         res_worker = eo.handle_pre_tool_use(p_worker)
         self.assertEqual(res_worker.get("decision"), "allow")
         updated = (res_worker.get("updatedInput") or res_worker.get("overwrite") or {}).get("cmd", "")
-        self.assertIn("gpt-5.6-terra", updated)
+        self.assertIn(eo.DEFAULT_CODEX_WORKER_MODEL, updated)
 
         p_scout = {
             "thread_id": "thr_test",
@@ -1449,7 +1453,7 @@ class TestCodexEngine(HookBase):
         res_scout = eo.handle_pre_tool_use(p_scout)
         self.assertEqual(res_scout.get("decision"), "allow")
         updated_scout = (res_scout.get("updatedInput") or res_scout.get("overwrite") or {}).get("command", "")
-        self.assertIn("gpt-5.6-luna", updated_scout)
+        self.assertIn(eo.DEFAULT_CODEX_SCOUT_MODEL, updated_scout)
 
     def test_spawn_agent_and_mitosis_tools_pinning(self):
         p1 = {
@@ -1461,7 +1465,7 @@ class TestCodexEngine(HookBase):
         res1 = eo.handle_pre_tool_use(p1)
         self.assertEqual(res1.get("decision"), "allow")
         model1 = (res1.get("updatedInput") or res1.get("overwrite") or {}).get("model")
-        self.assertEqual(model1, "gpt-5.6-luna")
+        self.assertEqual(model1, eo.DEFAULT_CODEX_SCOUT_MODEL)
 
         p2 = {
             "thread_id": "thr_test",
@@ -1472,7 +1476,7 @@ class TestCodexEngine(HookBase):
         res2 = eo.handle_pre_tool_use(p2)
         self.assertEqual(res2.get("decision"), "allow")
         model2 = (res2.get("updatedInput") or res2.get("overwrite") or {}).get("model")
-        self.assertEqual(model2, "gpt-5.6-terra")
+        self.assertEqual(model2, eo.DEFAULT_CODEX_WORKER_MODEL)
 
         p3 = {
             "thread_id": "thr_test",
@@ -1483,12 +1487,12 @@ class TestCodexEngine(HookBase):
         res3 = eo.handle_pre_tool_use(p3)
         self.assertEqual(res3.get("decision"), "allow")
         model3 = (res3.get("updatedInput") or res3.get("overwrite") or {}).get("model")
-        self.assertEqual(model3, "gpt-5.6-luna")
+        self.assertEqual(model3, eo.DEFAULT_CODEX_SCOUT_MODEL)
 
         p3b = dict(p3, tool_input={"prompt": "Locate parse_token in src/. Do not edit anything."})
         res3b = eo.handle_pre_tool_use(p3b)
         model3b = (res3b.get("updatedInput") or res3b.get("overwrite") or {}).get("model")
-        self.assertEqual(model3b, "gpt-5.6-luna")
+        self.assertEqual(model3b, eo.DEFAULT_CODEX_SCOUT_MODEL)
 
         p4 = {
             "thread_id": "thr_test",
@@ -1499,7 +1503,7 @@ class TestCodexEngine(HookBase):
         res4 = eo.handle_pre_tool_use(p4)
         self.assertEqual(res4.get("decision"), "allow")
         model4 = (res4.get("updatedInput") or res4.get("overwrite") or {}).get("model")
-        self.assertEqual(model4, "gpt-5.6-terra")
+        self.assertEqual(model4, eo.DEFAULT_CODEX_WORKER_MODEL)
 
     def test_codex_notify_report_validation_and_branch_worktree(self):
         msg_ok = "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: pytest ok\nNOTES: All tests pass"
@@ -1573,13 +1577,13 @@ class TestMitosisMCPServer(unittest.TestCase):
             return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: grep ok\nNOTES: none", ""
 
         res = mcp.execute_subagent_task({"prompt": "Locate parse_token in src/"}, runner=mock_runner)
-        self.assertEqual((res["model"], res["confidence"], res["decision_source"]), ("gpt-5.6-luna", 0.85, "rule"))
-        res = mcp.execute_subagent_task({"prompt": "Locate parse_token", "model": "gpt-5.6-terra"}, runner=mock_runner)
+        self.assertEqual((res["model"], res["confidence"], res["decision_source"]), (eo.DEFAULT_CODEX_SCOUT_MODEL, 0.85, "rule"))
+        res = mcp.execute_subagent_task({"prompt": "Locate parse_token", "model": eo.DEFAULT_CODEX_WORKER_MODEL}, runner=mock_runner)
         self.assertEqual((res["confidence"], res["decision_source"]), (1.0, "explicit"))
 
     def test_tools_call_scout_mock_runner(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):
-            self.assertEqual(model, "gpt-5.6-luna")
+            self.assertEqual(model, eo.DEFAULT_CODEX_SCOUT_MODEL)
             return 0, "STATUS: COMPLETED\nFILES_CHANGED: NONE\nVERIFICATION: grep ok\nNOTES: Found token", ""
 
         server = mcp.MitosisMCPServer(runner=mock_runner)
@@ -1594,7 +1598,7 @@ class TestMitosisMCPServer(unittest.TestCase):
 
     def test_tools_call_worker_mock_runner(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):
-            self.assertEqual(model, "gpt-5.6-terra")
+            self.assertEqual(model, eo.DEFAULT_CODEX_WORKER_MODEL)
             self.assertEqual(workspace, "branch")
             return 0, "STATUS: COMPLETED\nFILES_CHANGED: src/auth.py\nVERIFICATION: pytest ok\nNOTES: Fixed bug", ""
 
@@ -1633,8 +1637,8 @@ class TestMitosisMCPServer(unittest.TestCase):
             },
         })
         self.assertFalse(res["result"]["isError"])
-        self.assertIn("gpt-5.6-luna", recorded_models)
-        self.assertIn("gpt-5.6-terra", recorded_models)
+        self.assertIn(eo.DEFAULT_CODEX_SCOUT_MODEL, recorded_models)
+        self.assertIn(eo.DEFAULT_CODEX_WORKER_MODEL, recorded_models)
 
     def test_report_validation_failure_marks_error(self):
         def mock_runner(prompt, model, workspace="inherit", cwd=None):
@@ -2067,18 +2071,18 @@ class TestMitosisMCPSandbox(unittest.TestCase):
         tempfile.tempdir = None
 
     def test_scout_is_read_only(self):
-        cmd = mcp.build_codex_cmd("p", "gpt-5.6-luna", role_type=mcp.SCOUT_TYPE)
+        cmd = mcp.build_codex_cmd("p", eo.DEFAULT_CODEX_SCOUT_MODEL, role_type=mcp.SCOUT_TYPE)
         self.assertIn("read-only", cmd)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", cmd)
 
     def test_worker_is_workspace_write(self):
-        cmd = mcp.build_codex_cmd("p", "gpt-5.6-terra", workspace="branch", role_type=mcp.WORKER_TYPE)
+        cmd = mcp.build_codex_cmd("p", eo.DEFAULT_CODEX_WORKER_MODEL, workspace="branch", role_type=mcp.WORKER_TYPE)
         self.assertIn("workspace-write", cmd)
         self.assertIn("--worktree", cmd)
 
     def test_yolo_opt_in(self):
         os.environ["MITOSIS_CODEX_YOLO"] = "1"
-        cmd = mcp.build_codex_cmd("p", "gpt-5.6-terra")
+        cmd = mcp.build_codex_cmd("p", eo.DEFAULT_CODEX_WORKER_MODEL)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", cmd)
         self.assertNotIn("--sandbox", cmd)
 

@@ -2,6 +2,6 @@
 # Usage: codex exec --profile mitosis-scout "<read-only lookup task>"
 # Installed to $CODEX_HOME/mitosis-scout.config.toml by scripts/setup-codex.py.
 # Generated from spec/models.toml; edit the spec and run scripts/sync-generated.py.
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "low"
 sandbox_mode = "read-only"

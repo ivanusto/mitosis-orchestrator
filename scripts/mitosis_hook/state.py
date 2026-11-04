@@ -386,7 +386,8 @@ def _record_tier(info: Dict[str, Any]) -> str:
     if tier in ("flash_lite", "flash"):
         return str(tier)
     model = str(info.get("model") or "").strip().lower()
-    if model in ("flash_lite", "haiku", DEFAULT_CODEX_SCOUT_MODEL.lower(), codex_tier_model("flash_lite").lower()):
+    # "gpt-5.6-luna" is the previous default scout: state files written by it still name it.
+    if model in ("flash_lite", "haiku", "gpt-5.6-luna", DEFAULT_CODEX_SCOUT_MODEL.lower(), codex_tier_model("flash_lite").lower()):
         return "flash_lite"
     return "flash"
 

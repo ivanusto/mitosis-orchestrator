@@ -7,7 +7,7 @@ You are operating under the **Mitosis Orchestrator** multi-platform policy:
 > [!IMPORTANT]
 > - In **Antigravity (`agy`)**: Never pass `Model: "inherit"` or `Model: "pro"` to `invoke_subagent`, and never call `agent(...)` inside a `run_workflow` script without `model="flash"` or `model="flash_lite"`.
 > - In **Anthropic Claude Code**: Delegate execution tasks to `Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"` (sonnet, effort `medium`) and fast reconnaissance to `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (haiku, effort `low`); the hook pins both model and effort. Other plugins' agents and built-in types are not rewritten by the policy.
-> - In **OpenAI Codex CLI (0.134+)**: Pinned via role files in `$CODEX_HOME/agents/` (`explorer` / `flash-lite-scout` on `gpt-5.6-luna`, `worker` / `flash-worker` on `gpt-5.6-terra`) selected with `spawn_agent(agent_type=...)`, or via profile files `$CODEX_HOME/mitosis-scout.config.toml` (`read-only`) and `mitosis-worker.config.toml` (`workspace-write`) used with `codex exec --profile <name>`.
+> - In **OpenAI Codex CLI (0.134+)**: Pinned via role files in `$CODEX_HOME/agents/` (`explorer` / `flash-lite-scout` on `gpt-6-luna`, `worker` / `flash-worker` on `gpt-6.1-terra`) selected with `spawn_agent(agent_type=...)`, or via profile files `$CODEX_HOME/mitosis-scout.config.toml` (`read-only`) and `mitosis-worker.config.toml` (`workspace-write`) used with `codex exec --profile <name>`.
 
 ---
 
@@ -16,10 +16,10 @@ You are operating under the **Mitosis Orchestrator** multi-platform policy:
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
 | **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | Architecture design, cross-cutting refactoring, API contracts, task decomposition, reviewing diffs, and final synthesis. |
-| **Execution Worker** | `flash` via `flash-worker` | `sonnet` via `mitosis-orchestrator:flash-worker` | **`gpt-5.6-terra`** via `worker` / `flash-worker` / `--profile mitosis-worker` | Multi-file exploration, call-graph tracing, writing and running tests, scoped code edits within explicit file allowlist (`workspace-write`). |
-| **Reconnaissance Scout** | `flash_lite` via `flash-lite-scout` | `haiku` via `mitosis-orchestrator:flash-lite-scout` | **`gpt-5.6-luna`** via `explorer` / `flash-lite-scout` / `--profile mitosis-scout` | High-fan-out single-hop read-only lookups: symbol searches, `grep`/`glob`, config inspection, git/log status, `.log` slicing (`read-only`). |
+| **Execution Worker** | `flash` via `flash-worker` | `sonnet` via `mitosis-orchestrator:flash-worker` | **`gpt-6.1-terra`** via `worker` / `flash-worker` / `--profile mitosis-worker` | Multi-file exploration, call-graph tracing, writing and running tests, scoped code edits within explicit file allowlist (`workspace-write`). |
+| **Reconnaissance Scout** | `flash_lite` via `flash-lite-scout` | `haiku` via `mitosis-orchestrator:flash-lite-scout` | **`gpt-6-luna`** via `explorer` / `flash-lite-scout` / `--profile mitosis-scout` | High-fan-out single-hop read-only lookups: symbol searches, `grep`/`glob`, config inspection, git/log status, `.log` slicing (`read-only`). |
 
-### A. Reconnaissance Scout (`flash_lite` / `haiku` / `gpt-5.6-luna`)
+### A. Reconnaissance Scout (`flash_lite` / `haiku` / `gpt-6-luna`)
 Single-hop, read-only lookups:
 - Locating files, symbols, definitions or references
 - Targeted grep/glob searches and directory listings
@@ -29,7 +29,7 @@ Single-hop, read-only lookups:
 
 Scouts have no write tools and no web mutation tools. On Claude Code the scout has `Bash` for read-only checks; the hook allows only an allowlist of read-only commands (`git status/log/diff/show`, `ls`, `rg`, `wc`, `tail`, ...) and denies redirection. Prompts containing mutation verbs (implement, refactor, edit, fix, patch, delete, ...) are automatically upgraded to execution workers by the policy.
 
-### B. Execution Worker (`flash` / `sonnet` / `gpt-5.6-terra`)
+### B. Execution Worker (`flash` / `sonnet` / `gpt-6.1-terra`)
 Moderate-complexity analysis or scoped execution:
 - Multi-file exploration, call-graph tracing, root-cause analysis
 - Web and documentation research (`search_web`, `read_url_content`, `WebFetch`, `WebSearch`)

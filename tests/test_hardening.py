@@ -297,7 +297,7 @@ class TestMcpServerRobustness(unittest.TestCase):
         self.assertTrue(worker["is_error"])
 
     def test_dash_prompt_stays_positional(self):
-        cmd = mcp.build_codex_cmd("--help me", "gpt-5.6-terra")
+        cmd = mcp.build_codex_cmd("--help me", mcp.DEFAULT_CODEX_WORKER_MODEL)
         self.assertEqual(cmd[-2:], ["--", "--help me"])
 
     def test_handler_exception_becomes_internal_error(self):

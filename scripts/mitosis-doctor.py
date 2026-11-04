@@ -1042,6 +1042,38 @@ def check_scout_shell_rules(ctx: Ctx, platform: str) -> None:
         ctx.add(platform, "scout_shell_rules", OK, "info: posix (no pwsh or powershell found)")
 
 
+def effective_codex_model(models: Optional[Dict[str, Any]], tier: str) -> Optional[str]:
+    """The model a Codex tier is pinned to: a valid CODEX_MITOSIS_<TIER>_MODEL, else spec/models.toml."""
+    override = os.environ.get("CODEX_MITOSIS_%s_MODEL" % tier.upper(), "").strip()
+    if re.match(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$", override):
+        return override
+    want = dig(models, "codex", tier, "model")
+    return want if isinstance(want, str) and want else None
+
+
+def check_codex_pinned_models(ctx: Ctx, p: str, cfg: Any, xdir: Path, models: Optional[Dict[str, Any]]) -> None:
+    """Info row when the primary and worker share a model, and a warning for a pin Codex does not list."""
+    scout = effective_codex_model(models, "scout")
+    worker = effective_codex_model(models, "worker")
+    primary = cfg.get("model") if isinstance(cfg, dict) else None
+    if worker and isinstance(primary, str) and primary == worker:
+        ctx.add(p, "worker_same_as_primary", OK,
+                "the primary model is also the worker model (`%s`): the worker differs from the primary only by reasoning effort" % safe(worker))
+    cache, cerr = load_json(xdir / "models_cache.json")
+    listed = cache.get("models") if cerr is None and isinstance(cache, dict) else None
+    if not isinstance(listed, list):
+        return
+    slugs = {m.get("slug") for m in listed if isinstance(m, dict)}
+    absent = [m for m in (scout, worker) if m and m not in slugs]
+    if absent:
+        ctx.add(p, "pinned_models", WARN,
+                "pinned model(s) not in Codex's models_cache.json: %s. To go back to the earlier models run "
+                "`CODEX_MITOSIS_WORKER_MODEL=gpt-5.6-terra CODEX_MITOSIS_SCOUT_MODEL=gpt-5.6-luna python3 scripts/setup-codex.py` "
+                "and keep both variables exported for Codex" % ", ".join("`%s`" % safe(m) for m in absent))
+    else:
+        ctx.add(p, "pinned_models", OK, "the pinned scout and worker models are listed in models_cache.json")
+
+
 def check_codex(ctx: Ctx) -> None:
     p = "codex"
     env_home = os.environ.get("CODEX_HOME")
@@ -1104,7 +1136,8 @@ def check_codex(ctx: Ctx) -> None:
         elif have == want:
             ctx.add(p, "role." + role, OK, "model matches spec/models.toml")
         else:
-            ctx.add(p, "role." + role, WARN, "model differs from spec/models.toml (expected `%s`); fine if you chose it" % safe(want))
+            ctx.add(p, "role." + role, WARN, "model differs from spec/models.toml (expected `%s`); fine if you chose it, otherwise run `python3 scripts/setup-codex.py` to install the current role files" % safe(want))
+    check_codex_pinned_models(ctx, p, cfg, xdir, models)
     offline_probe(ctx, p, root)
     check_scout_shell_rules(ctx, p)
     check_heartbeat(ctx, p, version)
@@ -1174,7 +1207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
               file=sys.stderr if args.json else sys.stdout, flush=True)
     tmp = Path(tempfile.mkdtemp(prefix="mitosis-doctor-"))
     try:
-        ctx = Ctx(Path(args.home) if args.home else Path.home(), Path(args.root) if args.root else None, tmp)
+        ctx = Ctx(Path(args.home) if args.home else Path.home(), Path(args.root).resolve() if args.root else None, tmp)
         ctx.explicit_home = bool(args.home)
         if "claude" in platforms:
             check_claude(ctx, args.live)

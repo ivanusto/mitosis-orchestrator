@@ -28,8 +28,8 @@ eo = _load("eo_codex_overrides", "enforce-orchestrator.py")
 mcp = _load("mcp_codex_overrides", "mitosis-mcp-server.py")
 setup_codex = _load("setup_codex_overrides", "setup-codex.py")
 
-SCOUT = "gpt-5.6-luna"
-WORKER = "gpt-5.6-terra"
+SCOUT = eo.DEFAULT_CODEX_SCOUT_MODEL
+WORKER = eo.DEFAULT_CODEX_WORKER_MODEL
 LOOKUP = "Find where main is defined in this directory and report the file name."
 
 
@@ -144,7 +144,7 @@ class CodexOverridesTest(unittest.TestCase):
         self.assertRegex(scout, r'(?m)^model = "gpt-5.7-mini"$')
         self.assertRegex(scout, r'(?m)^model_reasoning_effort = "low"$')
         worker = (home / "agents" / "flash-worker.toml").read_text(encoding="utf-8")
-        self.assertRegex(worker, r'(?m)^model = "gpt-5.6-terra"$')
+        self.assertRegex(worker, r'(?m)^model = "%s"$' % re.escape(WORKER))
         self.assertRegex(worker, r'(?m)^model_reasoning_effort = "high"$')
         profile = (home / "mitosis-scout.config.toml").read_text(encoding="utf-8")
         self.assertRegex(profile, r'(?m)^model = "gpt-5.7-mini"$')
