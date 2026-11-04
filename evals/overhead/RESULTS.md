@@ -49,3 +49,11 @@ Loading the plugin without using `/orchestrate` cost the same as no plugin on th
 The inference in `evals/compare/RESULTS.md`, the README and `docs/cost*.md` that the extra cost "probably comes from loading the skill and hook context" is corrected to this. The +58% of the compare lookup arm was not reproduced at this size in this run. The compare HARM verdict stands under its own sealed rule.
 
 Scope: one short task, one machine, `opus` at `medium`, n=3 per arm, so the label for each arm is INCONCLUSIVE and the medians have wide spread. This explains overhead on a short task. It does not measure the value of the plugin in a long session, and it makes no savings claim.
+
+## Correction, 2026-11-04
+
+The sealed report and the sections above use token classes taken from the stream's per-call usage, which undercounts output tokens: the off median is about 700 there and 11,267 in the CLI's `modelUsage`. That is the visible gap to the effective cost. So the output share of 1.4% is wrong, and "the remainder is not determined" no longer holds.
+
+From `modelUsage` in the kept streams, medians over each arm's runs (off, loaded, orchestrate): output tokens 11,267, 11,366, 14,085; output USD 0.2253, 0.2273, 0.2817. `/orchestrate` against off: cache write +0.066 USD, output +0.056 USD (about 45% of the 0.1242 difference), cache read +0.018 USD. Medians of classes do not add up exactly.
+
+The static share of 24.5% is unaffected. The outcome NO TRIM is unaffected, because neither arm's difference was completely separated. `run.py` is sealed and stays as it was; any later harness must take output tokens from `modelUsage` or the transcript.

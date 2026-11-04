@@ -54,7 +54,7 @@ A Codex scout started through the MCP server runs under `--sandbox read-only`, w
 
 - Outcome by the sealed rule: NO TRIM.
 - First-call prefix (probe): `loaded` +786 tokens and `/orchestrate` +3,238 tokens against off.
-- By the sealed formula the static prefix explains 24.5% of the `/orchestrate` difference and output tokens 1.4%. The token decomposition leaves a visible gap to the effective cost in every arm. So loading the skill and hook context explains about a quarter; the rest is not determined.
+- By the sealed formula, text added to the prefix explains 24.5% of the `/orchestrate` difference. **Corrected 2026-11-04:** the 1.4% output share first published here was wrong, because the stream's per-call usage undercounts output tokens (the off median is about 700 in the stream and 11,267 in the CLI's `modelUsage`), which also explains the gap to the effective cost. From `modelUsage`, the medians for `/orchestrate` against off are cache write +0.066 USD, output +0.056 USD and cache read +0.018 USD, so output accounts for about 45% of the difference. The outcome is unchanged, because the difference was not completely separated.
 - Median peak context 58.6K (off) against 66.9K (`/orchestrate`).
 - The +58% of the earlier comparison was not reproduced at this size in this run. The earlier HARM verdict stands under its own sealed rule. n=3, short task, one machine.
 - This is not a savings claim. The README, `docs/cost*.md` and a dated note in `evals/compare/RESULTS.md` now say "probably comes from loading the skill and hook context" was an inference, not a measurement.

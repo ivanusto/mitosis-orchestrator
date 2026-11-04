@@ -403,7 +403,7 @@ Result (Claude Code, `opus` at `medium`, 18 scored runs, all 18 succeeded, none 
 | fix | 0.8240 | 0.8159 | on 1% lower | INCONCLUSIVE |
 
 1. The verdict follows the sealed rule. By the pre-registered action, the skill now says when not to use it, and 2.5 does not invest in dispatch rate.
-2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another, so subagents do not account for the extra cost. An earlier version of this item inferred that the extra cost "probably comes from loading the skill and hook context". That was an inference from the `Agent` counts and the primary's cost, not a measurement. The 2.5 overhead run (below) measured it and explains only about a quarter by its sealed formula; the rest is not determined.
+2. What it measures: 7 of 9 on-arm runs dispatched nothing even under explicit `/orchestrate`, and subagent cost was 0.05 USD in one run and 0.35 USD in another, so subagents do not account for the extra cost. An earlier version of this item inferred that the extra cost "probably comes from loading the skill and hook context". That was an inference from the `Agent` counts and the primary's cost, not a measurement. The 2.5 overhead run (below) measured it and explains only about a quarter by its sealed formula, and output tokens about 45% (corrected 2026-11-04; see that file).
 3. Limits: n=3 per arm, 3 uncorrected comparisons, and ops only just crosses the 10% line with a difference of about 0.05 USD. The tasks are short (peak context 40K to 90K against a 274K median in real sessions), so this says nothing about long sessions or context protection.
 4. A first attempt stopped after one scored run because the tamper check counted hook-written bytecode as a change. The harness was fixed and resealed; that run (success, 0.70 USD, off arm) was discarded, not reused.
 
@@ -420,7 +420,7 @@ Pre-registered in `evals/overhead/PROTOCOL.md`, sealed at plugin commit `368dc34
 | `/orchestrate` | 0.7684 | +0.1242 (+19.3%), not completely separated | INCONCLUSIVE |
 
 - Outcome by the sealed rule: NO TRIM. The first-call prefix is +786 tokens (loaded) and +3,238 tokens (`/orchestrate`) against off.
-- By the sealed formula, text added to the prefix explains 24.5% of the `/orchestrate` difference and output tokens 1.4%. The token decomposition leaves a visible gap to the effective cost in every arm. So loading the skill and hook context explains about a quarter; the remainder is not determined.
+- By the sealed formula, text added to the prefix explains 24.5% of the `/orchestrate` difference. **Corrected 2026-11-04:** the 1.4% output share first published here was wrong, because the stream's per-call usage undercounts output tokens (the off median is about 700 in the stream and 11,267 in the CLI's `modelUsage`), which also explains the gap to the effective cost. From `modelUsage`, the medians for `/orchestrate` against off are cache write +0.066 USD, output +0.056 USD and cache read +0.018 USD, so output accounts for about 45% of the difference. The outcome is unchanged, because the difference was not completely separated.
 - Median peak context was 58.6K (off) and 66.9K (`/orchestrate`).
 - The +58% of the comparison above was not reproduced at this size in this run. The earlier HARM verdict stands under its own sealed rule. n=3, a short task, one machine.
 
