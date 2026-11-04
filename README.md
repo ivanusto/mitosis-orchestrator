@@ -125,9 +125,9 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 
 | Platform | Verified version | Verified on | Method |
 | --- | --- | --- | --- |
-| Claude Code | 2.1.318 | 2026-11-04 | headless run of advice, enforce and built-in pinning |
-| Codex CLI | 0.166.0 | 2026-11-04 | installed plugin run after hook review |
-| agy | 1.5.0 | 2026-11-04 | headless run of the edit budget and advice |
+| Claude Code | 2.1.318 | 2026-11-04 | headless run of the renamed hooks file and built-in pinning |
+| Codex CLI | 0.166.0 | 2026-11-05 | installed plugin run after hook review |
+| agy | 1.5.0 | 2026-11-04 | headless run of the circuit breaker and write_file permissions |
 
 - Claude Code: 2.1.318 is the npm `latest` tag. The npm `stable` tag was 2.1.311 on that date and was not run.
 - agy: Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.7.0 - 2026-11-04
+## 2.7.0 - 2026-11-05
 
 **After updating, do this.** On Codex, run `python3 scripts/setup-codex.py`, because the models live in the role files: without it, children stay on the old models and doctor warns. Then open Codex once, accept the hook review, and run `python3 scripts/mitosis-doctor.py`. On Claude Code, start a new session.
 
