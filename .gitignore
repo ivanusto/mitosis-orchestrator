@@ -7,3 +7,6 @@ __pycache__/
 .env
 evals/results/
 eval-results.json
+
+# Claude Code per-user permissions (may contain secrets)
+.claude/settings.local.json
