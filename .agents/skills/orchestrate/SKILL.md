@@ -8,7 +8,7 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.0)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.1)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -37,7 +37,7 @@ When context must be gathered across the workspace before planning:
    - **Antigravity (`agy`)**: `invoke_subagent` with `TypeName: "flash-lite-scout"` and `"Model": "flash_lite"`.
    - **Claude Code**: `Agent` with `subagent_type: "mitosis-orchestrator:flash-lite-scout"` (the hook pins `model: haiku`, `effort: low`). Untyped `Agent` calls with `model: inherit` are classified by prompt; built-in `Explore` is left as-is.
    - **OpenAI Codex CLI**: `spawn_agent(agent_type="explorer")` (`flash-lite-scout` is accepted as an alias when scripts/setup-codex.py installed it) or `codex exec --profile mitosis-scout "<lookup>"` (`gpt-6-luna`, low effort, `read-only` sandbox).
-   - Keep each prompt narrowly scoped and end it with the four-header bounded REPORT FORMAT from `rules/AGENTS.md`.
+   - Keep each prompt narrowly scoped and do not ask it to look up `rules/AGENTS.md`: subagents answer with the four-header bounded REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES), and the hook appends it to prompts that lack it.
    - Scouts are strictly read-only; mutation tasks or web searches are directed to Phase 3 workers.
 3. Dispatch, then keep going:
    - **Antigravity (`agy`)**: end the turn right after dispatching; the platform wakes you when scouts report.

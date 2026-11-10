@@ -1474,6 +1474,20 @@ def _sequenced_action(clause: str) -> bool:
     return bool(m and "\u4e00" <= m.group(1) <= "\u9fff" and not _POLITE_CJK_READ_RE.match(clause[m.start(1):]))
 
 
+# Sequencing words that open a sentence ("Afterwards push the branch.", "然後把 build 推上去") hide the verb that follows.
+_SEQUENCER_OPEN_RE = re.compile(
+    r"(^|[.!?;。！？；\n])([ \t]*)\W*?(?:(?:and\s+then|then|afterwards?|after\s+that|next|finally|lastly|also|additionally|"
+    r"once\s+(?:you\s+are\s+|you'?re\s+|that'?s\s+)?(?:done|finished)|when\s+(?:you\s+are\s+|you'?re\s+)?(?:done|finished)|"
+    r"following\s+that)\b[,\s]*|(?:然後|然后|接著|接着|之後|之后|最後|最后|另外|順便|顺便|完成後|完成后|再)[，,\s]*(?:請|请)?\s*)+",
+    re.IGNORECASE,
+)
+
+
+def _strip_sequencers(text: str) -> str:
+    """Drop sequencing words at the start of each sentence so the imperative checks see the verb."""
+    return _SEQUENCER_OPEN_RE.sub(lambda m: m.group(1) + m.group(2), text)
+
+
 _OPENING_SKIP = {
     # read and research verbs
     *(_SEQUENCED_READ_WORDS - {"point"}), "run", "execute", "exec", "rerun", "invoke", "launch", "research", "investigate", "analyze", "analyse", "examine", "explore", "study", "survey",
@@ -2169,11 +2183,12 @@ def _decide_by_rules(subagent: Dict[str, Any], use_role: bool = True) -> Tuple[D
         if needs_web(text):
             return done(_rule_decision("flash", worker_upgrade, "scout-web",
                                        "scout has no web access; upgraded to flash-worker"))
-        opening = _scout_opening_action(prompt)
+        unseq = _strip_sequencers(prompt)
+        opening = _scout_opening_action(prompt) or (_scout_opening_action(unseq) if unseq != prompt else None)
         if opening:
             return done(_rule_decision("flash", worker_upgrade, "scout-imperative",
                                        f"opening clause '{opening}' is an action; upgraded to flash-worker"))
-        any_action = _action_sentence(prompt)
+        any_action = _action_sentence(prompt) or (_action_sentence(unseq) if unseq != prompt else None)
         if any_action:
             return done(_rule_decision("flash", worker_upgrade, "scout-imperative",
                                        f"sentence '{any_action}' is an action; upgraded to flash-worker"))
@@ -2202,7 +2217,7 @@ def _decide_by_rules(subagent: Dict[str, Any], use_role: bool = True) -> Tuple[D
         return done(_rule_decision(requested, None, "explicit-model", "explicit model honoured"))
     if DOCS_LOOKUP_RE.search(_blank_local_docs(text)) or _external_docs(text):
         return done(_rule_decision("flash", None, "docs-lookup", "docs or web lookup needs web access"))
-    trailing = find_trailing_imperative(prompt) or _action_sentence(prompt)
+    trailing = find_trailing_imperative(prompt) or _action_sentence(prompt) or _action_sentence(_strip_sequencers(prompt))
     if trailing:
         return done(_rule_decision("flash", None, "trailing-imperative",
                                    f"action clause '{trailing}' follows a question"))

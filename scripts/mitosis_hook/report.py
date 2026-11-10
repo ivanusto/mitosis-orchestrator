@@ -75,6 +75,113 @@ _REPORT_LEAD_RE = re.compile(
 )
 
 
+# Format-only instructions that name no canonical headers: "Follow the four-line REPORT FORMAT from
+# rules/AGENTS.md if you can locate it", "otherwise end your reply with exactly these four lines:" plus a
+# block of `HEADER: <placeholder>` lines. A clause is dropped only when it is nothing but such an
+# instruction, so "Follow the REPORT FORMAT and delete build/." keeps its action.
+_FMT_NAME = (
+    r"(?:the\s+|this\s+|our\s+|that\s+)?(?:(?:four|4|bounded|standard|required)[- ]line\s+"
+    r"|(?:four|4)[- ]header\s+|bounded\s+)?REPORT\s+FORMAT"
+)
+_FMT_WHERE = (
+    r"(?:\s+(?:from|in|of|per|at|(?:as\s+)?(?:defined|described|specified|given)\s+in)\s+"
+    r"[`'\"]?[\w./\\~-]+[`'\"]?(?:\s+file)?)?"
+)
+_FMT_COND = (
+    r"(?:\s*[,(]?\s*(?:if|when)\s+you\s+(?:can|could|are\s+able\s+to)\s+"
+    r"(?:locate|find|see|access|read|open)\s+(?:it|that|the\s+file|this)\s*\)?)?"
+)
+_FMT_VERB = (
+    r"(?:follow|use|apply|obey|adopt|respect"
+    r"|(?:end|finish)\s+(?:your\s+|the\s+)?(?:reply|response|report|answer|message)\s+with"
+    r"|(?:reply|respond|answer|report)\s+(?:with|using|in)|conclude\s+with|close\s+with)"
+)
+_FMT_PREFIX = r"^\W*(?:(?:then|and|also|please|finally|lastly|otherwise|or|else)[,\s]+)*"
+_FORMAT_CLAUSE_RE = re.compile(
+    _FMT_PREFIX + _FMT_VERB + r"\s+(?:(?:strictly|exactly)\s+)?" + _FMT_NAME + _FMT_WHERE
+    + r"(?:\s+(?:above|below|here))?" + _FMT_COND + r"\W*$",
+    re.IGNORECASE,
+)
+_FORMAT_CLAUSE_ZH_RE = re.compile(
+    r"^\W*(?:(?:最後|最后|然後|然后|並|并|請|请|再|同時|同时)[,，\s]*)*"
+    r"(?:依照|依据|依據|按照|遵循|遵照|使用|套用|採用|采用)[^，。；;\n]{0,50}?REPORT\s*FORMAT"
+    r"\s*(?:的)?\s*(?:回報|回报|回覆|回复|報告|报告|格式|輸出|输出)?\s*(?:即可|就好|為準|为准)?\W*$",
+    re.IGNORECASE,
+)
+# One `HEADER: <placeholder>` line of an ad-hoc report template.
+_TEMPLATE_LINE_RE = re.compile(
+    r"^[ \t]*[-*`]*[ \t]*[A-Z][A-Z_]{1,24}(?:[ _][A-Z_]{2,24})?[*`]*[ \t]*:[ \t]*"
+    r"(?:<[^>\n]{0,80}>|\w+(?:[ \t]*[|/][ \t]*\w+)*)?[ \t]*`*[ \t]*$"
+)
+_TEMPLATE_LEAD_RE = re.compile(
+    r"(?:(?<=[.!?;；。！？])\s*|^)\W*?(?:(?:then|and|please|finally|otherwise|or|else)[,\s]+)*"
+    r"(?:(?:end|finish|close|conclude|reply|respond|answer|return|report|format|structure|use|give)\b"
+    r"[^.!?;；。！？:：\n]*\b(?:lines?|headers?|format|template|fields?|report|reply|response|answer)\b"
+    r"[^.!?;；。！？:：\n]*"
+    r"|(?:最後|最后|結尾|结尾|請|请|回覆|回复|回報|回报|用)[^。；;\n]*(?:行|格式|標頭|标题|回報|回报|回覆|回复)[^。；;\n]*)"
+    r"[:：]\s*\Z",
+    re.IGNORECASE,
+)
+_CLAUSE_SPLIT_RE = re.compile(r"([;；。！？\n]|[.!?](?=\s|$))")
+_SUBCLAUSE_SPLIT_RE = re.compile(r"([,，])")
+
+
+def _is_format_clause(clause: str) -> bool:
+    return bool(_FORMAT_CLAUSE_RE.match(clause) or _FORMAT_CLAUSE_ZH_RE.match(clause))
+
+
+def _drop_template_blocks(text: str) -> str:
+    """Remove runs of 3+ `HEADER: <placeholder>` lines and the lead-in clause before them."""
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        j = i
+        while j < len(lines) and _TEMPLATE_LINE_RE.match(lines[j]):
+            j += 1
+        if j - i < 3:
+            out.append(lines[i])
+            i += 1
+            continue
+        k = len(out) - 1
+        while k >= 0 and not out[k].strip():
+            k -= 1
+        if k >= 0:
+            out[k] = _TEMPLATE_LEAD_RE.sub("", out[k]).rstrip()
+        i = j
+    return "\n".join(out)
+
+
+def _drop_format_clauses(text: str) -> str:
+    parts = _CLAUSE_SPLIT_RE.split(text)
+    out = []
+    for idx in range(0, len(parts), 2):
+        clause = parts[idx]
+        delim = parts[idx + 1] if idx + 1 < len(parts) else ""
+        if clause.strip() and _is_format_clause(clause):
+            out.append("\n" if delim == "\n" else "")
+            continue
+        subs = _SUBCLAUSE_SPLIT_RE.split(clause)
+        if len(subs) > 1:
+            kept = []
+            for n in range(0, len(subs), 2):
+                piece = subs[n]
+                sep = subs[n + 1] if n + 1 < len(subs) else ""
+                if piece.strip() and _is_format_clause(piece):
+                    continue
+                kept.append(piece + sep)
+            clause = "".join(kept)
+        out.append(clause + delim)
+    return "".join(out)
+
+
+def strip_format_instructions(text: str) -> str:
+    """Drop reply-format-only clauses and ad-hoc header templates; anything else in the text stays."""
+    text = _drop_template_blocks(text)
+    text = _drop_format_clauses(text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def strip_report_format(prompt: str) -> str:
     """Drop the report instructions before classification: they describe the answer, not the task.
 
@@ -89,7 +196,7 @@ def strip_report_format(prompt: str) -> str:
         if lead:
             head = head[:len(head) - len(head.rsplit("\n", 1)[-1]) + lead.start()].rstrip()
         text = (head + "\n" + text[match.end():]).strip()
-    return text
+    return strip_format_instructions(text)
 
 
 def prompt_has_report_format(prompt: str) -> bool:

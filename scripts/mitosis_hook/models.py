@@ -319,7 +319,7 @@ POLICY_NOTICE = (
     "(`TypeName: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
     "research and scoped code edits to `flash` (`TypeName: \"flash-worker\"`). "
     "Never use `Model: \"inherit\"` or `Model: \"pro\"` on subagents. "
-    "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+    "Subagents answer with the four-line REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES); the hook appends it to prompts that lack it, so do not ask subagents to find rules/AGENTS.md."
 )
 
 
@@ -336,7 +336,7 @@ def claude_policy_notice() -> str:
         f"`subagent_type: \"mitosis-orchestrator:flash-worker\"` ({worker_tag}). "
         "Untyped `Agent` calls are classified by prompt; other plugins' agents and built-in types "
         "(Explore, Plan, general-purpose) are left untouched. "
-        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md."
+        "Subagents answer with the four-line REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES); the hook appends it to prompts that lack it, so do not ask subagents to find rules/AGENTS.md."
     )
 
 
@@ -351,7 +351,7 @@ def codex_policy_notice() -> str:
         "(`agent_type: \"explorer\"`) and multi-file research, test runs, web/docs "
         f"research and scoped code edits to `{codex_tier_model('flash')}` (`agent_type: \"worker\"`). "
         "Never use `model: \"inherit\"` on subagents. "
-        "Every subagent prompt must end with the four-line REPORT FORMAT from rules/AGENTS.md. "
+        "Subagents answer with the four-line REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES); the hook appends it to prompts that lack it, so do not ask subagents to find rules/AGENTS.md. "
         "Do not dictate other report headings in spawn_agent messages: subagents answer with "
         "STATUS/FILES_CHANGED/VERIFICATION/NOTES."
     )
