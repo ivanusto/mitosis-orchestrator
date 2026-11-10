@@ -110,6 +110,17 @@ class FlagOffTest(Base):
         self.assertEqual(self.state().get("pending_spawns", []), [])
 
 
+class NewBuiltinTypesTest(Base):
+    def test_fork_and_web_fetch_are_left_unpinned_as_builtin(self):
+        for t in ("fork", "web-fetch"):
+            args, res = self.spawn(t)
+            hso = res["hookSpecificOutput"]
+            self.assertNotIn("updatedInput", hso)
+            self.assertEqual(hso["permissionDecisionReason"],
+                             "Mitosis Orchestrator: built-in agent type '%s'; not pinned." % t)
+        self.assertEqual(self.state().get("pending_spawns", []), [])
+
+
 class ExploreTest(Base):
     def test_explore_pinned_to_scout_values(self):
         self.flag()

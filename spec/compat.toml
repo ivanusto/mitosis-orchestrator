@@ -4,20 +4,20 @@
 # `note_zh` are the Traditional Chinese texts used by README.zh-TW.md.
 
 [claude]
-verified = "2.1.318"
-verified_on = "2026-11-04"
-method = "headless run of the renamed hooks file and built-in pinning"
-method_zh = "以 headless 實跑改名後的 hooks 檔與內建代理釘定"
-fixtures = "2.1.318"
-note = "2.1.318 is the npm `latest` tag. The npm `stable` tag was 2.1.311 on that date and was not run."
-note_zh = "2.1.318 是 npm 的 `latest` 標籤。當天 npm 的 `stable` 標籤是 2.1.311，未實跑。"
+verified = "2.1.322"
+verified_on = "2026-11-10"
+method = "headless smoke and interactive background-agent run with claude-fable-5-2 as primary"
+method_zh = "以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理"
+fixtures = "2.1.322"
+note = "The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`."
+note_zh = "Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。"
 
 [codex]
 verified = "0.166.0"
 verified_on = "2026-11-05"
 method = "installed plugin run after hook review"
 method_zh = "完成 hook review 後以已安裝外掛實跑"
-fixtures = "source-0.166.0"
+fixtures = "0.166.0"
 
 [agy]
 verified = "1.5.0"

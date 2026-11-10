@@ -30,7 +30,7 @@ A real Claude Code session (Opus 5.5 primary) running `/orchestrate` on a small 
 
 <p align="center"><img src="./assets/screenshots/orchestrate-en.png" width="820" alt="Claude Code session: the primary dispatches a flash-lite-scout and a flash-worker, then verifies the tests" /></p>
 
-`scripts/mitosis-cost-report.py` on a run of the same task: the scout ran on haiku, the worker on sonnet, and the primary still accounts for most of the cost (orchestration did not make this run cheaper; see the comparison below) (see [Choosing the Primary Model](./docs/cost.md#choosing-the-primary-model-on-claude-code-fable-51-vs-opus-55)):
+`scripts/mitosis-cost-report.py` on a run of the same task: the scout ran on haiku, the worker on sonnet, and the primary still accounts for most of the cost (orchestration did not make this run cheaper; see the comparison below) (see [Choosing the Primary Model](./docs/cost.md#choosing-the-primary-model-on-claude-code-fable-52-vs-opus-55)):
 
 <p align="center"><img src="./assets/screenshots/cost.png" width="820" alt="Cost ledger: haiku scout, sonnet worker, opus primary, total 0.41 USD" /></p>
 
@@ -92,7 +92,7 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 | Provider | Supported Primary Orchestrator Models | Auto-Filtered Small Tiers (Blocked as Primary) |
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**, **`gpt-5.6-sol`**, `gpt-5.6-terra`, `gpt-6.1-terra`, `gpt-6-astra`, `o1`, `o3`, `o4` | `gpt-5.6-luna`, `gpt-6-luna`, `gpt-5.4-mini`, `o4-mini`, `o3-mini`, `gpt-4.1-mini` |
-| **Anthropic** (Claude Code) | **`fable`** (Claude Fable 5.1), **`opus`** (Claude Opus 5.5), `sonnet` (Claude Sonnet 5.5) | `haiku` (Claude Haiku 5.5, `claude-haiku-*`) |
+| **Anthropic** (Claude Code) | **`fable`** (Claude Fable 5.2), **`opus`** (Claude Opus 5.5), `sonnet` (Claude Sonnet 5.5) | `haiku` (Claude Haiku 5.5, `claude-haiku-*`) |
 | **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano` |
 | **xAI** | `Grok 3`, `Grok 4`, `grok-3`, `grok-4`, `grok-3-thinking` | `grok-3-mini`, `grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`, `DeepSeek-V3`, `deepseek-reasoner`, `deepseek-chat` | `deepseek-lite` |
@@ -103,11 +103,13 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 ---
 
-## Choosing the Primary Model on Claude Code: Fable 5.1 vs Opus 5.5
+## Choosing the Primary Model on Claude Code: Fable 5.2 vs Opus 5.5
 
 - Recommended default: `opus` at `medium` effort. Scouts (`haiku`) and workers (`sonnet`) are pinned by the hook.
 - Use `fable` for multi-hour autonomous runs, ambiguous specifications, cross-cutting refactors with subtle invariants and deep review.
-- The primary is 70% to 85% of the spend in the measured sessions, so the primary model and its effort are the biggest cost lever.
+- Fable 5.2 costs 2x Opus 5.5 (8 / 40 against 4 / 20 per MTok; a 1-hour cache write is 16 against 8). In a three-task check on 2026-11-10, Opus 5.5 was cheaper per task than Fable 5.2, while Fable 5.2 was 8% to 32% faster than Fable 5.1 (n=3 each, a small sample).
+- Fast mode bills every token category at 2x; `mitosis-cost-report.py` reads `usage.speed` from the transcript and prices those turns accordingly.
+- The primary is 70% to 85% of the spend in the sessions measured on Fable 5.1, so the primary model and its effort are the biggest cost lever.
 - Prices, a worked example, the cost report and daughter-cell tuning: [docs/cost.md](./docs/cost.md).
 
 ---
@@ -125,11 +127,11 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 
 | Platform | Verified version | Verified on | Method |
 | --- | --- | --- | --- |
-| Claude Code | 2.1.318 | 2026-11-04 | headless run of the renamed hooks file and built-in pinning |
+| Claude Code | 2.1.322 | 2026-11-10 | headless smoke and interactive background-agent run with claude-fable-5-2 as primary |
 | Codex CLI | 0.166.0 | 2026-11-05 | installed plugin run after hook review |
 | agy | 1.5.0 | 2026-11-04 | headless run of the circuit breaker and write_file permissions |
 
-- Claude Code: 2.1.318 is the npm `latest` tag. The npm `stable` tag was 2.1.311 on that date and was not run.
+- Claude Code: The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.
 - agy: Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.
 <!-- END GENERATED: compat -->
 
@@ -138,7 +140,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.1)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:

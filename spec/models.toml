@@ -37,6 +37,8 @@ model = "flash"
 
 # USD per million tokens: [input, cache_write_5m, cache_read, output]
 [prices]
+"claude-fable-5-2" = [8.0, 10.0, 0.20, 40.0]
+"claude-mythos-5-2" = [8.0, 10.0, 0.20, 40.0]
 "claude-fable-5-1" = [10.0, 12.5, 0.25, 50.0]
 "claude-mythos-5-1" = [10.0, 12.5, 0.25, 50.0]
 "claude-fable-5" = [10.0, 12.5, 0.25, 50.0]
@@ -53,7 +55,7 @@ model = "flash"
 
 # Short aliases used when a transcript records a bare tier name.
 [price_aliases]
-fable = "claude-fable-5-1"
+fable = "claude-fable-5-2"
 opus = "claude-opus-5-5"
 sonnet = "claude-sonnet-5-5"
 haiku = "claude-haiku-5-5"
@@ -61,3 +63,7 @@ haiku = "claude-haiku-5-5"
 [cache]
 # 1h cache writes cost this multiple of the input price.
 one_hour_write_multiplier = 2.0
+
+[fast]
+# Fast mode (transcript message.usage.speed == "fast") bills every token category at this multiple of standard.
+multiplier = 2.0

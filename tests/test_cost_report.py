@@ -120,6 +120,31 @@ class TestCollect(CostReportBase):
         self.assertEqual(cr.price_for("claude-opus-5", cr.DEFAULT_PRICES), cr.DEFAULT_PRICES["claude-opus-5"])
         self.assertIsNone(cr.price_for("gemini-flash", cr.DEFAULT_PRICES))
 
+    def test_fable_5_2_has_its_own_exact_price(self):
+        self.assertEqual(cr.DEFAULT_PRICES["claude-fable-5-2"], (8.0, 10.0, 0.20, 40.0))
+        self.assertEqual(cr.price_for("claude-fable-5-2", cr.DEFAULT_PRICES), (8.0, 10.0, 0.20, 40.0))
+        self.assertEqual(cr.price_for("claude-mythos-5-2", cr.DEFAULT_PRICES), (8.0, 10.0, 0.20, 40.0))
+        self.assertNotEqual(cr.price_for("claude-fable-5-2", cr.DEFAULT_PRICES), cr.DEFAULT_PRICES["claude-fable-5"])
+        self.assertEqual(cr.price_for("fable", cr.DEFAULT_PRICES), cr.DEFAULT_PRICES["claude-fable-5-2"])
+
+    def test_fast_mode_records_cost_double_on_every_category(self):
+        fast = assistant("claude-fable-5-2", "msg_f", 100, 1000, 10000, 500)
+        fast["message"]["usage"]["speed"] = "fast"
+        std = assistant("claude-fable-5-2", "msg_s", 100, 1000, 10000, 500)
+        std["message"]["usage"]["speed"] = "standard"
+        sid = "99999999-2222-4333-8444-555555555555"
+        write_jsonl(self.project / f"{sid}.jsonl", [fast, std])
+        summary = cr.summarize(cr.collect_session(self.project, sid), cr.DEFAULT_PRICES, primary_cache_ttl="5m")
+        one = (100 * 8 + 1000 * 10 + 10000 * 0.20 + 500 * 40) / 1e6
+        row = summary["rows"][0]
+        self.assertAlmostEqual(row["usd"], one * 3, places=9)  # one standard + one fast (2x)
+        self.assertEqual(summary["fast"]["usage"]["turns"], 1)
+        self.assertEqual(summary["fast"]["usage"]["output"], 500)
+        self.assertAlmostEqual(summary["fast"]["usd"], one * 2, places=9)
+        self.assertIn("fast mode: 1 turns", cr.render_text(summary))
+        self.assertIsNone(self.summary["fast"])  # no fast records in the base session
+        self.assertEqual(cr.ccusage_report([summary])["sessions"][0]["totalCost"], summary["total_usd"])
+
     def test_prices_override_file(self):
         override = Path(self.tmp.name) / "prices.json"
         override.write_text(json.dumps({"claude-mystery-9": {"input": 1, "cache_write": 1, "cache_read": 1, "output": 1}, "claude-fable-5-1": [0, 0, 0, 0]}), encoding="utf-8")

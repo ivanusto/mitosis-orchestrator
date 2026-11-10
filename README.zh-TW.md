@@ -92,7 +92,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | 模型廠商 | 支援作為主代理的尖端模型 (Primary Orchestrator) | 自動攔截的輕量級模型 (Small-Tier Filter) |
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
-| **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.1）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
+| **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.2）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
 | **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`、`DeepSeek-V3`、`deepseek-reasoner`、`deepseek-chat` | `deepseek-lite` |
@@ -103,11 +103,13 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 ---
 
-## Claude Code 主核模型選擇：Fable 5.1 與 Opus 5.5
+## Claude Code 主核模型選擇：Fable 5.2 與 Opus 5.5
 
 - 建議預設：`opus` 搭配 `medium` effort；scout（`haiku`）與 worker（`sonnet`）由 hook 釘定。
 - 數小時自主長跑、需求模糊、牽涉隱含不變量的跨模組重構與深度審查，改用 `fable`。
-- 實測 session 中主核占總費用 70% 到 85%，因此主核模型與 effort 是最大的成本控制桿。
+- Fable 5.2 的價格是 Opus 5.5 的 2 倍（每百萬 token 為 8／40 對 4／20，1 小時快取寫入為 16 對 8）。2026-11-10 的三項任務對照中，Opus 5.5 每項任務都比 Fable 5.2 便宜，而 Fable 5.2 比 Fable 5.1 快 8% 到 32%（各 n=3，樣本很小）。
+- 快速模式對每一類 token 以 2 倍計費；`mitosis-cost-report.py` 會讀取對話紀錄的 `usage.speed` 並據以計價。
+- 在 Fable 5.1 上量測的 session 中，主核占總費用 70% 到 85%，因此主核模型與 effort 是最大的成本控制桿。
 - 價格、示例試算、成本報表與子細胞調整，見 [docs/cost.zh-TW.md](./docs/cost.zh-TW.md)。
 
 ---
@@ -125,11 +127,11 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 | 平台 | 已驗證版本 | 驗證日期 | 方式 |
 | --- | --- | --- | --- |
-| Claude Code | 2.1.318 | 2026-11-04 | 以 headless 實跑改名後的 hooks 檔與內建代理釘定 |
+| Claude Code | 2.1.322 | 2026-11-10 | 以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理 |
 | Codex CLI | 0.166.0 | 2026-11-05 | 完成 hook review 後以已安裝外掛實跑 |
 | agy | 1.5.0 | 2026-11-04 | 以 headless 實跑熔斷器與 write_file 權限 |
 
-- Claude Code：2.1.318 是 npm 的 `latest` 標籤。當天 npm 的 `stable` 標籤是 2.1.311，未實跑。
+- Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
 - agy：print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
 <!-- END GENERATED: compat -->
 
@@ -138,7 +140,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.0)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.1)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：

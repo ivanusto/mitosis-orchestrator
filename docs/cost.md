@@ -1,30 +1,30 @@
-# Choosing the Primary Model on Claude Code: Fable 5.1 vs Opus 5.5
+# Choosing the Primary Model on Claude Code: Fable 5.2 vs Opus 5.5
 
-Prices as of 2026-10-22, usage measurements of 2026-10-23 to 2026-11-02 (2.4.0); check the official pricing page.
+Prices as of 2026-11-10 (Fable 5.2 released 2026-11-09), usage measurements of 2026-10-23 to 2026-11-02 (2.4.0, measured on Fable 5.1); check the official pricing page.
 
 [繁體中文](./cost.zh-TW.md) · [Back to README](../README.md)
 
-Mitosis pins only the daughter cells (scouts on `haiku`, workers on `sonnet`). The Master Nucleus is whatever `/model` is set to, and on Claude Code that is usually `fable` (Claude Fable 5.1) or `opus` (Claude Opus 5.5). The numbers below are Anthropic API list prices in USD per million tokens at the time of writing (2026-10); check the official pricing page before relying on them.
+Mitosis pins only the daughter cells (scouts on `haiku`, workers on `sonnet`). The Master Nucleus is whatever `/model` is set to, and on Claude Code that is usually `fable` (Claude Fable 5.2) or `opus` (Claude Opus 5.5). The numbers below are Anthropic API list prices in USD per million tokens at the time of writing (2026-11); check the official pricing page before relying on them.
 
 | Tier | Model | Input | Output | Cache read | Relative to Opus 5.5 | Default effort |
 | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
-| Primary | `fable` (Claude Fable 5.1) | 10.00 | 50.00 | 0.25 | 2.5x | `high` |
+| Primary | `fable` (Claude Fable 5.2) | 8.00 | 40.00 | 0.20 | 2x | `high` |
 | Primary | `opus` (Claude Opus 5.5) | 4.00 | 20.00 | 0.20 | 1x | `medium` |
 | Worker | `sonnet` (Claude Sonnet 5.5) | 2.00 | 10.00 | 0.20 | 0.5x | `high` (Mitosis pins `medium`) |
 | Scout | `haiku` (Claude Haiku 5.5) | 0.10 | 0.50 | about 0.01 | 0.025x | `medium` (Mitosis pins `low`) |
 
 ### What changes when you swap the primary
 
-- **Price per token: 2.5x.** Fable 5.1 and Opus 5.5 share the same tokenizer family, so the same transcript costs about 2.5x on Fable. Under Mitosis that multiplier applies only to the primary's share (planning, decomposition, reviewing diffs, synthesis); scouts and workers cost the same under either primary.
-- **Wall-clock time.** Fable 5.1 takes longer turns: at `high` effort a single request that gathers context, builds and self-verifies can run many minutes, and a 15-minute turn on a hard task is normal. Opus 5.5 defaults to `medium`, where it matches or beats Opus 5 at `high` in fewer steps and with roughly half the tokens. Both models get noticeably slower at `xhigh` / `max`. Effort is the main latency and cost lever on both: `/effort` in the session, `effortLevel` in `~/.claude/settings.json`, or `CLAUDE_CODE_EFFORT_LEVEL`.
-- **Capability.** Fable 5.1 pulls ahead on long-horizon autonomous runs, ambiguous specifications it must clarify itself, cross-cutting refactors with subtle invariants, deep code review, and sustained coordination of parallel subagents. Its `low` / `medium` settings still perform very well, often above previous models at `xhigh`. Opus 5.5 is the stronger value for multistep agentic coding and review on well-specified tasks: cheaper per solved task, not just per token.
-- **Where the money goes.** The primary's cache reads and output dominate the bill. In the two sessions below (measured 2026-10-19 to 2026-10-22) the primary was 70% to 85% of spend, and across the 2026-10-19 to 2026-10-22 sessions about 90%. An unpinned subagent inherits the primary model: built-in `Explore` / `general-purpose` agents and untyped `Agent` calls with an explicit `model` are deliberately left alone by the hook, and one inherited `fable` subagent in a measured session cost about 40x what thirteen `haiku` scouts did.
+- **Price per token: 2x.** Fable 5.2 is 8 / 40 against 4 / 20 for Opus 5.5 (input / output), and a 1-hour cache write is 16 against 8, so the same transcript costs about 2x on Fable, assuming the same token counts. Under Mitosis that multiplier applies only to the primary's share (planning, decomposition, reviewing diffs, synthesis); scouts and workers cost the same under either primary. In a three-task check on 2026-11-10, Opus 5.5 was cheaper per task than Fable 5.2, while Fable 5.2 was 8% to 32% faster than Fable 5.1 (n=3 each, a small sample).
+- **Wall-clock time.** Fable takes longer turns: at `high` effort a single request that gathers context, builds and self-verifies can run many minutes, and a 15-minute turn on a hard task is normal. Opus 5.5 defaults to `medium`, where it matches or beats Opus 5 at `high` in fewer steps and with roughly half the tokens. Both models get noticeably slower at `xhigh` / `max`. Effort is the main latency and cost lever on both: `/effort` in the session, `effortLevel` in `~/.claude/settings.json`, or `CLAUDE_CODE_EFFORT_LEVEL`.
+- **Capability.** Fable pulls ahead on long-horizon autonomous runs, ambiguous specifications it must clarify itself, cross-cutting refactors with subtle invariants, deep code review, and sustained coordination of parallel subagents. Its `low` / `medium` settings still perform very well, often above previous models at `xhigh`. Opus 5.5 is the stronger value for multistep agentic coding and review on well-specified tasks: cheaper per solved task, not just per token.
+- **Where the money goes.** The primary's cache reads and output dominate the bill. In the two sessions below (measured 2026-10-19 to 2026-10-22, on Fable 5.1) the primary was 70% to 85% of spend, and across the 2026-10-19 to 2026-10-22 sessions about 90%. An unpinned subagent inherits the primary model: built-in `Explore` / `general-purpose` agents and untyped `Agent` calls with an explicit `model` are deliberately left alone by the hook, and one inherited `fable` subagent in a measured session cost about 40x what thirteen `haiku` scouts did.
 
 ### What real use looked like (2026-10-23 to 2026-11-02)
 
-One machine, interactive Claude Code, `mitosis-cost-report.py --fleet`, list prices: 40 sessions, 5,799 primary tool calls, 27 `Agent` calls (0.5%), Bash 77% of tool calls. The primary cost about 492 USD and subagents about 11.4 USD (2.3%). Of the subagent spend 23.8% was unpinned (2 `Explore` calls, 2.71 USD), and no subagent ran on haiku. In this use the plugin barely delegated. The limit is one user, one machine, 11 days and list prices; this does not say what a heavier delegator would see.
+One machine, interactive Claude Code, `mitosis-cost-report.py --fleet`, Fable 5.1 list prices: 40 sessions, 5,799 primary tool calls, 27 `Agent` calls (0.5%), Bash 77% of tool calls. The primary cost about 492 USD and subagents about 11.4 USD (2.3%). Of the subagent spend 23.8% was unpinned (2 `Explore` calls, 2.71 USD), and no subagent ran on haiku. In this use the plugin barely delegated. The limit is one user, one machine, 11 days and list prices; this does not say what a heavier delegator would see.
 
-Earlier measurements, 2026-10-19 to 2026-10-22: primary about 90% of spend; the report's all-primary counterfactual came out about 5.3% lower, and 15% to 17% lower in sessions with heavy delegation. That is a re-pricing, not a saving, and the comparison experiment below did not reproduce a cost benefit.
+Earlier measurements, 2026-10-19 to 2026-10-22 (Fable 5.1): primary about 90% of spend; the report's all-primary counterfactual came out about 5.3% lower, and 15% to 17% lower in sessions with heavy delegation. That is a re-pricing, not a saving, and the comparison experiment below did not reproduce a cost benefit.
 
 ### Recommendation
 
@@ -43,10 +43,12 @@ The plugin's default Claude pin target is `opus` for the same reason. The old ru
 
 | Primary | Input (60K) | Cache read (240K) | Output (30K) | Per task |
 | :--- | ---: | ---: | ---: | ---: |
-| `fable` | 0.60 | 0.06 | 1.50 | about 2.16 USD |
+| `fable` (5.2) | 0.48 | 0.05 | 1.20 | about 1.73 USD |
 | `opus` | 0.24 | 0.05 | 0.60 | about 0.89 USD |
 
-That is a 2.4x difference on the primary alone; the scout and worker bill is identical in both rows. Real sessions differ in turn count and effort, so measure your own.
+That is about a 2x difference on the primary alone; the scout and worker bill is identical in both rows. Real sessions differ in turn count and effort, so measure your own.
+
+**Fast mode.** On the models that support it (`claude-fable-5-2`, `claude-mythos-5-2`, `claude-opus-5-5`, `claude-opus-5`, `claude-opus-4-8`), fast mode bills every token category at 2x the standard price, cache reads and writes included. Claude Code transcripts mark such turns with `usage.speed = "fast"`; the cost report reads that field, prices those turns at 2x and prints a `fast mode:` line with their tokens and USD (already included in the totals).
 
 **Subscription plans (Pro / Max).** These are not billed per token, but their usage limits are weighted by model tier in the same direction, so a `fable` primary drains the limit noticeably faster than `opus`. The decision rule above is unchanged; the report below still tells you which model is consuming the budget.
 
@@ -65,7 +67,7 @@ python3 scripts/mitosis-cost-report.py --debug-log /tmp/mitosis-orchestrator/<se
 
 Since 1.7.0 the report also prints a counterfactual line: every subagent row is re-priced on the primary model (the all-frontier counterfactual) and compared with what the pinned scouts and workers cost. `--format text|json|ccusage` selects the output (`--json` stays as an alias). When a hook debug log exists (`*_MITOSIS_DEBUG=1`; found automatically per session or passed with `--debug-log`), a routing section shows how many decisions went to each tier and which rules fired.
 
-Trimmed output from two real (different) tasks, one per primary:
+Trimmed output from two real (different) tasks, one per primary (measured on Fable 5.1, before 5.2 existed):
 
 ```text
   model                 role        turns      input    cache_w     cache_r    output  thinking       USD

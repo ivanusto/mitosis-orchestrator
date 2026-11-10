@@ -1,0 +1,693 @@
+{
+  "cli_version": "2.1.322",
+  "modes": {
+    "post-tool-use": {
+      "Agent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.duration_ms": [
+          "int"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.description": [
+          "str"
+        ],
+        "payload.tool_input.effort": [
+          "str"
+        ],
+        "payload.tool_input.model": [
+          "str"
+        ],
+        "payload.tool_input.prompt": [
+          "str"
+        ],
+        "payload.tool_input.run_in_background": [
+          "bool"
+        ],
+        "payload.tool_input.subagent_type": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_response": [
+          "dict"
+        ],
+        "payload.tool_response.__KEY1__": [
+          "bool"
+        ],
+        "payload.tool_response.__KEY2__": [
+          "str"
+        ],
+        "payload.tool_response.__KEY3__": [
+          "bool"
+        ],
+        "payload.tool_response.agentId": [
+          "str"
+        ],
+        "payload.tool_response.agentType": [
+          "str"
+        ],
+        "payload.tool_response.canContinueAgent": [
+          "bool"
+        ],
+        "payload.tool_response.content": [
+          "list"
+        ],
+        "payload.tool_response.content[]": [
+          "dict"
+        ],
+        "payload.tool_response.content[].text": [
+          "str"
+        ],
+        "payload.tool_response.content[].type": [
+          "str"
+        ],
+        "payload.tool_response.description": [
+          "str"
+        ],
+        "payload.tool_response.harnessNoteCount": [
+          "int"
+        ],
+        "payload.tool_response.harnessSectionHash": [
+          "str"
+        ],
+        "payload.tool_response.harnessTailCount": [
+          "int"
+        ],
+        "payload.tool_response.prompt": [
+          "str"
+        ],
+        "payload.tool_response.resolvedModel": [
+          "str"
+        ],
+        "payload.tool_response.status": [
+          "str"
+        ],
+        "payload.tool_response.toolStats": [
+          "dict"
+        ],
+        "payload.tool_response.toolStats.bashCount": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.editFileCount": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.linesAdded": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.linesRemoved": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.otherToolCount": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.readCount": [
+          "int"
+        ],
+        "payload.tool_response.toolStats.searchCount": [
+          "int"
+        ],
+        "payload.tool_response.toolsUsed": [
+          "list"
+        ],
+        "payload.tool_response.toolsUsed[]": [
+          "str"
+        ],
+        "payload.tool_response.totalDurationMs": [
+          "int"
+        ],
+        "payload.tool_response.totalTokens": [
+          "int"
+        ],
+        "payload.tool_response.totalToolUseCount": [
+          "int"
+        ],
+        "payload.tool_response.usage": [
+          "dict"
+        ],
+        "payload.tool_response.usage.cache_creation": [
+          "dict"
+        ],
+        "payload.tool_response.usage.cache_creation.ephemeral_1h_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.cache_creation.ephemeral_5m_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.cache_creation_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.cache_read_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.fallback_credit": [
+          "null"
+        ],
+        "payload.tool_response.usage.inference_geo": [
+          "str"
+        ],
+        "payload.tool_response.usage.input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations": [
+          "list"
+        ],
+        "payload.tool_response.usage.iterations[]": [
+          "dict"
+        ],
+        "payload.tool_response.usage.iterations[].cache_creation": [
+          "dict"
+        ],
+        "payload.tool_response.usage.iterations[].cache_creation.ephemeral_1h_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].cache_creation.ephemeral_5m_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].cache_creation_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].cache_read_input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].input_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].output_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.iterations[].type": [
+          "str"
+        ],
+        "payload.tool_response.usage.output_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.output_tokens_details": [
+          "dict"
+        ],
+        "payload.tool_response.usage.output_tokens_details.thinking_tokens": [
+          "int"
+        ],
+        "payload.tool_response.usage.server_tool_use": [
+          "dict"
+        ],
+        "payload.tool_response.usage.server_tool_use.web_fetch_requests": [
+          "int"
+        ],
+        "payload.tool_response.usage.server_tool_use.web_search_requests": [
+          "int"
+        ],
+        "payload.tool_response.usage.service_tier": [
+          "str"
+        ],
+        "payload.tool_response.usage.speed": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      },
+      "Bash": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.duration_ms": [
+          "int"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.command": [
+          "str"
+        ],
+        "payload.tool_input.description": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_response": [
+          "dict"
+        ],
+        "payload.tool_response.interrupted": [
+          "bool"
+        ],
+        "payload.tool_response.isImage": [
+          "bool"
+        ],
+        "payload.tool_response.noOutputExpected": [
+          "bool"
+        ],
+        "payload.tool_response.stderr": [
+          "str"
+        ],
+        "payload.tool_response.stdout": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-invocation": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "pre-tool-use": {
+      "Agent": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.description": [
+          "str"
+        ],
+        "payload.tool_input.prompt": [
+          "str"
+        ],
+        "payload.tool_input.run_in_background": [
+          "bool"
+        ],
+        "payload.tool_input.subagent_type": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.hookSpecificOutput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.hookEventName": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecision": [
+          "str"
+        ],
+        "result.hookSpecificOutput.permissionDecisionReason": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.updatedInput.description": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.effort": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.model": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.prompt": [
+          "str"
+        ],
+        "result.hookSpecificOutput.updatedInput.run_in_background": [
+          "bool"
+        ],
+        "result.hookSpecificOutput.updatedInput.subagent_type": [
+          "str"
+        ]
+      },
+      "Bash": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.tool_input": [
+          "dict"
+        ],
+        "payload.tool_input.command": [
+          "str"
+        ],
+        "payload.tool_input.description": [
+          "str"
+        ],
+        "payload.tool_name": [
+          "str"
+        ],
+        "payload.tool_use_id": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "session-start": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.model": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.source": [
+          "str"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.hookSpecificOutput": [
+          "dict"
+        ],
+        "result.hookSpecificOutput.additionalContext": [
+          "str"
+        ],
+        "result.hookSpecificOutput.hookEventName": [
+          "str"
+        ]
+      }
+    },
+    "stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.background_tasks": [
+          "list"
+        ],
+        "payload.background_tasks[]": [
+          "dict"
+        ],
+        "payload.background_tasks[].agent_type": [
+          "str"
+        ],
+        "payload.background_tasks[].description": [
+          "str"
+        ],
+        "payload.background_tasks[].id": [
+          "str"
+        ],
+        "payload.background_tasks[].status": [
+          "str"
+        ],
+        "payload.background_tasks[].type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.last_assistant_message": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_crons": [
+          "list"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.stop_hook_active": [
+          "bool"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "subagent-stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.agent_id": [
+          "str"
+        ],
+        "payload.agent_transcript_path": [
+          "str"
+        ],
+        "payload.agent_type": [
+          "str"
+        ],
+        "payload.background_tasks": [
+          "list"
+        ],
+        "payload.background_tasks[]": [
+          "dict"
+        ],
+        "payload.background_tasks[].agent_type": [
+          "str"
+        ],
+        "payload.background_tasks[].description": [
+          "str"
+        ],
+        "payload.background_tasks[].id": [
+          "str"
+        ],
+        "payload.background_tasks[].status": [
+          "str"
+        ],
+        "payload.background_tasks[].type": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.effort": [
+          "dict"
+        ],
+        "payload.effort.level": [
+          "str"
+        ],
+        "payload.hook_event_name": [
+          "str"
+        ],
+        "payload.last_assistant_message": [
+          "str"
+        ],
+        "payload.permission_mode": [
+          "str"
+        ],
+        "payload.prompt_id": [
+          "str"
+        ],
+        "payload.scratchpad_dir": [
+          "str"
+        ],
+        "payload.session_crons": [
+          "list"
+        ],
+        "payload.session_id": [
+          "str"
+        ],
+        "payload.stop_hook_active": [
+          "bool"
+        ],
+        "payload.transcript_path": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    }
+  },
+  "platform": "claude",
+  "scenarios": [
+    "interactive-fork",
+    "scout-agent"
+  ],
+  "shape_version": 1
+}

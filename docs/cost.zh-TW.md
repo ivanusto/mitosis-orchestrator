@@ -1,30 +1,30 @@
-# Claude Code 主核模型選擇：Fable 5.1 與 Opus 5.5
+# Claude Code 主核模型選擇：Fable 5.2 與 Opus 5.5
 
-價格截至 2026-10-22，使用量量測為 2026-10-23 至 2026-11-02（2.4.0），使用前請查官方價目表。
+價格截至 2026-11-10（Fable 5.2 於 2026-11-09 發表），使用量量測為 2026-10-23 至 2026-11-02（2.4.0，於 Fable 5.1 上量測），使用前請查官方價目表。
 
 [English](./cost.md) · [回到 README](../README.zh-TW.md)
 
-Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核（Master Nucleus）就是 `/model` 目前選的模型，在 Claude Code 上通常是 `fable`（Claude Fable 5.1）或 `opus`（Claude Opus 5.5）。下表為撰寫時（2026 年 10 月）Anthropic API 牌價，單位為美元／百萬 token；實際採用前請以官方價目頁為準。
+Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核（Master Nucleus）就是 `/model` 目前選的模型，在 Claude Code 上通常是 `fable`（Claude Fable 5.2）或 `opus`（Claude Opus 5.5）。下表為撰寫時（2026 年 11 月）Anthropic API 牌價，單位為美元／百萬 token；實際採用前請以官方價目頁為準。
 
 | 階層 | 模型 | 輸入 | 輸出 | 快取讀取 | 相對 Opus 5.5 | 預設 effort |
 | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
-| 主核 | `fable`（Claude Fable 5.1） | 10.00 | 50.00 | 0.25 | 2.5 倍 | `high` |
+| 主核 | `fable`（Claude Fable 5.2） | 8.00 | 40.00 | 0.20 | 2 倍 | `high` |
 | 主核 | `opus`（Claude Opus 5.5） | 4.00 | 20.00 | 0.20 | 1 倍 | `medium` |
 | Worker | `sonnet`（Claude Sonnet 5.5） | 2.00 | 10.00 | 0.20 | 0.5 倍 | `high`（Mitosis 釘為 `medium`） |
 | Scout | `haiku`（Claude Haiku 5.5） | 0.10 | 0.50 | 約 0.01 | 0.025 倍 | `medium`（Mitosis 釘為 `low`） |
 
 ### 換主核會改變什麼
 
-- **單價差 2.5 倍。** Fable 5.1 與 Opus 5.5 屬同一 tokenizer 家族，同樣的對話在 Fable 上約貴 2.5 倍。在 Mitosis 架構下這個倍率只作用在主核的部分（規劃、拆解、審查 diff、整合）；scout 與 worker 的費用在兩種主核下完全相同。
-- **任務時間。** Fable 5.1 的單一回合較長：在 `high` effort 下，一個需要蒐集情境、實作並自我驗證的請求常跑數分鐘，困難任務單一回合跑到 15 分鐘屬於正常現象。Opus 5.5 預設 `medium`，在這個等級就能以更少步驟與約一半的 token 達到或超過 Opus 5 的 `high`。兩者在 `xhigh` / `max` 都會明顯變慢。effort 是兩種模型共同的時間與費用主要控制桿：session 內用 `/effort`，或設定 `~/.claude/settings.json` 的 `effortLevel`，或環境變數 `CLAUDE_CODE_EFFORT_LEVEL`。
-- **能力。** Fable 5.1 在長程自主執行、需要主核自行釐清的模糊需求、牽涉隱含不變量的跨模組重構、深度程式碼審查，以及長時間協調平行子代理這些工作上領先；它的 `low` / `medium` 仍然很強，常超過前代模型的 `xhigh`。Opus 5.5 在規格明確的多步驟 agentic 開發與審查上性價比更好：不只每 token 便宜，每個解完的任務也更便宜。
-- **錢花在哪裡。** 帳單由主核的快取讀取與輸出主導。下方兩場 session（2026-10-19 至 2026-10-22 量測）中主核占總費用 70% 到 85%，2026-10-19 至 2026-10-22 的 session 整體約 90%。未釘定的子代理會繼承主核模型：內建的 `Explore` / `general-purpose` 代理與帶明確 `model` 的未指定型別 `Agent` 呼叫，hook 刻意不動它們；實測中一個繼承 `fable` 的子代理，費用約為十三個 `haiku` scout 的 40 倍。
+- **單價差 2 倍。** Fable 5.2 的輸入／輸出為 8／40，Opus 5.5 為 4／20；1 小時快取寫入則是 16 對 8。在 token 數相同的前提下，同樣的對話在 Fable 上約貴 2 倍。在 Mitosis 架構下這個倍率只作用在主核的部分（規劃、拆解、審查 diff、整合）；scout 與 worker 的費用在兩種主核下完全相同。2026-11-10 的三項任務對照中，Opus 5.5 每項任務的費用都低於 Fable 5.2，而 Fable 5.2 比 Fable 5.1 快 8% 到 32%（各 n=3，樣本很小）。
+- **任務時間。** Fable 的單一回合較長：在 `high` effort 下，一個需要蒐集情境、實作並自我驗證的請求常跑數分鐘，困難任務單一回合跑到 15 分鐘屬於正常現象。Opus 5.5 預設 `medium`，在這個等級就能以更少步驟與約一半的 token 達到或超過 Opus 5 的 `high`。兩者在 `xhigh` / `max` 都會明顯變慢。effort 是兩種模型共同的時間與費用主要控制桿：session 內用 `/effort`，或設定 `~/.claude/settings.json` 的 `effortLevel`，或環境變數 `CLAUDE_CODE_EFFORT_LEVEL`。
+- **能力。** Fable 在長程自主執行、需要主核自行釐清的模糊需求、牽涉隱含不變量的跨模組重構、深度程式碼審查，以及長時間協調平行子代理這些工作上領先；它的 `low` / `medium` 仍然很強，常超過前代模型的 `xhigh`。Opus 5.5 在規格明確的多步驟 agentic 開發與審查上性價比更好：不只每 token 便宜，每個解完的任務也更便宜。
+- **錢花在哪裡。** 帳單由主核的快取讀取與輸出主導。下方兩場 session（2026-10-19 至 2026-10-22 於 Fable 5.1 量測）中主核占總費用 70% 到 85%，2026-10-19 至 2026-10-22 的 session 整體約 90%。未釘定的子代理會繼承主核模型：內建的 `Explore` / `general-purpose` 代理與帶明確 `model` 的未指定型別 `Agent` 呼叫，hook 刻意不動它們；實測中一個繼承 `fable` 的子代理，費用約為十三個 `haiku` scout 的 40 倍。
 
 ### 真實使用的樣子（2026-10-23 至 2026-11-02）
 
-一台機器，互動式 Claude Code，`mitosis-cost-report.py --fleet`，牌價：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%），Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。這樣的使用下外掛幾乎沒有委派。限制是單一使用者、單一機器、11 天與牌價；這不代表較常委派的使用者會看到同樣結果。
+一台機器，互動式 Claude Code，`mitosis-cost-report.py --fleet`，Fable 5.1 牌價：40 個 session、5,799 次主核工具呼叫、27 次 `Agent` 呼叫（0.5%），Bash 占工具呼叫的 77%。主核約 492 美元，子代理約 11.4 美元（2.3%）。子代理支出中 23.8% 未釘定（2 次 `Explore` 呼叫，2.71 美元），沒有任何子代理跑在 haiku。這樣的使用下外掛幾乎沒有委派。限制是單一使用者、單一機器、11 天與牌價；這不代表較常委派的使用者會看到同樣結果。
 
-較早的量測，2026-10-19 至 2026-10-22：主核約占 90% 費用；報表的全主核反事實低約 5.3%，大量委派的 session 低 15% 到 17%。這是重新計價，不是節省，而且下方的對照實驗並未重現成本上的好處。
+較早的量測，2026-10-19 至 2026-10-22（Fable 5.1）：主核約占 90% 費用；報表的全主核反事實低約 5.3%，大量委派的 session 低 15% 到 17%。這是重新計價，不是節省，而且下方的對照實驗並未重現成本上的好處。
 
 ### 建議
 
@@ -43,10 +43,12 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 
 | 主核 | 輸入（60K） | 快取讀取（240K） | 輸出（30K） | 每任務 |
 | :--- | ---: | ---: | ---: | ---: |
-| `fable` | 0.60 | 0.06 | 1.50 | 約 2.16 美元 |
+| `fable`（5.2） | 0.48 | 0.05 | 1.20 | 約 1.73 美元 |
 | `opus` | 0.24 | 0.05 | 0.60 | 約 0.89 美元 |
 
-光主核就差 2.4 倍，scout 與 worker 的費用兩列相同。真實 session 的回合數與 effort 都不同，請自行量測。
+光主核就差約 2 倍，scout 與 worker 的費用兩列相同。真實 session 的回合數與 effort 都不同，請自行量測。
+
+**快速模式（fast mode）。** 支援的模型（`claude-fable-5-2`、`claude-mythos-5-2`、`claude-opus-5-5`、`claude-opus-5`、`claude-opus-4-8`）在快速模式下，每一類 token 都以標準價的 2 倍計費，包含快取讀取與寫入。Claude Code 的對話紀錄以 `usage.speed = "fast"` 標記這類回合；成本報表會讀取這個欄位，以 2 倍計價，並另印一行 `fast mode:` 列出這些回合的 token 與美元（已含在總計內）。
 
 **訂閱方案（Pro / Max）。** 訂閱不按 token 計費，但用量上限同樣依模型階層加權，方向一致，所以 `fable` 主核消耗上限的速度明顯快於 `opus`。上述判斷原則不變；下方報表仍能告訴你是哪個模型在吃額度。
 
@@ -65,7 +67,7 @@ python3 scripts/mitosis-cost-report.py --debug-log /tmp/mitosis-orchestrator/<se
 
 1.7.0 起報表多一行反事實金額：把每筆子代理列改用主核模型重新計價（全尖端模型的反事實），再與實際釘定的偵察者與執行者費用比較。`--format text|json|ccusage` 選擇輸出格式（`--json` 仍是別名）。若存在 hook 除錯日誌（`*_MITOSIS_DEBUG=1`，自動依 session 尋找，或用 `--debug-log` 指定），報表會多一段路由統計，列出各階層的決策數與觸發的規則。
 
-兩場真實（但不同）任務的節錄輸出，各用一種主核：
+兩場真實（但不同）任務的節錄輸出，各用一種主核（於 Fable 5.1 上量測，當時尚無 5.2）：
 
 ```text
   model                 role        turns      input    cache_w     cache_r    output  thinking       USD

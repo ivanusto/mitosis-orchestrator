@@ -71,6 +71,8 @@ DEFAULT_PRICES: Dict[str, Tuple[float, float, float, float]] = dict(_GEN.PRICES)
 # Short aliases used when a transcript records a bare tier name.
 ALIASES = dict(_GEN.PRICE_ALIASES)
 CACHE_1H_WRITE_MULTIPLIER = _GEN.CACHE_1H_WRITE_MULTIPLIER
+# Fast mode (message.usage.speed == "fast") bills every token category at this multiple of standard.
+FAST_MODE_MULTIPLIER = _GEN.FAST_MODE_MULTIPLIER
 
 USAGE_FIELDS = ("input", "cache_write", "cache_read", "output", "thinking")
 
@@ -130,6 +132,7 @@ def _usage_of(record: Dict[str, Any]) -> Optional[Dict[str, int]]:
         return None
     details = usage.get("output_tokens_details") or {}
     return {
+        "fast": usage.get("speed") == "fast",
         "input": int(usage.get("input_tokens") or 0),
         "cache_write": int(usage.get("cache_creation_input_tokens") or 0),
         "cache_read": int(usage.get("cache_read_input_tokens") or 0),
@@ -172,7 +175,7 @@ def collect_session(project_dir: Path, session_id: str) -> Dict[str, Any]:
     if sub_dir.is_dir():
         sources += [(f, "subagent") for f in sorted(sub_dir.glob("agent-*.jsonl"))]
 
-    seen: Dict[str, Tuple[str, str, Dict[str, int]]] = {}
+    seen: Dict[str, Tuple[str, str, Dict[str, Any]]] = {}
     order: List[str] = []
     start: Optional[datetime] = None
     end: Optional[datetime] = None
@@ -209,6 +212,12 @@ def collect_session(project_dir: Path, session_id: str) -> Dict[str, Any]:
         bucket["turns"] += 1
         for f in USAGE_FIELDS:
             bucket[f] += usage[f]
+        if usage.get("fast"):
+            fast = bucket.setdefault("fast", {f: 0 for f in USAGE_FIELDS})
+            fast.setdefault("turns", 0)
+            fast["turns"] += 1
+            for f in USAGE_FIELDS:
+                fast[f] += usage[f]
     return {
         "session_id": session_id,
         "project_dir": str(project_dir),
@@ -223,14 +232,25 @@ def collect_session(project_dir: Path, session_id: str) -> Dict[str, Any]:
 CACHE_TTLS = ("5m", "1h")
 
 
-def cost_usd(usage: Dict[str, int], price: Optional[Tuple[float, float, float, float]], cache_ttl: str = "5m") -> Optional[float]:
-    """USD for one usage bucket. `cache_ttl` picks the cache-write rate: 5m = table value, 1h = 2x input."""
-    if price is None:
-        return None
+def _base_cost(usage: Dict[str, Any], price: Tuple[float, float, float, float], cache_ttl: str) -> float:
     p_in, p_cw, p_cr, p_out = price
     if cache_ttl == "1h":
         p_cw = CACHE_1H_WRITE_MULTIPLIER * p_in
     return (usage["input"] * p_in + usage["cache_write"] * p_cw + usage["cache_read"] * p_cr + usage["output"] * p_out) / 1_000_000
+
+
+def cost_usd(usage: Dict[str, Any], price: Optional[Tuple[float, float, float, float]], cache_ttl: str = "5m",
+             use_fast: bool = True) -> Optional[float]:
+    """USD for one usage bucket. `cache_ttl` picks the cache-write rate: 5m = table value, 1h = 2x input.
+
+    Tokens in usage["fast"] (records with usage.speed == "fast") cost FAST_MODE_MULTIPLIER x on every category."""
+    if price is None:
+        return None
+    total = _base_cost(usage, price, cache_ttl)
+    fast = usage.get("fast") if use_fast else None
+    if isinstance(fast, dict):
+        total += (FAST_MODE_MULTIPLIER - 1.0) * _base_cost(fast, price, cache_ttl)
+    return total
 
 
 def compute_savings(
@@ -265,7 +285,7 @@ def compute_savings(
             continue
         actual += r["usd"]
         if r["role"] == "subagent":
-            counterfactual += cost_usd(r, primary_price, subagent_cache_ttl) or 0.0
+            counterfactual += cost_usd(r, primary_price, subagent_cache_ttl, use_fast=False) or 0.0
         else:
             counterfactual += r["usd"]
     saved = counterfactual - actual
@@ -287,6 +307,9 @@ def summarize(
     rows: List[Dict[str, Any]] = []
     totals = {"primary": {f: 0 for f in USAGE_FIELDS}, "subagent": {f: 0 for f in USAGE_FIELDS}}
     totals_usd = {"primary": 0.0, "subagent": 0.0}
+    fast_total = {f: 0 for f in USAGE_FIELDS}
+    fast_total["turns"] = 0
+    fast_usd = 0.0
     unknown: List[str] = []
     for model, roles in sorted(session["models"].items()):
         for role in ("primary", "subagent"):
@@ -301,6 +324,13 @@ def summarize(
             for f in USAGE_FIELDS:
                 totals[role][f] += usage[f]
             totals_usd[role] += usd or 0.0
+            fast = usage.get("fast")
+            if fast:
+                for f in USAGE_FIELDS:
+                    fast_total[f] += fast[f]
+                fast_total["turns"] += fast["turns"]
+                ttl = primary_cache_ttl if role == "primary" else subagent_cache_ttl
+                fast_usd += FAST_MODE_MULTIPLIER * (cost_usd(fast, price, ttl, use_fast=False) or 0.0)
     total_tokens = {r: sum(v for k, v in totals[r].items() if k != "thinking") for r in totals}
     all_tokens = total_tokens["primary"] + total_tokens["subagent"]
     all_usd = totals_usd["primary"] + totals_usd["subagent"]
@@ -316,6 +346,7 @@ def summarize(
         "totals": totals,
         "totals_usd": totals_usd,
         "total_usd": all_usd,
+        "fast": {"multiplier": FAST_MODE_MULTIPLIER, "usage": fast_total, "usd": fast_usd} if fast_total["turns"] else None,
         "primary_token_share": (total_tokens["primary"] / all_tokens) if all_tokens else None,
         "primary_usd_share": (totals_usd["primary"] / all_usd) if all_usd else None,
         "unknown_models": unknown,
@@ -365,6 +396,14 @@ def render_text(summary: Dict[str, Any]) -> str:
         f"  TOTAL USD {_fmt_usd(summary['total_usd'])}   primary share: "
         f"{'n/a' if share_t is None else f'{share_t:.0%}'} of tokens, {'n/a' if share_u is None else f'{share_u:.0%}'} of USD"
     )
+    fast = summary.get("fast")
+    if fast:
+        u = fast["usage"]
+        fast_tokens = u["input"] + u["cache_write"] + u["cache_read"] + u["output"]
+        lines.append(
+            f"  fast mode: {u['turns']} turns, {_fmt_int(fast_tokens)} tokens, USD {_fmt_usd(fast['usd'])} "
+            f"(included above, priced at {fast['multiplier']:g}x on every token category)"
+        )
     sv = summary.get("savings")
     if sv:
         lines.append(f"  Savings vs all-frontier (same tokens on {sv['primary_model']}): ${sv['savings_usd']:,.2f} ({sv['savings_pct']:.1f}%)")

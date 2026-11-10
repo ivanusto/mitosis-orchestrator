@@ -140,6 +140,23 @@ class CaptureDoesNotDelayTheResponse(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIsInstance(json.loads(proc.stdout.decode()), dict)
 
+    def test_snapshot_is_taken_before_platform_key_is_added(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertLess(source.index("capture.snapshot("), source.index('payload["platform"] = platform'))
+
+    def test_captured_payload_has_no_platform_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ)
+            _support.set_temp_env(env, tmp)
+            env["MITOSIS_CAPTURE_PAYLOADS"] = os.path.join(tmp, "cap")
+            payload = {"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Read",
+                       "tool_input": {"file_path": "x"}, "cwd": tmp}
+            proc = subprocess.run([sys.executable, str(SCRIPT), "pre-tool-use", "--platform=codex"],
+                                  input=json.dumps(payload).encode(), capture_output=True, env=env, timeout=30)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            line = (Path(tmp) / "cap" / "payloads.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            self.assertEqual(json.loads(line)["payload"], payload)
+
     def test_capture_runs_after_stdout_is_flushed(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertLess(source.index("sys.stdout.flush()"), source.index("capture.write("))

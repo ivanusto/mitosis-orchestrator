@@ -460,6 +460,7 @@ def main() -> None:
     except Exception:
         payload = {}
         stdin_error = True
+    capture_snapshot = capture.snapshot(payload)  # before main() adds `platform`: a capture holds what the CLI sent
     if platform:
         payload["platform"] = platform
 
@@ -472,7 +473,6 @@ def main() -> None:
 
     handler = HANDLERS.get(mode)
     error_class = "StdinParseError" if stdin_error else None
-    capture_snapshot = capture.snapshot(payload)
     try:
         result = handler(payload) if handler else {}
     except Exception as exc:  # never break the agent loop because of the guard

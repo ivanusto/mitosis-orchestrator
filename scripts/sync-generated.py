@@ -209,6 +209,7 @@ def build_module(models: dict, report: dict, compat: dict) -> str:
         ("PRICES", prices),
         ("PRICE_ALIASES", aliases),
         ("CACHE_1H_WRITE_MULTIPLIER", float(models["cache"]["one_hour_write_multiplier"])),
+        ("FAST_MODE_MULTIPLIER", float(models["fast"]["multiplier"])),
         ("REPORT_HEADERS", tuple(report["headers"])),
         ("REPORT_STATUS_VALUES", tuple(report["status_values"])),
         ("REPORT_MAX_CHARS", int(report["max_chars"])),

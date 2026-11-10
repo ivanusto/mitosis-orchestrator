@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.7.1 - 2026-11-10
+
+Model refresh for Claude Fable 5.2 and Mythos 5.2 (released 2026-11-09). Nothing to do after updating; start a new Claude Code session.
+
+### Fixed
+- **Cost report: `claude-fable-5-2` was priced as `claude-fable-5`,** because the longest-prefix lookup found no exact entry. A real run showed 0.465 USD in the report against 0.373 USD from Claude Code (+25%). `claude-fable-5-2` and `claude-mythos-5-2` now have their own price (input 8, 5m cache write 10, cache read 0.20, output 40; the 1h write stays 2x input = 16). The `fable` price alias now points at `claude-fable-5-2`; older entries are kept.
+- **Hook: `fork` and `web-fetch` are known built-in Agent types** (Claude Code 2.1.322). A `fork` call is left unpinned with the reason "built-in agent type", instead of "unknown agent type 'fork' left untouched".
+- **Routing: a scout prompt that repeats the report-format instruction was upgraded to a worker.** Fable 5.2 copies the SessionStart notice into scout prompts ("Follow the four-line REPORT FORMAT from rules/AGENTS.md if you can locate it; otherwise end your reply with exactly these four lines: ..."), and `scout-imperative` read "Follow" as an action, so a read-only lookup ran on sonnet and then searched the whole disk for `AGENTS.md`. Clauses that only describe the reply format, and a block of `HEADER: <placeholder>` lines with its lead-in, are now removed before classification. A clause that also asks for an action is kept.
+- **Routing: a sentence that opens with a sequencing word hid its verb** ("Afterwards push the branch", "Finally run npm publish", "然後把 build 刪掉" stayed on the scout). Sequencing words at the start of a sentence (English and Chinese) are skipped before the imperative checks. This was already the case in 2.7.0; removing the format clause made it visible.
+- **SessionStart notice and `/orchestrate` skill no longer send subagents to `rules/AGENTS.md`.** They say the hook appends the four-line REPORT FORMAT to a prompt that lacks it.
+- **Payload capture recorded a fake `payload.platform` key** because the snapshot was taken after `main()` added it. The snapshot is now taken first, so a capture holds what the CLI sent.
+
+### Added
+- **Fast mode in the cost report.** A transcript record with `message.usage.speed == "fast"` is priced at 2x on every token category (`[fast] multiplier` in `spec/models.toml`, generated into `FAST_MODE_MULTIPLIER`). The text report prints a `fast mode:` line with the fast turns, tokens and USD, already included in the totals. The all-frontier counterfactual stays at standard prices.
+- Claude Code 2.1.322 payload fixtures in `tests/fixtures/payloads/claude/2.1.322/` (headless smoke and interactive background agents with `claude-fable-5-2` as primary).
+
+### Docs
+- README and `docs/cost.md` now describe Fable 5.2: 2x the price of Opus 5.5 (8 / 40 against 4 / 20). The default recommendation stays `opus` at `medium`. In a three-task check on 2026-11-10 Opus 5.5 was cheaper per task than Fable 5.2, and Fable 5.2 was 8% to 32% faster than Fable 5.1 (n=3 each, a small sample). The earlier measured tables are labelled as measured on Fable 5.1.
+- Verified CLI: Claude Code 2.1.322 (2026-11-10). Codex fixtures now named `0.166.0`.
+
 ## 2.7.0 - 2026-11-05
 
 **After updating, do this.** On Codex, run `python3 scripts/setup-codex.py`, because the models live in the role files: without it, children stay on the old models and doctor warns. Then open Codex once, accept the hook review, and run `python3 scripts/mitosis-doctor.py`. On Claude Code, start a new session.

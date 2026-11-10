@@ -16,9 +16,11 @@ AGY_WORKER_MODEL = 'flash'
 PRICES = {
     'claude-fable-5': (10.0, 12.5, 0.25, 50.0),
     'claude-fable-5-1': (10.0, 12.5, 0.25, 50.0),
+    'claude-fable-5-2': (8.0, 10.0, 0.2, 40.0),
     'claude-haiku-4-5': (1.0, 1.25, 0.1, 5.0),
     'claude-haiku-5-5': (0.1, 0.125, 0.01, 0.5),
     'claude-mythos-5-1': (10.0, 12.5, 0.25, 50.0),
+    'claude-mythos-5-2': (8.0, 10.0, 0.2, 40.0),
     'claude-opus-4-6': (5.0, 6.25, 0.5, 25.0),
     'claude-opus-4-7': (5.0, 6.25, 0.5, 25.0),
     'claude-opus-4-8': (5.0, 6.25, 0.5, 25.0),
@@ -29,12 +31,13 @@ PRICES = {
     'claude-sonnet-5-5': (2.0, 2.5, 0.2, 10.0),
 }
 PRICE_ALIASES = {
-    'fable': 'claude-fable-5-1',
+    'fable': 'claude-fable-5-2',
     'haiku': 'claude-haiku-5-5',
     'opus': 'claude-opus-5-5',
     'sonnet': 'claude-sonnet-5-5',
 }
 CACHE_1H_WRITE_MULTIPLIER = 2.0
+FAST_MODE_MULTIPLIER = 2.0
 REPORT_HEADERS = ('STATUS', 'FILES_CHANGED', 'VERIFICATION', 'NOTES')
 REPORT_STATUS_VALUES = ('COMPLETED', 'BLOCKED', 'FAILED')
 REPORT_MAX_CHARS = 1600
@@ -43,7 +46,7 @@ REPORT_FORMAT_SCOUT = 'REPORT FORMAT:\nReturn only these four headers (plus up t
 REPORT_FORMAT_WORKER = 'REPORT FORMAT:\nReturn only these four headers (plus up to 10 `- ` bullet lines under NOTES if needed):\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: <comma-separated paths or NONE>\nVERIFICATION: <one sentence stating the command run and its exit result>\nNOTES: <one sentence of findings or up to 10 bullets; when BLOCKED or FAILED, include a file:// log URI>'
 REPORT_BLOCK_REASON = "[Mitosis Orchestrator] Your final message must be the bounded four-header report ({error}). Reply again with exactly these lines and nothing else (no preamble, no code fences, at most 1,600 characters):\nSTATUS: COMPLETED | BLOCKED | FAILED\nFILES_CHANGED: <comma-separated paths or NONE>\nVERIFICATION: <one sentence stating the command run and its exit result>\nNOTES: <one sentence or up to 10 '- ' bullets; when BLOCKED or FAILED, workers include a file://.../*.log URI and scouts say what was denied or missing>"
 COMPAT = {
-    'claude': {'verified': '2.1.318', 'verified_on': '2026-11-04', 'method': 'headless run of the renamed hooks file and built-in pinning', 'note': '2.1.318 is the npm `latest` tag. The npm `stable` tag was 2.1.311 on that date and was not run.', 'fixtures': '2.1.318'},
-    'codex': {'verified': '0.166.0', 'verified_on': '2026-11-05', 'method': 'installed plugin run after hook review', 'fixtures': 'source-0.166.0'},
+    'claude': {'verified': '2.1.322', 'verified_on': '2026-11-10', 'method': 'headless smoke and interactive background-agent run with claude-fable-5-2 as primary', 'note': 'The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.', 'fixtures': '2.1.322'},
+    'codex': {'verified': '0.166.0', 'verified_on': '2026-11-05', 'method': 'installed plugin run after hook review', 'fixtures': '0.166.0'},
     'agy': {'verified': '1.5.0', 'verified_on': '2026-11-04', 'method': 'headless run of the circuit breaker and write_file permissions', 'note': 'Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.', 'fixtures': '1.5.0'},
 }

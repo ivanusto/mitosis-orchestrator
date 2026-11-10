@@ -460,6 +460,11 @@ class TestPrimaryModelGuard(HookBase):
         self.assertTrue(eo.is_frontier_tier("deepseek-reasoner"))
         self.assertTrue(eo.is_frontier_tier("deepseek-r1"))
 
+    def test_fable_and_mythos_5_2_are_frontier(self):
+        for name in ("claude-fable-5-2", "claude-mythos-5-2", "fable"):
+            with self.subTest(name=name):
+                self.assertTrue(eo.is_frontier_tier(name))
+
     def test_small_tier_rejections(self):
         rejections = (
             "grok-3-mini",

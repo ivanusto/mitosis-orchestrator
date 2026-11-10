@@ -68,7 +68,7 @@ CLAUDE_PLUGIN_PREFIX = "mitosis-orchestrator"
 # Built-in Claude Code subagent types that the pinning policy must never rewrite.
 CLAUDE_BUILTIN_AGENT_TYPES = {
     "explore", "plan", "general-purpose", "claude", "claude-code-guide",
-    "statusline-setup", "output-style-setup", "bash",
+    "statusline-setup", "output-style-setup", "bash", "fork", "web-fetch",
 }
 
 

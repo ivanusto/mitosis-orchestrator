@@ -87,7 +87,7 @@ TERMINATION_REASONS = (
 PLUGIN_PREFIX = "mitosis-orchestrator:"
 AGENT_TYPES = frozenset((
     "explorer", "worker", "default", "flash-lite-scout", "flash-worker", "explore", "plan", "general-purpose", "claude",
-    "claude-code-guide", "statusline-setup", "output-style-setup", "bash",
+    "claude-code-guide", "statusline-setup", "output-style-setup", "bash", "fork", "web-fetch",
 ))
 TOOL_NAMES = frozenset((
     "run_command", "Bash", "shell", "exec_command", "local_shell", "apply_patch", "invoke_subagent", "Task", "Agent",
@@ -153,6 +153,8 @@ def tool_name_ok(value: str) -> bool:
 
 
 def agent_type_ok(value: str) -> bool:
+    if value == "":
+        return True  # Claude Code's internal fork stop carries an empty agent_type.
     bare = value[len(PLUGIN_PREFIX):] if value.startswith(PLUGIN_PREFIX) else value
     return bare.lower() in AGENT_TYPES
 
