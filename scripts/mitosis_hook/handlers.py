@@ -128,7 +128,7 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
     elif status == "warn":
         note = (
             f"WARNING: {target_file} primary model is '{model or 'unset'}', not a frontier model. "
-            "Ask the user to switch to a supported frontier model (Gemini Argon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
+            "Ask the user to switch to a supported frontier model (Gemini Argon/Carbon/Pro/Ultra, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
             "or set CODEX_MITOSIS_ALLOW_NON_PRIMARY=1 / AGY_MITOSIS_ALLOW_NON_PRIMARY=1 / CLAUDE_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
         )
     elif status == "silenced":
@@ -238,7 +238,7 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     warn_text = (
         f"[Mitosis Orchestrator] The active session model is '{model_name}', which is "
         "not a frontier model. Tell the user to switch Model Selection to "
-        "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Pro/Ultra, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
+        "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Carbon/Pro/Ultra, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
     )
     if is_codex_hook_payload(payload):
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": warn_text}}

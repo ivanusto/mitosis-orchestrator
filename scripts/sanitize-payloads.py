@@ -106,7 +106,7 @@ ROLE_CANNED = frozenset(("Reconnaissance Scout",))
 IDENT_RE = re.compile(r"^(?!.*[0-9]{2})[A-Za-z_][A-Za-z0-9_]{0,39}$")
 MODEL_FAMILY = frozenset((
     "gemini", "claude", "gpt", "chatgpt", "o1", "o3", "o4", "haiku", "sonnet", "opus", "fable", "mythos", "flash", "lite",
-    "pro", "ultra", "argon", "codex", "gemma", "llama", "qwen", "qwq", "deepseek", "mistral", "grok", "best", "inherit",
+    "pro", "ultra", "argon", "carbon", "codex", "gemma", "llama", "qwen", "qwq", "deepseek", "mistral", "grok", "best", "inherit",
     "sol", "terra", "luna", "spark", "mini", "nano",
 ))
 MODEL_WORDS = MODEL_FAMILY | frozenset((

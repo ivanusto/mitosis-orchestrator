@@ -2,13 +2,13 @@
 name: orchestrate
 description: >-
   Structured 4-phase orchestration workflow across 3 platforms (Google Antigravity agy, Anthropic Claude Code,
-  OpenAI Codex CLI) that keeps the primary agent on a frontier reasoning model (Gemini 4 Argon, Claude Fable/Opus/Sonnet,
+  OpenAI Codex CLI) that keeps the primary agent on a frontier reasoning model (Gemini 4 Argon/Carbon, Claude Fable/Opus/Sonnet,
   gpt-6.1-sol / gpt-5.6-sol, o3, Grok, DeepSeek, Qwen) as architect/coordinator and dispatches subagents pinned to
   reconnaissance (flash_lite / haiku / gpt-6-luna) or execution (flash / sonnet / gpt-6.1-terra). Activate when the
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.1)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.2)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -23,7 +23,7 @@ Execute complex engineering tasks using a 4-phase hierarchical orchestration loo
 
 | Phase / Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI |
 | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon` / Frontier | `fable` / `opus` / `sonnet` | `gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-6-astra` / `o3` |
+| **Primary Master Nucleus** | `Gemini 4 Argon` or `Gemini 4 Carbon` (agy 1.5.5+, ADC sign-in only; default stays Argon) / Frontier | `fable` / `opus` / `sonnet` | `gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-6-astra` / `o3` |
 | **Phase 1: Reconnaissance** | `flash_lite` (`flash-lite-scout`) | `haiku` (`Agent` with `subagent_type: "mitosis-orchestrator:flash-lite-scout"`) | `gpt-6-luna` (`spawn_agent` role `explorer` (`flash-lite-scout` accepted as alias), or `codex exec --profile mitosis-scout`) |
 | **Phase 3: Scoped Execution** | `flash` (`flash-worker`) | `sonnet` (`Agent` with `subagent_type: "mitosis-orchestrator:flash-worker"`) | `gpt-6.1-terra` (`spawn_agent` role `worker` (`flash-worker` accepted as alias), or `codex exec --profile mitosis-worker`) |
 

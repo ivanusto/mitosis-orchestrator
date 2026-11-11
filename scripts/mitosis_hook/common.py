@@ -84,6 +84,8 @@ CLAUDE_HOOK_EVENTS = {
 ALLOWED_PRIMARY_MODELS = {
     "Gemini 4 Argon (High)",
     "Gemini 4 Argon (Medium)",
+    "Gemini 4 Carbon (High)",
+    "Gemini 4 Carbon (Medium)",
 }
 
 

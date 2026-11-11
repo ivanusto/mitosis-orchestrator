@@ -60,7 +60,7 @@ SMALL_TIER_RE = re.compile(r"(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark
 # "o1" does not match "product-o1x". Family names match as segment prefixes
 # ("qwen3", "deepseek-v4").
 FRONTIER_SEGMENTS = {
-    "argon", "pro", "ultra", "claude", "opus", "sonnet", "fable", "mythos", "grok", "o1", "o3", "o4",
+    "argon", "carbon", "pro", "ultra", "claude", "opus", "sonnet", "fable", "mythos", "grok", "o1", "o3", "o4",
 }
 
 
@@ -78,7 +78,7 @@ MIN_FRONTIER_PARAMS_B = 30.0
 
 
 def is_frontier_tier(model_name: str) -> bool:
-    """True for Argon / Pro / Ultra / Claude / frontier models; False for Flash, Lite, Mini, Nano, Haiku, Auto or empty."""
+    """True for Argon / Carbon / Pro / Ultra / Claude / frontier models; False for Flash, Lite, Mini, Nano, Haiku, Auto or empty."""
     normalized = (model_name or "").strip().lower()
     if not normalized or normalized in {"auto", "none", "inherit"}:
         return False
