@@ -37,8 +37,11 @@ CLAUDE_SCOUT_TOOL_RULE = (
     "The hook denies any other command, any `>` redirection and any `$(...)`."
 )
 AGY_SCOUT_TOOL_RULE = (
-    "Use `find_by_name`, `grep_search`, `list_dir` and `view_file` with `StartLine`/`EndLine` slices. "
-    "Read whole files only when the prompt asks for it."
+    "Read files with `read_file` (`view_file` on agy before 1.5), using line ranges for large files, "
+    "only at the paths named in the prompt. agy 1.5 and later give the scout no search, directory-listing or shell tool, "
+    "so if the lookup needs a path or a search the prompt did not give, stop and report STATUS: BLOCKED "
+    "naming what is needed (do not guess paths). Older agy versions that still offer "
+    "`find_by_name`/`grep_search`/`list_dir` may use them."
 )
 CODEX_SCOUT_TOOL_RULE = (
     "Read files with slice bounds when inspecting large files. Shell is for read-only commands only "
@@ -47,6 +50,15 @@ CODEX_SCOUT_TOOL_RULE = (
 
 CLAUDE_SCOUT_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 CLAUDE_WORKER_TOOLS = ["Read", "Write", "Edit", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "NotebookEdit"]
+# agy tool names. agy 1.5.x renamed the file tools and keeps the old names as aliases:
+# view_file -> read_file, replace_file_content -> edit_file, write_to_file -> write_file.
+# Listing an old name next to its new name fails to build the agent
+# ("tool name conflict: multiple tools resolved with name ..."), so only the old
+# alias is listed: it resolves on agy 1.5.x and still exists on earlier versions.
+# find_by_name, grep_search, list_dir, read_url_content, multi_replace_file_content and
+# notebook_edit are retired on 1.5.x and silently dropped; they stay for earlier agy.
+# The scout gets no run_command: agy runs no hooks inside subagents, so it could not be held read-only.
+AGY_TOOL_ALIASES = {"view_file": "read_file", "replace_file_content": "edit_file", "write_to_file": "write_file"}
 AGY_SCOUT_TOOLS = ["send_message", "view_file", "find_by_name", "grep_search", "list_dir"]
 AGY_WORKER_TOOLS = [
     "send_message", "view_file", "find_by_name", "grep_search", "list_dir", "read_url_content",

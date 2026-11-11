@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.2)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.3)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -27,7 +27,7 @@ Single-hop, read-only lookups:
 - `git status` / `git log` / log tail checks
 - High-fan-out reconnaissance where latency and cost matter
 
-Scouts have no write tools and no web mutation tools. On Claude Code the scout has `Bash` for read-only checks; the hook allows only an allowlist of read-only commands (`git status/log/diff/show`, `ls`, `rg`, `wc`, `tail`, ...) and denies redirection. Prompts containing mutation verbs (implement, refactor, edit, fix, patch, delete, ...) are automatically upgraded to execution workers by the policy.
+Scouts have no write tools and no web mutation tools. On agy 1.5+ a scout has only `read_file` (no search, listing or shell tool, and agy runs no hooks inside subagents): give it exact paths; searches, listings, `git` checks and `.log` slicing go to `flash-worker`, which uses `run_command` (`rg`, `ls`, `git ...`). On Claude Code the scout has `Bash` for read-only checks; the hook allows only an allowlist of read-only commands (`git status/log/diff/show`, `ls`, `rg`, `wc`, `tail`, ...) and denies redirection. Prompts containing mutation verbs (implement, refactor, edit, fix, patch, delete, ...) are automatically upgraded to execution workers by the policy.
 
 ### B. Execution Worker (`flash` / `sonnet` / `gpt-6.1-terra`)
 Moderate-complexity analysis or scoped execution:

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.3 - 2026-11-11
+
+agy 1.5.x retired the search and listing tools (`list_dir`, `find_by_name`, `grep_search`); the default toolset is now `ask_question`, `define_subagent`, `edit_file`, `invoke_subagent`, `manage_subagents`, `manage_task`, `read_file`, `run_command`, `schedule`, `search_web`, `send_message`, `swarm`, `write_file`. Nothing to do after updating except start a new agy session.
+
+### Fixed
+- **The scout's first dispatch failed** with `unknown tool: "list_dir"` (also `find_by_name`, `grep_search`) because its generated instructions named retired tools, and agy 1.5.x silently drops unknown names from `tools:`, so the scout received only `read_file`, `send_message` and `manage_task`. Scouts now read the paths named in the prompt with `read_file` and report `STATUS: BLOCKED` naming what is needed when a search or listing is required.
+- **Tool lists stay on the old names, on purpose.** On agy 1.5.5 `view_file`, `replace_file_content` and `write_to_file` are aliases of `read_file`, `edit_file` and `write_file`, and listing an old name next to its new name fails to build the agent (`tool name conflict: multiple tools resolved with name "read_file"`). The old names resolve on 1.5.x and still exist on earlier agy. A test now rejects both members of an alias pair in one list.
+- **The agy SessionStart notice** now tells the primary to give scouts exact paths and to send searches, listings and git checks to `flash-worker`.
+- The scout stays read-only: it gets no `run_command`, because agy runs no hooks inside subagents and a shell could not be held read-only.
+
+### Docs
+- `rules/AGENTS.md`, the `/orchestrate` skill, README and README.zh-TW describe the agy 1.5 scout (`read_file` only) and send searches to the worker; `spec/compat.toml` notes the toolset change.
+- The 1.2.7 claim that custom agents listing legacy tools keep them does not hold on agy 1.5.x.
+- Verified CLI: agy 1.5.5 (2026-11-11).
+
 ## 2.7.2 - 2026-11-11
 
 Gemini 4 Carbon support for agy 1.5.5. Nothing to do after updating except start a new agy session. The default primary stays `Gemini 4 Argon (High)`, because Carbon is offered only when agy is signed in with Application Default Credentials; `GEMINI_API_KEY` users do not see it.

@@ -20,7 +20,7 @@
 
 - **主核架構師（Primary Frontier Orchestrator）**：專注於高階架構設計、API 介面契約、跨模組重構決策、資安與並行性把關，以及最終結果的統合驗證。
 - **執行子代理（`flash-worker` · `worker`）**：負責跨檔案程式碼探索、呼叫圖（Call-Graph）追蹤、外部文件查證、撰寫與執行測試，以及在明確允許清單內的局部修改。
-- **偵察子代理（`flash-lite-scout` · `explorer`）**：負責高併發、低延遲的唯讀單跳偵察：快速定位檔案與符號、執行 `grep`/`glob` 搜尋、切片檢視 `.log` 與 `transcript.jsonl`，以及單一檔案結構摘要。
+- **偵察子代理（`flash-lite-scout` · `explorer`）**：負責高併發、低延遲的唯讀單跳偵察：快速定位檔案與符號、執行 `grep`/`glob` 搜尋、切片檢視 `.log` 與 `transcript.jsonl`，以及單一檔案結構摘要。agy 1.5 起偵察子代理只有 `read_file`，只能讀主代理指名的路徑；搜尋、列目錄與 git 檢查改派 `flash-worker`。
 
 **用途。** 把主核的情境與雜訊式的讀取隔開，以及對真正可平行的工作做平行處理。這兩點都沒有在下方的對照實驗中量測；我們唯一做過的成本比較沒有發現節省（見[外掛是否真的生效？](#外掛是否真的生效240)）。
 
@@ -132,7 +132,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | agy | 1.5.5 | 2026-11-11 | 以 gemini-4-carbon-high 為主核做 headless 實跑（ADC 登入） |
 
 - Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
-- agy：`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon (Low|Medium|High)，外掛視為尖端模型，預設仍為 Argon。print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
+- agy：`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon (Low|Medium|High)，外掛視為尖端模型，預設仍為 Argon。agy 1.5.x 更換預設工具組（沒有列目錄、grep、glob、find 工具）：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED，搜尋與 git 檢查交給 worker。print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
@@ -140,7 +140,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.2)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.3)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -272,7 +272,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 | :--- | :--- | :--- | :--- | :--- |
 | **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` 或 `Gemini 4 Carbon (High/Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon） / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
 | **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
-| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
+| **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。agy 1.5 起偵察子代理只有 `read_file`（沒有搜尋、列目錄與 shell 工具），請給它確切路徑，搜尋與 git 檢查交給 worker。 |
 
 
 ### 信心分級分流與選用判斷器（v1.5.0）

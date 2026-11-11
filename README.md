@@ -132,7 +132,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 | agy | 1.5.5 | 2026-11-11 | headless run with gemini-4-carbon-high as primary (ADC sign-in) |
 
 - Claude Code: The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.
-- agy: Gemini 4 Carbon (Low|Medium|High) is listed by `agy models` only under ADC sign-in; it is accepted as a frontier primary, the default stays Argon. Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.
+- agy: Gemini 4 Carbon (Low|Medium|High) is listed by `agy models` only under ADC sign-in; it is accepted as a frontier primary, the default stays Argon. agy 1.5.x changed the default toolset (no list, grep, glob or find tool): the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed; searches and git checks go to the worker. Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.
 <!-- END GENERATED: compat -->
 
 ### 1. Google Antigravity (`agy` 1.4+)
@@ -140,7 +140,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.2)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.3)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -273,7 +273,7 @@ Provides the structured `/orchestrate` workflow:
 | :--- | :--- | :--- | :--- | :--- |
 | **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon) / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
 | **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
-| **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). |
+| **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). On agy 1.5+ the scout has only `read_file` (no search, listing or shell), so give it exact paths and send searches and git checks to the worker. |
 
 
 ### Confidence-graded routing and the optional judge (v1.5.0)
