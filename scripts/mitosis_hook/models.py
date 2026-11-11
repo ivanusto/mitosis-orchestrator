@@ -314,10 +314,11 @@ def check_primary_model_settings(payload: Optional[Dict[str, Any]] = None) -> Tu
 
 
 POLICY_NOTICE = (
-    "Subagent pinning is active: delegate single-hop lookups (grep/glob, file or symbol "
-    "location, git/log checks, single-file inspection) to `flash_lite` "
-    "(`TypeName: \"flash-lite-scout\"`) and multi-file research, test runs, web/docs "
-    "research and scoped code edits to `flash` (`TypeName: \"flash-worker\"`). "
+    "Subagent pinning is active: send to `flash_lite` (`TypeName: \"flash-lite-scout\"`) only reads of "
+    "files at paths you name (single-file or symbol inspection at a known path). On agy 1.5+ scouts have "
+    "only read_file (no search, listing or shell), so file/symbol location searches, grep/glob, git/log "
+    "checks, test runs, web/docs research and edits go to `flash` (`TypeName: \"flash-worker\"`); "
+    "always give scouts exact paths. "
     "Never use `Model: \"inherit\"` or `Model: \"pro\"` on subagents. "
     "Subagents answer with the four-line REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES); the hook appends it to prompts that lack it, so do not ask subagents to find rules/AGENTS.md."
 )
