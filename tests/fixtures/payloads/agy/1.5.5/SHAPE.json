@@ -1,0 +1,154 @@
+{
+  "cli_version": "1.5.5",
+  "modes": {
+    "pre-invocation": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hookEventName": [
+          "str"
+        ],
+        "payload.initialNumSteps": [
+          "int"
+        ],
+        "payload.invocationNum": [
+          "int"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ]
+      }
+    },
+    "session-start": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.hookEventName": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.injectSteps": [
+          "list"
+        ],
+        "result.injectSteps[]": [
+          "dict"
+        ],
+        "result.injectSteps[].systemMessage": [
+          "dict"
+        ],
+        "result.injectSteps[].systemMessage.systemMessage": [
+          "str"
+        ]
+      }
+    },
+    "stop": {
+      "-": {
+        "payload": [
+          "dict"
+        ],
+        "payload.artifactDirectoryPath": [
+          "str"
+        ],
+        "payload.conversationId": [
+          "str"
+        ],
+        "payload.cwd": [
+          "str"
+        ],
+        "payload.error": [
+          "str"
+        ],
+        "payload.executionNum": [
+          "int"
+        ],
+        "payload.fullyIdle": [
+          "bool"
+        ],
+        "payload.hookEventName": [
+          "str"
+        ],
+        "payload.lastUserInput": [
+          "str"
+        ],
+        "payload.modelName": [
+          "str"
+        ],
+        "payload.terminationReason": [
+          "str"
+        ],
+        "payload.transcriptPath": [
+          "str"
+        ],
+        "payload.workspacePaths": [
+          "list"
+        ],
+        "payload.workspacePaths[]": [
+          "str"
+        ],
+        "result": [
+          "dict"
+        ],
+        "result.decision": [
+          "str"
+        ]
+      }
+    }
+  },
+  "platform": "agy",
+  "scenarios": [
+    "carbon-primary"
+  ],
+  "shape_version": 1
+}

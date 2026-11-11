@@ -447,6 +447,8 @@ class TestPrimaryModelGuard(HookBase):
         # Gemini
         self.assertTrue(eo.is_frontier_tier("Gemini 4 Argon (High)"))
         self.assertTrue(eo.is_frontier_tier("Gemini 4 Argon (Medium)"))
+        for carbon in ("Gemini 4 Carbon (High)", "Gemini 4 Carbon (Medium)", "Gemini 4 Carbon (Low)", "gemini-4-carbon-high"):
+            self.assertTrue(eo.is_frontier_tier(carbon), carbon)
         self.assertTrue(eo.is_frontier_tier("gemini-3.1-pro-preview"))
         self.assertTrue(eo.is_frontier_tier("gemini-ultra"))
         # OpenAI
@@ -498,6 +500,7 @@ class TestPrimaryModelGuard(HookBase):
             "qwen-max", "qwen-plus", "qwq-32b",
             "Claude 3.7 Sonnet", "Claude 3 Opus",
             "Gemini 4 Argon (High)", "gemini-3.1-pro-preview", "gemini-ultra",
+            "Gemini 4 Carbon (High)", "Gemini 4 Carbon (Medium)", "Gemini 4 Carbon (Low)", "gemini-4-carbon-high",
             "gpt-4o", "gpt-5-preview", "o1", "o3", "o4",
             "deepseek-reasoner", "deepseek-r1",
         )
@@ -566,6 +569,24 @@ class TestPrimaryModelGuard(HookBase):
         data = json.loads(path.read_text())
         self.assertEqual(data["model"], "Gemini 4 Argon (Medium)")
         self.assertEqual(data["other"], 1)
+
+    def test_session_start_pins_to_carbon_when_requested(self):
+        path = self._settings("gemini-3-flash")
+        os.environ["AGY_MITOSIS_PIN_SETTINGS"] = "1"
+        os.environ["AGY_MITOSIS_PRIMARY_MODEL"] = "Gemini 4 Carbon (High)"
+        res = eo.handle_session_start({})
+        self.assertIn("Restored", res["injectSteps"][0]["systemMessage"]["systemMessage"])
+        self.assertEqual(json.loads(path.read_text())["model"], "Gemini 4 Carbon (High)")
+
+    def test_session_start_carbon_primary_is_not_warned(self):
+        self._settings("Gemini 4 Carbon (Medium)")
+        res = eo.handle_session_start({})
+        self.assertNotIn("not a frontier model", json.dumps(res))
+
+    def test_pre_invocation_carbon_model_id_is_not_warned(self):
+        p = dict(self.payload, modelName="gemini-4-carbon-high", invocationNum=0)
+        res = eo.handle_pre_invocation(p)
+        self.assertNotIn("not a frontier model", json.dumps(res))
 
     def test_session_start_pins_when_opted_in_argon_legacy(self):
         path = self._settings("gemini-3-flash")

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.2 - 2026-11-11
+
+Gemini 4 Carbon support for agy 1.5.5. Nothing to do after updating except start a new agy session. The default primary stays `Gemini 4 Argon (High)`, because Carbon is offered only when agy is signed in with Application Default Credentials; `GEMINI_API_KEY` users do not see it.
+
+### Fixed
+- **A Carbon primary warned as "not a frontier model"** at SessionStart ("settings.json primary model is 'Gemini 4 Carbon (Medium)'") and at every PreInvocation ("'gemini-4-carbon-high'"), because `carbon` was not a known frontier name. With `*_MITOSIS_PIN_SETTINGS=1` the pin would also have rewritten a Carbon primary back to Argon. `carbon` now counts as frontier (`gemini-4-carbon-low|medium|high`, display names `Gemini 4 Carbon (Low|Medium|High)`).
+
+### Added
+- `Gemini 4 Carbon (High)` and `Gemini 4 Carbon (Medium)` are accepted values of `AGY_MITOSIS_PRIMARY_MODEL`.
+- agy 1.5.5 payload fixture `tests/fixtures/payloads/agy/1.5.5/carbon-primary.jsonl` (headless run with `gemini-4-carbon-high`, recorded after this fix).
+
+### Docs
+- README, README.zh-TW, `rules/AGENTS.md` and the `/orchestrate` skill list Carbon next to Argon, with the note "agy 1.5.5+, ADC sign-in only; default stays Argon".
+- Verified CLI: agy 1.5.5 (2026-11-11).
+
 ## 2.7.1 - 2026-11-10
 
 Model refresh for Claude Fable 5.2 and Mythos 5.2 (released 2026-11-09). Nothing to do after updating; start a new Claude Code session.

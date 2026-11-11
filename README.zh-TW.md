@@ -93,7 +93,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.2）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
-| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano` |
+| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`、`DeepSeek-V3`、`deepseek-reasoner`、`deepseek-chat` | `deepseek-lite` |
 | **Alibaba Qwen** | `Qwen Max`、`Qwen Plus`、`Qwen 2.5 / 3`、`QwQ`（`qwq-32b`） | `qwen-lite`、`qwen-vl-lite` |
@@ -129,10 +129,10 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | 以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理 |
 | Codex CLI | 0.166.0 | 2026-11-05 | 完成 hook review 後以已安裝外掛實跑 |
-| agy | 1.5.0 | 2026-11-04 | 以 headless 實跑熔斷器與 write_file 權限 |
+| agy | 1.5.5 | 2026-11-11 | 以 gemini-4-carbon-high 為主核做 headless 實跑（ADC 登入） |
 
 - Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
-- agy：print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
+- agy：`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon (Low|Medium|High)，外掛視為尖端模型，預設仍為 Argon。print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
@@ -140,7 +140,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.1)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.2)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -270,7 +270,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
-| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
+| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` 或 `Gemini 4 Carbon (High/Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon） / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
 | **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
 | **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。 |
 
