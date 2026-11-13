@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.5 - 2026-11-13
+
+Based on real agy 1.5.7 data (harness-bench, Gemini 4 Hydrogen primary). Nothing to do after updating except start a new agy session.
+
+### Changed
+- **Report length ignores `file://` link targets.** 6 of 22 subagent reports failed the check as `too_long` (limit 1,600 chars). In 4 of them the excess was markdown file links such as `[calc.py](file:///home/user/project/calc.py#L1-L2)`, up to 9 per report, which agy's own system prompt tells agents to write. The length check now counts each `[text](file://...)` link as its text (or `link` if empty), so those 4 pass; the other 2 (verbatim log dumps) still fail. http(s) links are counted in full. The limit stays 1,600 and applies on every platform; the report wording in the agent files says so.
+- **Context-hygiene guard allows small logs.** The primary was blocked from reading a 25-line `vllm-startup.log`, which cost an extra scout round trip. A `.log` or transcript that is a regular file of at most 16 KiB (`SMALL_LOG_MAX_BYTES`, by `os.stat` on the resolved path) can now be read directly; larger files, missing files and stat errors stay blocked. Override with `*_MITOSIS_SMALL_LOG_BYTES` (`0` disables the exemption; an invalid value uses the default). `*_MITOSIS_ALLOW_DIRECT_LOGS` is unchanged.
+- A `file://` link target longer than 512 characters is counted in full, so the link form cannot carry a long payload past the limit.
 ## 2.7.4 - 2026-11-13
 
 Gemini 4 Hydrogen and the agy `Orchestrator` models. Nothing to do after updating except start a new agy session.

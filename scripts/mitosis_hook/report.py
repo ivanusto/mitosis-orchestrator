@@ -231,6 +231,16 @@ REPORT_PROBLEM_CLASSES = (
 _HEADER_PROBLEM_CLASSES = ("status_line", "files_line", "verification_line", "notes_line")
 
 
+# A file:// target of at most 512 characters is not counted; a longer target does not match and counts in
+# full, so the link form cannot carry a long payload past the limit.
+_FILE_LINK_RE = re.compile(r"\[([^\]\n]*)\]\(file://[^\s)]{0,505}\)")
+
+
+def report_effective_length(text: str) -> int:
+    """Report length for the too_long check: `[text](file://...)` links (target <= 512 chars) count as their text (or `link`)."""
+    return len(_FILE_LINK_RE.sub(lambda m: m.group(1) or "link", text))
+
+
 def _report_problem(text: str, require_log_uri: bool = True) -> Optional[Tuple[str, str]]:
     """Check a report against the 4-header bounded format.
 
@@ -240,9 +250,10 @@ def _report_problem(text: str, require_log_uri: bool = True) -> Optional[Tuple[s
     stripped = "\n".join(l for l in (text or "").splitlines() if not REPORT_FENCE_RE.match(l)).strip()
     if not stripped:
         return "empty", "Subagent report is empty."
-    if len(stripped) > MAX_SUBAGENT_REPORT_CHARS:
+    effective_len = report_effective_length(stripped)
+    if effective_len > MAX_SUBAGENT_REPORT_CHARS:
         return "too_long", (
-            f"Subagent report length ({len(stripped)} chars) exceeds maximum "
+            f"Subagent report length ({effective_len} chars, file:// link targets not counted) exceeds maximum "
             f"{MAX_SUBAGENT_REPORT_CHARS} chars."
         )
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]

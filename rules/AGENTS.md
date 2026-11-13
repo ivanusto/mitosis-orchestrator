@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.4)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.5)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini 4 Hydrogen (`High` or `XHigh`; `Low` / `Medium` are not accepted)**, **agy Orchestrator (Carbon / Argon; agy 1.5.7+)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.

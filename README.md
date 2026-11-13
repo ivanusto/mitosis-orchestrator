@@ -142,7 +142,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.4)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.5)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -231,7 +231,7 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 | `PreToolUse` · scout's own tools (Claude Code / Codex) | A `flash-lite-scout` or Codex `explorer` cannot use `Write` / `Edit` / `apply_patch`, whatever its prompt says, and its shell commands must pass a read-only allowlist. The check reads command text and denies what it cannot read for certain; it is not a sandbox ([SECURITY.md](./SECURITY.md)). |
 | `PreToolUse` · `run_workflow` | Blocks workflow scripts whose `agent(...)` calls omit model specification. |
 | `PreToolUse` · `define_subagent` | Forces `enable_subagent_tools=false` to prevent recursive nested subagent spawning. |
-| `PreToolUse` · **Context Hygiene** | Blocks the primary agent from directly reading raw `.log` or `transcript.jsonl` files, keeping noisy logs out of the primary context window by delegating log slicing to reconnaissance scouts. |
+| `PreToolUse` · **Context Hygiene** | Blocks the primary agent from directly reading raw `.log` or `transcript.jsonl` files larger than 16 KiB (small files are allowed), keeping noisy logs out of the primary context window by delegating log slicing to reconnaissance scouts. |
 | `PreToolUse` · **Fast-Path Budget** | Caps direct workspace file mutations by the primary agent at `3` distinct files per turn (configurable via `*_MITOSIS_MAX_DIRECT_EDITS`) and flags direct workspace edit + test-runner loops on the primary agent. Mode `*_MITOSIS_FASTPATH_MODE`: `advise` (default) never blocks and adds one short advice note per kind per turn; `enforce` denies as in earlier versions; `off` disables the budget. On agy the budget is per user turn (it resets when `invocationNum` returns to 0). Test-runner detection ignores quoted text, heredoc bodies and `grep`/`git`/`cat`-style commands. |
 | `PreToolUse` · **Circuit Breaker** | After `2` commands in a row fail in one user turn, `*_MITOSIS_CIRCUIT_BREAKER_MODE` decides: `advise` (default) adds one note on agy and never blocks, `enforce` denies `run_command`, `Bash` and subagent spawns until the next turn, `off` disables. On agy the exit code is read from the transcript at the next model call, because PostToolUse carries none. A read-only command that exits 0 or 1 (`grep` with no match) neither counts nor clears the streak, and neither does a single `test`, `[ ]`, `command -v` or `which` question. On agy a subagent call neither counts nor clears either, because agy reports only that the spawn was accepted. Hooks do not run inside agy subagents, so a worker's own test loop is not counted. **On Claude Code and Codex the counter has never counted a real failure**, since their payloads have no field it reads, so the breaker does nothing there. |
 | `PreToolUse` · **Workspace Guard** | Opt-in (`*_MITOSIS_AUTO_ALLOW=1`): auto-approves file and command tools that stay inside the workspace on Claude Code and agy (on Codex the guard only denies, because Codex rejects an allow without `updatedInput`), while prompting (`ask`; `deny` on Codex, which has no `ask`) for outside paths, privilege escalation, root deletes, force pushes, or shell-piped downloads. When disabled it gives no verdict: on Claude Code the hook returns `{}`, so your normal permission rules and prompts apply (1.5.0 and earlier returned `allow`, which skipped them). |
@@ -249,7 +249,7 @@ Zero-dependency Python 3.8+ standard library hook engine (entry script plus the 
 - Since 2.5.0 a scout's declared `BLOCKED` or `FAILED` is trusted without a log URI once no retry can come (before, it failed validation and, on interactive Claude Code's background path, no escalation started). `CLAUDE_MITOSIS_ENFORCE_REPORT=0` no longer turns off background escalation, untyped pinned agents escalate, a fenced report arms, and a quoted `- STATUS: FAILED` line inside a `COMPLETED` report does not. Workers still need the URI.
 
 ### 2. Bounded 4-Header Subagent Report Contract
-All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, up to 10 compact bullet lines under `NOTES:`, and, for workers, a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`; a scout is read-only and cannot write a log, so its declared `BLOCKED` or `FAILED` is accepted without one):
+All reconnaissance scouts and execution workers return a strict, token-efficient 4-header report (≤ 1,600 characters, `file://` link targets not counted, up to 10 compact bullet lines under `NOTES:`, and, for workers, a mandatory `file://.../*.log` scratch log URI whenever `STATUS` is `BLOCKED` or `FAILED`; a scout is read-only and cannot write a log, so its declared `BLOCKED` or `FAILED` is accepted without one):
 
 <!-- BEGIN GENERATED: report-format -->
 ```markdown
@@ -495,6 +495,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | Maximum distinct workspace files the primary agent may edit directly in a single turn. |
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise` (default, any unknown value) never blocks and adds advice once per kind per turn; `enforce` restores the denials for the edit limit and edit-then-test; `off` disables the budget. |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
+| `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | Regular `.log` or transcript files up to this size may be read directly by the primary (Context Hygiene exemption). `0` disables it. |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to turn the fast-path budget off (same as `*_MITOSIS_FASTPATH_MODE=off`, no tracking). |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | Set to `0` to stop comparing the pinned model with the model the subagent actually ran on. |
 | `MITOSIS_CAPTURE_PAYLOADS` | unset | Absolute directory for raw hook payloads, used to build test fixtures. **The file holds your prompts and paths**: see `SECURITY.md`. |

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -105,6 +106,36 @@ LOG_OR_TRANSCRIPT_RE = re.compile(
     r"(?:^|[/\\])(?:transcript(?:_full)?\.jsonl|[^/\\]+\.log)$",
     re.IGNORECASE,
 )
+
+
+SMALL_LOG_MAX_BYTES = 16 * 1024
+
+
+def _small_log_max_bytes() -> int:
+    raw = _get_env("CODEX_MITOSIS_SMALL_LOG_BYTES", "CLAUDE_MITOSIS_SMALL_LOG_BYTES", "AGY_MITOSIS_SMALL_LOG_BYTES")
+    if not raw:
+        return SMALL_LOG_MAX_BYTES
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return SMALL_LOG_MAX_BYTES
+
+
+def _is_small_regular_file(target: str, cwd: str) -> bool:
+    limit = _small_log_max_bytes()
+    if limit <= 0 or not target:
+        return False
+    try:
+        path = os.path.expanduser(target)
+        if not os.path.isabs(path):
+            if not cwd or not os.path.isabs(cwd):
+                return False
+            path = os.path.join(cwd, path)
+        path = os.path.realpath(path)
+        st = os.stat(path)
+        return stat.S_ISREG(st.st_mode) and st.st_size <= limit
+    except (OSError, ValueError):
+        return False
 
 
 @_releases_state_locks
@@ -455,7 +486,11 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
                 or args.get("File")
                 or ""
             )
-            if target and LOG_OR_TRANSCRIPT_RE.search(target.replace("\\", "/")):
+            if (
+                target
+                and LOG_OR_TRANSCRIPT_RE.search(target.replace("\\", "/"))
+                and not _is_small_regular_file(target, str(payload.get("cwd") or ""))
+            ):
                 return _deny(
                     f"[Mitosis Orchestrator] Direct inspection of log/transcript file '{Path(target).name}' "
                     "by the primary agent is blocked for context hygiene. "

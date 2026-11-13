@@ -142,7 +142,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.4)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.5)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -231,7 +231,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 | `PreToolUse` · 偵察子代理自己的工具（Claude Code / Codex） | `flash-lite-scout` 與 Codex `explorer` 不論提示詞怎麼寫，都不能用 `Write` / `Edit` / `apply_patch`，shell 指令也要通過唯讀白名單。這項檢查讀的是指令文字，讀不準就拒絕，並不是沙盒（見 [SECURITY.md](./SECURITY.md)）。 |
 | `PreToolUse` · `run_workflow` | 攔截工作流腳本中未明確指定子代理模型層級的呼叫。 |
 | `PreToolUse` · `define_subagent` | 強制 `enable_subagent_tools=false`，防止子代理無限巢狀衍生。 |
-| `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取 `.log` 或 `transcript.jsonl` 原始大檔，改由偵察子代理切片摘要。 |
+| `PreToolUse` · **情境整潔守衛 (Context Hygiene)** | 攔截主代理直接讀取超過 16 KiB 的 `.log` 或 `transcript.jsonl` 原始大檔（小檔放行），改由偵察子代理切片摘要。 |
 | `PreToolUse` · **快捷修改預算 (Fast-Path Budget)** | 限制主代理單回合直接修改工作區檔案上限 `3` 個（`*_MITOSIS_MAX_DIRECT_EDITS` 可調），並標記主代理在同回合直接修改檔案後執行測試框架。模式由 `*_MITOSIS_FASTPATH_MODE` 決定：`advise`（預設）不阻擋，每種情況每回合只附一則簡短建議；`enforce` 恢復與舊版相同的拒絕；`off` 停用預算。agy 自此版本起以使用者回合為單位計算（`invocationNum` 回到 0 時重置）。測試框架偵測會忽略引號內文字、heredoc 內容，以及 `grep`、`git`、`cat` 等命令。 |
 | `PreToolUse` · **兩次失敗熔斷器 (Circuit Breaker)** | 同一個使用者回合內連續 `2` 個指令失敗後，由 `*_MITOSIS_CIRCUIT_BREAKER_MODE` 決定：`advise`（預設）在 agy 加一則提醒、不阻擋；`enforce` 拒絕 `run_command`、`Bash` 與子代理派工直到下一回合；`off` 停用。agy 的 PostToolUse 不帶退出碼，所以在下一次模型呼叫時從逐字稿讀取。唯讀指令 exit 0 或 1（例如 `grep` 沒有命中）不計入也不清除連續次數，單獨一句 `test`、`[ ]`、`command -v` 或 `which` 這類提問也一樣。在 agy 上，子代理呼叫同樣不計入也不清除，因為 agy 只回報派工已被接受。agy 子代理內不執行 hook，所以 worker 自己的測試循環不計入。**Claude Code 與 Codex 從未計入真實失敗**，因為它們的 payload 沒有計數器讀取的欄位，熔斷器在這兩個平台沒有作用。 |
 | `PreToolUse` · **工作區範圍守衛 (Workspace Guard)** | 選用（`*_MITOSIS_AUTO_ALLOW=1`）：工作區內的檔案讀寫與安全命令自動放行（僅限 Claude Code 與 agy；Codex 會拒絕沒有 `updatedInput` 的放行，因此在 Codex 上守衛只會拒絕）；跨出工作區、提權或危險指令轉為詢問（`ask`；Codex 沒有 `ask`，改為 `deny`）。未啟用時不表態：Claude Code 端回傳 `{}`，沿用使用者原本的權限規則與提示（1.5.0 以前回傳 `allow`，會略過權限提示）。 |
@@ -249,7 +249,7 @@ Codex 0.163（multi-agent v2）在 hook payload 裡把代理工具命名為 `col
 - 2.3 起背景 `Agent` 啟動（`{"isAsync": true, "agentId": ...}`）也會被登記，因此 `SendMessage` 的偵察者防護看得到它們。
 
 ### 2. 有界四標頭子代理回報合約 (Bounded 4-Header Report Contract)
-所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元、`NOTES:` 下最多 10 行清單，執行者在狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結；偵察者是唯讀的，無法寫日誌，所以它宣告的 `BLOCKED` 或 `FAILED` 不需要連結也會被接受）：
+所有偵察與執行子代理都採用極簡四標頭格式回報（總長 ≤ 1,600 字元，`file://` 連結目標不計入、`NOTES:` 下最多 10 行清單，執行者在狀態為 `BLOCKED` 或 `FAILED` 時必須附 `file://.../*.log` 日誌連結；偵察者是唯讀的，無法寫日誌，所以它宣告的 `BLOCKED` 或 `FAILED` 不需要連結也會被接受）：
 
 <!-- BEGIN GENERATED: report-format -->
 ```markdown
@@ -501,6 +501,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_MAX_DIRECT_EDITS` | `3` | 主代理單一回合可直接修改的不同工作區檔案數量上限。 |
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise`（預設，未知值亦同）不阻擋，每種情況每回合附一次建議；`enforce` 恢復單回合修改上限與「修改後跑測試」的拒絕；`off` 停用預算。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
+| `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | 主代理可直接讀取不超過此大小的一般 `.log` 或 transcript 檔（情境整潔守衛的例外）。設為 `0` 則停用例外。 |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時停用快捷修改預算（等同 `*_MITOSIS_FASTPATH_MODE=off`，且不追蹤）。 |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | 設為 `0` 時，不再比對釘定的模型與子代理實際執行的模型。 |
 | `MITOSIS_CAPTURE_PAYLOADS` | 未設定 | 錄製原始 hook payload 的絕對路徑目錄，用來建立測試 fixture。**檔案內含你的提示詞與路徑**，詳見 `SECURITY.md`。 |
