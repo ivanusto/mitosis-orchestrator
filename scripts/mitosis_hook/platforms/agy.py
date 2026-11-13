@@ -3,6 +3,7 @@
 import copy
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -214,6 +215,7 @@ def _process_subagent_items(payload: Dict[str, Any], updated: List[Any]) -> Tupl
                 "tier": "flash_lite" if target_model == "flash_lite" else "flash",
                 "workspace": workspace,
                 "active_branch": workspace == "branch",
+                "dispatched_at": time.time(),
                 **({"escalated": True} if item is escalated_item else {}),
             }
         )

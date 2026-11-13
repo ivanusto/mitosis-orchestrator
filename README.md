@@ -142,7 +142,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.5)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.6)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -496,6 +496,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise` (default, any unknown value) never blocks and adds advice once per kind per turn; `enforce` restores the denials for the edit limit and edit-then-test; `off` disables the budget. |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
 | `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | Regular `.log` or transcript files up to this size may be read directly by the primary (Context Hygiene exemption). `0` disables it. |
+| `AGY_MITOSIS_TURN_NUDGE_SECONDS` | `300` | agy only. Seconds after a user request before the hook adds one reminder to write the deliverable now, sent once per request and only if a subagent was dispatched during that request. `0` disables it; an invalid value uses the default. It never blocks. |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to turn the fast-path budget off (same as `*_MITOSIS_FASTPATH_MODE=off`, no tracking). |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | Set to `0` to stop comparing the pinned model with the model the subagent actually ran on. |
 | `MITOSIS_CAPTURE_PAYLOADS` | unset | Absolute directory for raw hook payloads, used to build test fixtures. **The file holds your prompts and paths**: see `SECURITY.md`. |

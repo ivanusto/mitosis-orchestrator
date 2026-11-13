@@ -332,8 +332,10 @@ POLICY_NOTICE = (
     "Subagent pinning is active: send to `flash_lite` (`TypeName: \"flash-lite-scout\"`) only reads of "
     "files at paths you name (single-file or symbol inspection at a known path). On agy 1.5+ scouts have "
     "only read_file (no search, listing or shell), so file/symbol location searches, grep/glob, git/log "
-    "checks, test runs, web/docs research and edits go to `flash` (`TypeName: \"flash-worker\"`); "
+    "checks, test runs and edits go to `flash` (`TypeName: \"flash-worker\"`); "
     "always give scouts exact paths. "
+    "Do sequential web/docs research and tracing yourself (search_web, read_file); delegate only independent work that can run in parallel, and do not wait on a single subagent for something a few of your own calls would finish. "
+    "When the task asks for an output file, write it as soon as you have an evidence-backed answer, then refine; do not open new verification branches before the deliverable exists. "
     "Never use `Model: \"inherit\"` or `Model: \"pro\"` on subagents. "
     "Subagents answer with the four-line REPORT FORMAT (STATUS / FILES_CHANGED / VERIFICATION / NOTES); the hook appends it to prompts that lack it, so do not ask subagents to find rules/AGENTS.md."
 )

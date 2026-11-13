@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.7.6 - 2026-11-13
+
+Based on a real agy 1.5.7 harness task (read `vllm-startup.log`, find the root cause, write `answer.md`, Gemini 4 Hydrogen High as primary). Pure agy passed 3/3 in 302-482 s. With the plugin loaded, 3/3 never wrote `answer.md` and were cut off by the 900 s print timeout. Nothing to do after updating except start a new agy session.
+
+Three causes: (1) the 25-line log was blocked by the context-hygiene guard (fixed in 2.7.5); (2) the SessionStart notice sent web/docs research to `flash` workers, so the primary dispatched source tracing and research to flash-worker subagents one after another, each taking 170-430 s, although it had the root cause within 20-90 s; (3) it kept adding verification follow-ups and never wrote the deliverable.
+
+### Changed
+- **agy policy notice, `/orchestrate` skill and `rules/AGENTS.md`.** Web/docs research is no longer listed as work to always send to `flash`. Two rules were added for agy: do sequential research and tracing yourself and delegate only independent parallel work; write the requested output file as soon as there is an evidence-backed answer, then refine. Claude Code and Codex text is unchanged.
+- **Turn nudge (agy only).** When a user request has run for `AGY_MITOSIS_TURN_NUDGE_SECONDS` (default 300, `0` disables) and a subagent was dispatched during that request (pending or already reported), the next `PreInvocation` adds one `ephemeralMessage` asking the primary to write the deliverable now from the evidence it has and not to open new research or follow-ups (follow-ups via `send_message` to already-reported subagents were what kept the primary from writing). Sent once per request; the timer is anchored on `lastUserInput` (agy resets `invocationNum` to 0 whenever a subagent message wakes the primary). It never blocks and does not run for subagent, Claude Code or Codex payloads.
+
+### Tests
+- New `tests/test_turn_nudge.py`.
+- Re-run of the same task (agy 1.5.7, Hydrogen High, same harness and 900 s budget, isolated home with only this plugin): 2.7.5 passed 3/3 in 846, 811 and 503 s with 2 to 4 subagents per run; this release passed 3/3 in 536, 627 and 517 s with no subagents (the primary did its own web research), close to plain agy (302 to 482 s). The other six harness tasks passed once each in 18 to 31 s. With a 15 s threshold the nudge fired once in a live `/orchestrate` run and the primary still wrote its deliverable.
+
 ## 2.7.5 - 2026-11-13
 
 Based on real agy 1.5.7 data (harness-bench, Gemini 4 Hydrogen primary). Nothing to do after updating except start a new agy session.

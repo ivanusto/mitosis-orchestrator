@@ -142,7 +142,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.5)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.6)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -502,6 +502,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise`（預設，未知值亦同）不阻擋，每種情況每回合附一次建議；`enforce` 恢復單回合修改上限與「修改後跑測試」的拒絕；`off` 停用預算。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
 | `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | 主代理可直接讀取不超過此大小的一般 `.log` 或 transcript 檔（情境整潔守衛的例外）。設為 `0` 則停用例外。 |
+| `AGY_MITOSIS_TURN_NUDGE_SECONDS` | `300` | 僅適用 agy。使用者送出請求後經過此秒數，若該請求期間已派出過子代理，hook 會提醒尖端模型立即以現有證據產出交付物，每個請求只提醒一次。設為 `0` 則停用，無效值使用預設值。此機制不會封鎖任何操作。 |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時停用快捷修改預算（等同 `*_MITOSIS_FASTPATH_MODE=off`，且不追蹤）。 |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | 設為 `0` 時，不再比對釘定的模型與子代理實際執行的模型。 |
 | `MITOSIS_CAPTURE_PAYLOADS` | 未設定 | 錄製原始 hook payload 的絕對路徑目錄，用來建立測試 fixture。**檔案內含你的提示詞與路徑**，詳見 `SECURITY.md`。 |

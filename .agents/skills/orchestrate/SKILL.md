@@ -8,7 +8,7 @@ description: >-
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.5)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.6)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
@@ -16,6 +16,11 @@ Execute complex engineering tasks using a 4-phase hierarchical orchestration loo
 
 - Skip it for a one-sitting set of independent lookups, and for sequential operational work whose steps depend on each other. In a measured comparison on short tasks the skill added cost there, and five of the six runs dispatched nothing.
 - For a multi-file fix of that size it made no measurable difference.
+
+### Antigravity (`agy`) pacing
+
+- Do sequential web/docs research and tracing yourself (`search_web`, `read_file`); delegate only independent work that can run in parallel, and do not wait on a single subagent for something a few of your own calls would finish.
+- When the task asks for an output file, write it as soon as you have an evidence-backed answer, then refine; do not open new verification branches before the deliverable exists.
 
 ---
 

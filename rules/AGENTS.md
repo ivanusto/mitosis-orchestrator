@@ -1,4 +1,4 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.5)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.6)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
 - **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini 4 Hydrogen (`High` or `XHigh`; `Low` / `Medium` are not accepted)**, **agy Orchestrator (Carbon / Argon; agy 1.5.7+)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
@@ -54,6 +54,7 @@ Moderate-complexity analysis or scoped execution:
 4. **`send_message` / `SendMessage` follow-ups**: reuse a long-lived worker's context for follow-ups instead of re-spawning (it keeps its cache), but never send code-editing or multi-step (more than 3 numbered steps) instructions to a scout. Invoke a worker instead.
 5. **Branch cleanup**: after a branch worker reports, merge or discard its changes and terminate the worker.
 6. **No nested spawning**: recursive nested subagent spawning is disallowed (`enable_subagent_tools: false`).
+7. **Antigravity (`agy`) pacing**: do sequential web/docs research and tracing yourself (`search_web`, `read_file`); delegate only independent work that can run in parallel, and do not wait on a single subagent for something a few of your own calls would finish. When the task asks for an output file, write it as soon as you have an evidence-backed answer, then refine; do not open new verification branches before the deliverable exists. After `AGY_MITOSIS_TURN_NUDGE_SECONDS` (default 300) after delegating, the hook adds one reminder to write the deliverable.
 
 ---
 
@@ -119,5 +120,6 @@ All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*`
 - **`*_MITOSIS_ALLOW_DIRECT_FASTPATH=1`**: Same as `*_MITOSIS_FASTPATH_MODE=off`, with no tracking.
 - **`*_MITOSIS_CIRCUIT_BREAKER_MODE=advise|enforce|off`**: Circuit breaker mode after 2 failed commands in a row in one turn (default `advise`: one note on agy, never blocks; `enforce` denies until the next turn).
 - **`*_MITOSIS_CIRCUIT_BREAKER=0`**: Disable the circuit breaker; wins over the mode.
+- **`AGY_MITOSIS_TURN_NUDGE_SECONDS=<int>`**: agy only. Seconds after a user request before the hook adds one reminder to write the deliverable once work has been delegated in that request (default 300; `0` disables; never blocks).
 - **`*_MITOSIS_DEBUG=1`**: Enable verbose JSON diagnostic logging to `mitosis_orchestrator_debug.log`.
 - **`MITOSIS_CODEX_YOLO=1`**: Run Codex subagents from the MCP server without sandboxing (default: scouts `read-only`, workers `workspace-write`).

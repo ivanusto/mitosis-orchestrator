@@ -4,6 +4,7 @@ import json
 import os
 import re
 import stat
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -204,6 +205,60 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
     }
 
 
+def _turn_nudge_seconds() -> int:
+    raw = _get_env("AGY_MITOSIS_TURN_NUDGE_SECONDS", default="300")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 300
+
+
+def _turn_nudge_steps(payload: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """agy primary only: once per user request, tell the primary to write its deliverable when
+    work was delegated and the request is taking long. Never blocks. The anchor is the user input,
+    not invocationNum (agy resets that to 0 whenever a subagent message wakes the primary)."""
+    last_input = payload.get("lastUserInput")
+    last_input = last_input if isinstance(last_input, str) else ""
+    now = time.time()
+    anchor = state.get("turn_anchor")
+    if not isinstance(anchor, dict) or anchor.get("input") != last_input:
+        anchor = {"input": last_input, "started": now, "nudged": False}
+        state["turn_anchor"] = anchor
+    threshold = _turn_nudge_seconds()
+    if threshold <= 0 or anchor.get("nudged"):
+        return []
+    try:
+        elapsed = now - float(anchor.get("started"))
+    except (TypeError, ValueError):
+        anchor["started"] = now
+        return []
+    if elapsed < 0:
+        anchor["started"] = now
+        return []
+    if elapsed < threshold:
+        return []
+    sync_subagents(payload, state)
+    started = float(anchor["started"])
+    mine: List[Dict[str, Any]] = []
+    for group in (state.get("subagents"), state.get("pending_spawns")):
+        records = group.values() if isinstance(group, dict) else (group or [])
+        for r in records:
+            stamp = r.get("dispatched_at") if isinstance(r, dict) else None
+            if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) and stamp >= started:
+                mine.append(r)
+    if not mine:
+        return []
+    pending = sum(1 for r in mine if not r.get("status"))
+    anchor["nudged"] = True
+    minutes = max(1, int(elapsed // 60))
+    tail = " (%d subagent(s) still pending)" % pending if pending else ""
+    return [{"ephemeralMessage": (
+        f"[Mitosis Orchestrator] {minutes} min since this request and you have delegated work{tail}. "
+        "Write the deliverable now from the evidence you have, mark what is unverified, and do not dispatch "
+        "new research or follow-ups; fold in late reports afterwards."
+    )}]
+
+
 @_releases_state_locks
 def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     # A subagent's own prompt (Codex sends UserPromptSubmit with agent_id) is
@@ -237,6 +292,7 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         _breaker_advise_agy(payload, state)
         for text in state.pop("fastpath_pending_advice", None) or []:
             agy_steps.append({"ephemeralMessage": text})
+        agy_steps.extend(_turn_nudge_steps(payload, state))
     save_state(payload, state)
 
     model_name = str(payload.get("modelName") or payload.get("model_name") or payload.get("model") or "")
