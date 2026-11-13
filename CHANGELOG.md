@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.4 - 2026-11-13
+
+Gemini 4 Hydrogen and the agy `Orchestrator` models. Nothing to do after updating except start a new agy session.
+
+### Added
+- **Gemini 4 Hydrogen (High / XHigh)** is accepted as a frontier primary, as is the level-less API id `gemini-4-hydrogen` and the "Extra High" spelling. **Low and Medium are not**: they are treated as small tiers and warned about.
+- **`Orchestrator (Carbon)` and `Orchestrator (Argon)`** (`gemini-pro-orchestrator`, `gemini-pro-orchestrator-argon`) are accepted as frontier primaries. Orchestrator already plans with Carbon/Argon and executes with Hydrogen internally; the plugin's subagent dispatch stacks on top of it.
+- agy Orchestrator (Carbon) hands execution to an internal executor that hook payloads report as `gemini-flash-worker-agy`; it is accepted and no longer triggers the non-frontier warning.
+- The default primary is unchanged (`Gemini 4 Argon (High)`).
+- Verified on agy 1.5.7 with headless `/orchestrate` runs (scout read plus worker edit) using `gemini-4-hydrogen-high`, `gemini-pro-orchestrator` and `gemini-pro-orchestrator-argon` as primary: subagents pinned to `flash_lite` / `flash`, both reports passed the four-header check and no non-frontier warning was injected. The concrete model behind the `flash` tier is resolved server side and is not visible to the CLI or hooks, so whether it is now Hydrogen is unverified.
+- New agy 1.5.7 payload fixtures: `hydrogen-primary`, `orchestrator-carbon-primary`; the Stop payload gained `continuationActive`.
+
+### Docs
+- README, README.zh-TW, `rules/AGENTS.md` and the `/orchestrate` skill list the new models; the agy-only sibling is now named `just-agy-orchestrator` (renamed from `argon-orchestrator`).
+
 ## 2.7.3 - 2026-11-11
 
 agy 1.5.x retired the search and listing tools (`list_dir`, `find_by_name`, `grep_search`); the default toolset is now `ask_question`, `define_subagent`, `edit_file`, `invoke_subagent`, `manage_subagents`, `manage_task`, `read_file`, `run_command`, `schedule`, `search_web`, `send_message`, `swarm`, `write_file`. Nothing to do after updating except start a new agy session.

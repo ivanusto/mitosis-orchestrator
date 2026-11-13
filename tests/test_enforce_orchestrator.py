@@ -492,6 +492,23 @@ class TestPrimaryModelGuard(HookBase):
                 self.assertFalse(eo.is_mitosis_tier(bad), f"{bad} should be rejected by is_mitosis_tier")
                 self.assertFalse(eo.is_argon_tier(bad), f"{bad} should be rejected by is_argon_tier")
 
+    def test_hydrogen_and_orchestrator_tiers(self):
+        for name in (
+            "gemini-4-hydrogen-high", "gemini-4-hydrogen-xhigh", "gemini-4-hydrogen",
+            "Gemini 4 Hydrogen (High)", "Gemini 4 Hydrogen (XHigh)", "Gemini 4 Hydrogen (Extra High)",
+            "gemini-pro-orchestrator", "gemini-pro-orchestrator-argon",
+            "Orchestrator (Carbon)", "Orchestrator (Argon)",
+        ):
+            with self.subTest(frontier=name):
+                self.assertTrue(eo.is_frontier_tier(name), name)
+        for name in (
+            "gemini-4-hydrogen-low", "gemini-4-hydrogen-medium",
+            "Gemini 4 Hydrogen (Low)", "Gemini 4 Hydrogen (Medium)",
+            "gemini-3.8-flash-high", "Gemini 3.8 Flash (High)",
+        ):
+            with self.subTest(small=name):
+                self.assertFalse(eo.is_frontier_tier(name), name)
+
     def test_tier_aliases(self):
         self.assertIs(eo.is_frontier_tier, eo.is_mitosis_tier)
         self.assertIs(eo.is_frontier_tier, eo.is_argon_tier)
@@ -587,6 +604,29 @@ class TestPrimaryModelGuard(HookBase):
         p = dict(self.payload, modelName="gemini-4-carbon-high", invocationNum=0)
         res = eo.handle_pre_invocation(p)
         self.assertNotIn("not a frontier model", json.dumps(res))
+
+    def test_orchestrator_executor_model(self):
+        for name in ("gemini-flash-worker-agy", "GEMINI-FLASH-WORKER-AGY"):
+            self.assertTrue(eo.is_orchestrator_executor(name), name)
+        for name in ("gemini-3.8-flash-high", "flash-worker", "", None):
+            self.assertFalse(eo.is_orchestrator_executor(name), name)
+        self.assertFalse(eo.is_frontier_tier("gemini-flash-worker-agy"))
+        res = eo.handle_pre_invocation(dict(self.payload, modelName="gemini-flash-worker-agy", invocationNum=3))
+        self.assertNotIn("not a frontier model", json.dumps(res))
+        res = eo.handle_pre_invocation(dict(self.payload, modelName="gemini-3.8-flash-high", invocationNum=4))
+        self.assertIn("not a frontier model", json.dumps(res))
+
+    def test_hydrogen_high_is_not_warned_but_medium_is(self):
+        for model, warned in (("gemini-4-hydrogen-high", False), ("gemini-4-hydrogen-medium", True)):
+            with self.subTest(model=model):
+                p = dict(self.payload, modelName=model, invocationNum=2)
+                res = eo.handle_pre_invocation(p)
+                self.assertEqual("injectSteps" in res, warned, json.dumps(res))
+        for model, warned in (("Gemini 4 Hydrogen (High)", False), ("Gemini 4 Hydrogen (Medium)", True)):
+            with self.subTest(settings=model):
+                self._settings(model)
+                res = eo.handle_session_start({})
+                self.assertEqual("WARNING" in json.dumps(res), warned, json.dumps(res))
 
     def test_session_start_pins_when_opted_in_argon_legacy(self):
         path = self._settings("gemini-3-flash")

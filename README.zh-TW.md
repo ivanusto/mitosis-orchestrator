@@ -93,10 +93,12 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.2）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
-| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano` |
+| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon）、`Gemini 4 Hydrogen (High / XHigh)`、`Orchestrator (Carbon / Argon)`（agy 1.5.7 以上）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano`、`Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`、`DeepSeek-V3`、`deepseek-reasoner`、`deepseek-chat` | `deepseek-lite` |
 | **Alibaba Qwen** | `Qwen Max`、`Qwen Plus`、`Qwen 2.5 / 3`、`QwQ`（`qwq-32b`） | `qwen-lite`、`qwen-vl-lite` |
+
+> `Orchestrator (Carbon)` 與 `Orchestrator (Argon)`（agy 1.5.7 以上）本身已在內部分工：由 Carbon 或 Argon 負責規劃，Hydrogen 負責執行。本外掛的子代理派工（`flash-worker` / `flash-lite-scout`）是疊加在其上。Gemini 4 Hydrogen 只有 High、XHigh（Extra High）或未指定等級時才視為尖端模型，Low 與 Medium 視為小型模型。Orchestrator (Carbon) 在規劃結束（`exit_plan_mode`）後交給內部執行者，hook 收到的 `modelName` 會變成 `gemini-flash-worker-agy`，本外掛視為 Orchestrator 的一部分，不發非尖端警告。
 
 > [!NOTE]
 > 內建邊界過濾器（`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`）排除 `mini`、`flash`、`lite`、`haiku`、`nano`、`luna`、`spark` 輕量模型，同時確保 `gemini` 不會誤判。
@@ -129,10 +131,10 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | 以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理 |
 | Codex CLI | 0.166.0 | 2026-11-05 | 完成 hook review 後以已安裝外掛實跑 |
-| agy | 1.5.5 | 2026-11-11 | 以 gemini-4-carbon-high 為主核做 headless 實跑（ADC 登入） |
+| agy | 1.5.7 | 2026-11-13 | 以 gemini-4-hydrogen-high、gemini-pro-orchestrator 與 gemini-pro-orchestrator-argon 為主核做 headless /orchestrate 實跑 |
 
 - Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
-- agy：`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon (Low|Medium|High)，外掛視為尖端模型，預設仍為 Argon。agy 1.5.x 更換預設工具組（沒有列目錄、grep、glob、find 工具）：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED，搜尋與 git 檢查交給 worker。print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。headless 寫檔要用 `--mode accept-edits` 或 `write_file(<完整絕對路徑>)` 規則，只有實際路徑在 `/tmp` 下例外。
+- agy：Gemini 4 Hydrogen（`gemini-4-hydrogen-low|medium|high|xhigh`）在 High 與 XHigh 時視為尖端主核，Low 與 Medium 會警告。Orchestrator (Carbon)（`gemini-pro-orchestrator`）與 Orchestrator (Argon)（`gemini-pro-orchestrator-argon`）視為尖端模型；兩者內部已分工規劃與執行，本外掛的子代理派工會疊加其上。Orchestrator (Carbon) 在 `exit_plan_mode` 後交給內部執行者，hook 收到的 `modelName` 是 `gemini-flash-worker-agy`，外掛接受且不發非尖端警告；實測中 Orchestrator (Argon) 全程維持自己的 id。`flash` 與 `flash_lite` 子代理層級由伺服器端解析，CLI 日誌與 hook payload 都看不到實際模型，`flash` 是否已改指 Hydrogen 尚未驗證。`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon。agy 1.5.x 沒有列目錄、grep、glob、find 工具：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED。print 模式下，子代理寫入實際路徑不在 `/tmp` 下的檔案，即使有 `--mode accept-edits` 也會被軟拒絕，該子代理隨之取消；print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。1.5.7 的 headless 執行若未指定 `--mode`，預設為 Auto mode。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
@@ -140,7 +142,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.3)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.4)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -151,7 +153,7 @@ agy plugin validate ~/.gemini/config/plugins/mitosis-orchestrator --strict
 ```
 
 > [!WARNING]
-> 若仍裝著前身 `argon-orchestrator`，請先移除（`agy plugin uninstall argon-orchestrator`）。兩者的 skill 都叫 `orchestrate`、agent 都叫 `flash-worker` / `flash-lite-scout`，同時啟用會互相衝突並跑兩套 hook。
+> 若裝著僅支援 agy 的姊妹外掛 [`just-agy-orchestrator`](https://github.com/ivanusto/just-agy-orchestrator)（原名 `argon-orchestrator`），請先移除或停用（`agy plugin uninstall just-agy-orchestrator`，舊安裝則為 `argon-orchestrator`）。兩者的 skill 都叫 `orchestrate`、agent 都叫 `flash-worker` / `flash-lite-scout`，同時啟用會互相衝突並跑兩套 hook。
 
 ### 平台二：Anthropic Claude Code (2.1.292 以上)
 

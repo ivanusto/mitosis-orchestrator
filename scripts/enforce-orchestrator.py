@@ -164,6 +164,7 @@ from mitosis_hook.models import (  # noqa: F401,E402
     _read_settings,
     _write_codex_config_model,
     _write_settings_atomic,
+    ORCHESTRATOR_EXECUTOR_MODELS,
     check_primary_model_settings,
     claude_policy_notice,
     claude_tier_effort,
@@ -175,6 +176,7 @@ from mitosis_hook.models import (  # noqa: F401,E402
     is_argon_tier,
     is_frontier_tier,
     is_mitosis_tier,
+    is_orchestrator_executor,
     settings_path,
     valid_codex_model,
 )

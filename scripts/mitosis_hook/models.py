@@ -60,7 +60,7 @@ SMALL_TIER_RE = re.compile(r"(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark
 # "o1" does not match "product-o1x". Family names match as segment prefixes
 # ("qwen3", "deepseek-v4").
 FRONTIER_SEGMENTS = {
-    "argon", "carbon", "pro", "ultra", "claude", "opus", "sonnet", "fable", "mythos", "grok", "o1", "o3", "o4",
+    "argon", "carbon", "orchestrator", "pro", "ultra", "claude", "opus", "sonnet", "fable", "mythos", "grok", "o1", "o3", "o4",
 }
 
 
@@ -78,7 +78,11 @@ MIN_FRONTIER_PARAMS_B = 30.0
 
 
 def is_frontier_tier(model_name: str) -> bool:
-    """True for Argon / Carbon / Pro / Ultra / Claude / frontier models; False for Flash, Lite, Mini, Nano, Haiku, Auto or empty."""
+    """True for Argon / Carbon / Orchestrator / Pro / Ultra / Claude / frontier models; False for Flash, Lite, Mini, Nano, Haiku, Auto or empty.
+
+    Gemini 4 Hydrogen is frontier only at High, XHigh / Extra High or with no level
+    (`gemini-4-hydrogen`); its Low and Medium levels are not.
+    """
     normalized = (model_name or "").strip().lower()
     if not normalized or normalized in {"auto", "none", "inherit"}:
         return False
@@ -90,7 +94,18 @@ def is_frontier_tier(model_name: str) -> bool:
     if FRONTIER_GPT_RE.search(normalized):
         return True
     segments = [seg for seg in re.split(r"[^a-z0-9]+", normalized) if seg]
+    if "hydrogen" in segments:
+        return not any(seg in {"low", "medium"} for seg in segments)
     return any(seg in FRONTIER_SEGMENTS or seg.startswith(FRONTIER_FAMILY_PREFIXES) for seg in segments)
+
+
+# agy Orchestrator (Carbon) hands execution to an internal executor after
+# `exit_plan_mode`; hook payloads then report this id. Users cannot select it.
+ORCHESTRATOR_EXECUTOR_MODELS = frozenset({"gemini-flash-worker-agy"})
+
+
+def is_orchestrator_executor(model_name: Any) -> bool:
+    return str(model_name or "").strip().lower() in ORCHESTRATOR_EXECUTOR_MODELS
 
 
 is_mitosis_tier = is_frontier_tier

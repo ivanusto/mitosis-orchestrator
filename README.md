@@ -93,10 +93,12 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**, **`gpt-5.6-sol`**, `gpt-5.6-terra`, `gpt-6.1-terra`, `gpt-6-astra`, `o1`, `o3`, `o4` | `gpt-5.6-luna`, `gpt-6-luna`, `gpt-5.4-mini`, `o4-mini`, `o3-mini`, `gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`** (Claude Fable 5.2), **`opus`** (Claude Opus 5.5), `sonnet` (Claude Sonnet 5.5) | `haiku` (Claude Haiku 5.5, `claude-haiku-*`) |
-| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini 4 Carbon (High / Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon), `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano` |
+| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini 4 Carbon (High / Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon), `Gemini 4 Hydrogen (High / XHigh)`, `Orchestrator (Carbon / Argon)` (agy 1.5.7+), `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano`, `Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`, `Grok 4`, `grok-3`, `grok-4`, `grok-3-thinking` | `grok-3-mini`, `grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`, `DeepSeek-V3`, `deepseek-reasoner`, `deepseek-chat` | `deepseek-lite` |
 | **Alibaba Qwen** | `Qwen Max`, `Qwen Plus`, `Qwen 2.5 / 3`, `QwQ` (`qwq-32b`) | `qwen-lite`, `qwen-vl-lite` |
+
+> `Orchestrator (Carbon)` and `Orchestrator (Argon)` (agy 1.5.7+) already split work internally: Carbon or Argon plans and Hydrogen executes. This plugin's subagent dispatch (`flash-worker` / `flash-lite-scout`) stacks on top of that. Gemini 4 Hydrogen is accepted as a primary only at High, XHigh (Extra High) or without a level; Low and Medium are treated as small tiers. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor whose hook `modelName` is `gemini-flash-worker-agy`; this plugin treats it as part of Orchestrator and does not emit the non-frontier warning.
 
 > [!NOTE]
 > Boundary-aware regex filtering (`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`) rejects lightweight variants across hyphen, space, or underscore naming conventions while never false-matching `gemini`.
@@ -129,10 +131,10 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | headless smoke and interactive background-agent run with claude-fable-5-2 as primary |
 | Codex CLI | 0.166.0 | 2026-11-05 | installed plugin run after hook review |
-| agy | 1.5.5 | 2026-11-11 | headless run with gemini-4-carbon-high as primary (ADC sign-in) |
+| agy | 1.5.7 | 2026-11-13 | headless /orchestrate runs with gemini-4-hydrogen-high, gemini-pro-orchestrator and gemini-pro-orchestrator-argon as primary |
 
 - Claude Code: The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.
-- agy: Gemini 4 Carbon (Low|Medium|High) is listed by `agy models` only under ADC sign-in; it is accepted as a frontier primary, the default stays Argon. agy 1.5.x changed the default toolset (no list, grep, glob or find tool): the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed; searches and git checks go to the worker. Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. Headless writes need `--mode accept-edits` or a `write_file(<exact absolute path>)` rule, except under a real `/tmp` path.
+- agy: Gemini 4 Hydrogen (`gemini-4-hydrogen-low|medium|high|xhigh`) is a frontier primary at High and XHigh; Low and Medium are warned about. Orchestrator (Carbon) (`gemini-pro-orchestrator`) and Orchestrator (Argon) (`gemini-pro-orchestrator-argon`) are accepted; they already split planning and execution internally, so subagent dispatch stacks on top. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor that hook payloads report as `gemini-flash-worker-agy`, which is accepted without the non-frontier warning; Orchestrator (Argon) kept its own id in the verified run. The `flash` and `flash_lite` subagent tiers are resolved server side and neither the CLI log nor hook payloads show the concrete model, so whether `flash` now means Hydrogen is unverified. Gemini 4 Carbon is listed by `agy models` only under ADC sign-in. agy 1.5.x has no list, grep, glob or find tool: the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed. Print mode soft-denies a subagent's file write outside a real `/tmp` path even under `--mode accept-edits`, which cancels that subagent; Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. 1.5.7 headless runs start in Auto mode unless `--mode` is given.
 <!-- END GENERATED: compat -->
 
 ### 1. Google Antigravity (`agy` 1.4+)
@@ -140,7 +142,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.3)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.4)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -151,7 +153,7 @@ agy plugin validate ~/.gemini/config/plugins/mitosis-orchestrator --strict
 ```
 
 > [!WARNING]
-> If the predecessor plugin `argon-orchestrator` is still installed, uninstall it first (`agy plugin uninstall argon-orchestrator`). Both ship a skill named `orchestrate` and agents named `flash-worker` / `flash-lite-scout`, so they would collide and run two hook chains.
+> If the agy-only sibling plugin [`just-agy-orchestrator`](https://github.com/ivanusto/just-agy-orchestrator) (formerly `argon-orchestrator`) is installed, uninstall or disable it first (`agy plugin uninstall just-agy-orchestrator`, or `argon-orchestrator` for older installs). Both ship a skill named `orchestrate` and agents named `flash-worker` / `flash-lite-scout`, so they would collide and run two hook chains.
 
 ### 2. Anthropic Claude Code (2.1.292+)
 

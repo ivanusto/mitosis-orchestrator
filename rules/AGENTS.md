@@ -1,7 +1,7 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.3)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.4)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
-- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
+- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini 4 Hydrogen (`High` or `XHigh`; `Low` / `Medium` are not accepted)**, **agy Orchestrator (Carbon / Argon; agy 1.5.7+)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
 - **Subagents (Daughter Cells)**: Always pinned to execution (`worker`) or reconnaissance (`scout` / `explorer`) tiers according to the 3-platform routing matrix below.
 
 > [!IMPORTANT]
@@ -15,7 +15,7 @@ You are operating under the **Mitosis Orchestrator** multi-platform policy:
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | Architecture design, cross-cutting refactoring, API contracts, task decomposition, reviewing diffs, and final synthesis. |
+| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` or `Gemini 4 Hydrogen (High/XHigh)` or `Orchestrator (Carbon/Argon)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | Architecture design, cross-cutting refactoring, API contracts, task decomposition, reviewing diffs, and final synthesis. |
 | **Execution Worker** | `flash` via `flash-worker` | `sonnet` via `mitosis-orchestrator:flash-worker` | **`gpt-6.1-terra`** via `worker` / `flash-worker` / `--profile mitosis-worker` | Multi-file exploration, call-graph tracing, writing and running tests, scoped code edits within explicit file allowlist (`workspace-write`). |
 | **Reconnaissance Scout** | `flash_lite` via `flash-lite-scout` | `haiku` via `mitosis-orchestrator:flash-lite-scout` | **`gpt-6-luna`** via `explorer` / `flash-lite-scout` / `--profile mitosis-scout` | High-fan-out single-hop read-only lookups: symbol searches, `grep`/`glob`, config inspection, git/log status, `.log` slicing (`read-only`). |
 

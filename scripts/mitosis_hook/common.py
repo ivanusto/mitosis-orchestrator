@@ -86,6 +86,10 @@ ALLOWED_PRIMARY_MODELS = {
     "Gemini 4 Argon (Medium)",
     "Gemini 4 Carbon (High)",
     "Gemini 4 Carbon (Medium)",
+    "Gemini 4 Hydrogen (High)",
+    "Gemini 4 Hydrogen (XHigh)",
+    "Orchestrator (Carbon)",
+    "Orchestrator (Argon)",
 }
 
 

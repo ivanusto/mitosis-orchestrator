@@ -2,13 +2,13 @@
 name: orchestrate
 description: >-
   Structured 4-phase orchestration workflow across 3 platforms (Google Antigravity agy, Anthropic Claude Code,
-  OpenAI Codex CLI) that keeps the primary agent on a frontier reasoning model (Gemini 4 Argon/Carbon, Claude Fable/Opus/Sonnet,
+  OpenAI Codex CLI) that keeps the primary agent on a frontier reasoning model (Gemini 4 Argon/Carbon/Hydrogen High+, agy Orchestrator, Claude Fable/Opus/Sonnet,
   gpt-6.1-sol / gpt-5.6-sol, o3, Grok, DeepSeek, Qwen) as architect/coordinator and dispatches subagents pinned to
   reconnaissance (flash_lite / haiku / gpt-6-luna) or execution (flash / sonnet / gpt-6.1-terra). Activate when the
   user invokes /orchestrate or requests multi-agent task decomposition.
 ---
 
-# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.3)
+# Mitosis Orchestrator Workflow (`/orchestrate`, v2.7.4)
 
 Execute complex engineering tasks using a 4-phase hierarchical orchestration loop with **Mitosis Orchestrator** across **Google Antigravity (`agy`)**, **Anthropic Claude Code**, and **OpenAI Codex CLI**.
 
