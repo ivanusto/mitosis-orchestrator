@@ -1,7 +1,7 @@
-# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.6)
+# Mitosis Orchestrator & Subagent Model Pinning Policy (v2.7.7)
 
 You are operating under the **Mitosis Orchestrator** multi-platform policy:
-- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini 4 Hydrogen (`High` or `XHigh`; `Low` / `Medium` are not accepted)**, **agy Orchestrator (Carbon / Argon; agy 1.5.7+)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
+- **Primary Agent (Master Nucleus)**: Pinned to a supported frontier reasoning model, one of **Gemini 4 Argon (`High` or `Medium`)**, **Gemini 4 Carbon (`High` or `Medium`; agy 1.5.5+, ADC sign-in only, default stays Argon)**, **Gemini 4 Hydrogen (`High` or `XHigh`; `Low` / `Medium` are not accepted)**, **agy Orchestrator (Carbon / Argon; agy 1.5.7+)**, **Gemini Pro / Ultra**, **Claude (`fable` / `opus` / `sonnet`)**, **OpenAI (`gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-sol`, `gpt-5.6-sol`, `gpt-6-astra`, `o3`, `o4`)**, **xAI Grok**, **DeepSeek**, or **Qwen**. You are the architect, planner and orchestrator.
 - **Subagents (Daughter Cells)**: Always pinned to execution (`worker`) or reconnaissance (`scout` / `explorer`) tiers according to the 3-platform routing matrix below.
 
 > [!IMPORTANT]
@@ -15,7 +15,7 @@ You are operating under the **Mitosis Orchestrator** multi-platform policy:
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` or `Gemini 4 Hydrogen (High/XHigh)` or `Orchestrator (Carbon/Argon)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | Architecture design, cross-cutting refactoring, API contracts, task decomposition, reviewing diffs, and final synthesis. |
+| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` or `Gemini 4 Hydrogen (High/XHigh)` or `Orchestrator (Carbon/Argon)` / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | Architecture design, cross-cutting refactoring, API contracts, task decomposition, reviewing diffs, and final synthesis. |
 | **Execution Worker** | `flash` via `flash-worker` | `sonnet` via `mitosis-orchestrator:flash-worker` | **`gpt-6.1-terra`** via `worker` / `flash-worker` / `--profile mitosis-worker` | Multi-file exploration, call-graph tracing, writing and running tests, scoped code edits within explicit file allowlist (`workspace-write`). |
 | **Reconnaissance Scout** | `flash_lite` via `flash-lite-scout` | `haiku` via `mitosis-orchestrator:flash-lite-scout` | **`gpt-6-luna`** via `explorer` / `flash-lite-scout` / `--profile mitosis-scout` | High-fan-out single-hop read-only lookups: symbol searches, `grep`/`glob`, config inspection, git/log status, `.log` slicing (`read-only`). |
 
@@ -106,7 +106,7 @@ This script:
 All options accept the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `CODEX_MITOSIS_*` prefix, with backwards-compatible fallback to legacy `AGY_ARGON_*`:
 
 - **`*_MITOSIS_PIN_SETTINGS=1`**: Opt in to rewriting settings back to the pinned frontier primary model at session start.
-- **`*_MITOSIS_PRIMARY_MODEL=<name>`**: Target primary frontier model when pinning (defaults: `Gemini 4 Argon (High)`, `opus`, `gpt-6.1-sol`).
+- **`*_MITOSIS_PRIMARY_MODEL=<name>`**: Target primary frontier model when pinning (defaults: `Gemini 4 Argon (High)`, `opus`, `gpt-6.2-sol`).
 - **`AGY_ALLOW_NON_MITOSIS_PRIMARY=1`** / **`*_MITOSIS_ALLOW_NON_PRIMARY=1`**: Silence session-start and per-turn non-frontier primary model warnings.
 - **`CLAUDE_MITOSIS_PIN_SUBAGENTS=0`**: Stop rewriting `Agent` calls in Claude Code entirely.
 - **`CLAUDE_MITOSIS_PIN_BUILTINS=1`**: Opt in (default off) to pin the built-in `Explore` agent to the scout model and effort and to route `general-purpose` like an untyped call. Explicit models are honoured and `Plan` is untouched. Quality impact of a cheaper model on these built-ins has not been measured and no saving is claimed; on one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. `Explore` does not get the scout Bash allowlist and its stops do not block or escalate; its read-only limit comes from Claude Code, not this plugin.

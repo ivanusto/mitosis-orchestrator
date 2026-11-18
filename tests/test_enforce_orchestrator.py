@@ -1147,6 +1147,15 @@ class TestClaudeCodeSessionStartAndSettings(ClaudeHookBase):
         self.assertIn("additionalContext", res["hookSpecificOutput"])
         self.assertIn("not a frontier model", res["hookSpecificOutput"]["additionalContext"])
 
+    def test_codex_gpt_6_2_primaries_are_not_warned(self):
+        for i, model in enumerate(("gpt-6.2-sol", "gpt-6.2-astra")):
+            with self.subTest(model=model):
+                self.assertTrue(eo.is_frontier_tier(model))
+                p = {"session_id": f"{self.session_id}-62-{i}", "hook_event_name": "UserPromptSubmit",
+                     "model": model, "turn_id": f"t{i}", "cwd": "/tmp"}
+                res = eo.handle_pre_invocation(p)
+                self.assertNotIn("not a frontier model", str(res))
+
     def test_claude_user_prompt_submit_silenced(self):
         os.environ["CLAUDE_MITOSIS_ALLOW_NON_PRIMARY"] = "1"
         p = {"session_id": self.session_id, "hook_event_name": "UserPromptSubmit", "model": "haiku", "invocationNum": 1}
@@ -1409,7 +1418,7 @@ class TestCodexEngine(HookBase):
         self.assertFalse(eo.is_frontier_tier("spark-1"))
 
     def test_codex_model_constants(self):
-        self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-6.1-sol")
+        self.assertEqual(eo.DEFAULT_CODEX_PRIMARY_MODEL, "gpt-6.2-sol")
         spec = tomllib.loads((Path(__file__).resolve().parent.parent / "spec" / "models.toml").read_text(encoding="utf-8"))
         self.assertEqual(spec["codex"]["worker"]["model"], "gpt-6.1-terra")
         self.assertEqual(spec["codex"]["scout"]["model"], "gpt-6-luna")
@@ -1433,9 +1442,9 @@ class TestCodexEngine(HookBase):
         cfg.write_text('model = "codex-mini"\nverbose = true\n', encoding="utf-8")
         data, _ = eo._read_codex_config_toml(cfg)
         self.assertEqual(data.get("model"), "codex-mini")
-        eo._write_codex_config_model(cfg, "gpt-6.1-sol")
+        eo._write_codex_config_model(cfg, "gpt-6.2-sol")
         data2, _ = eo._read_codex_config_toml(cfg)
-        self.assertEqual(data2.get("model"), "gpt-6.1-sol")
+        self.assertEqual(data2.get("model"), "gpt-6.2-sol")
         content = cfg.read_text(encoding="utf-8")
         self.assertIn("verbose = true", content)
 
@@ -1453,7 +1462,7 @@ class TestCodexEngine(HookBase):
         payload = {"thread_id": "thr_test", "hook_event_name": "SessionStart"}
         res = eo.handle_session_start(payload)
         data, _ = eo._read_codex_config_toml(cfg)
-        self.assertEqual(data.get("model"), "gpt-6.1-sol")
+        self.assertEqual(data.get("model"), "gpt-6.2-sol")
         self.assertIn("additionalContext", res)
         self.assertIn(eo.CODEX_POLICY_NOTICE, res["additionalContext"])
 

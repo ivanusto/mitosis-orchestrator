@@ -91,7 +91,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 
 | 模型廠商 | 支援作為主代理的尖端模型 (Primary Orchestrator) | 自動攔截的輕量級模型 (Small-Tier Filter) |
 | :--- | :--- | :--- |
-| **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
+| **OpenAI** (Codex CLI / API) | **`gpt-6.2-sol`**、`gpt-6.2-astra`、`gpt-6.1-sol`、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.2）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
 | **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon）、`Gemini 4 Hydrogen (High / XHigh)`、`Orchestrator (Carbon / Argon)`（agy 1.5.7 以上）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano`、`Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
@@ -130,10 +130,11 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | 平台 | 已驗證版本 | 驗證日期 | 方式 |
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | 以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理 |
-| Codex CLI | 0.166.0 | 2026-11-05 | 完成 hook review 後以已安裝外掛實跑 |
+| Codex CLI | 0.169.1 | 2026-11-18 | 以 gpt-6.2-sol 為主核實跑已安裝外掛（派出偵察與執行子代理），並以 gpt-6.2-astra 為主核實跑 |
 | agy | 1.5.7 | 2026-11-13 | 以 gemini-4-hydrogen-high、gemini-pro-orchestrator 與 gemini-pro-orchestrator-argon 為主核做 headless /orchestrate 實跑 |
 
 - Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
+- Codex CLI：GPT-6.2 只有 Astra（`gpt-6.2-astra`）與 Sol（`gpt-6.2-sol`），兩者都視為尖端主核，預設主核改為 `gpt-6.2-sol`。6.2 沒有 Terra 與 Luna，執行子代理維持 `gpt-6.1-terra`、偵察子代理維持 `gpt-6-luna`。6.2 的 API 拒絕推理等級 `none`；本外掛只釘定 `low` 與 `medium`。子代理 rollout 的第一個 `turn_context` 記錄主核模型、最後一個記錄釘定模型，釘定驗證讀的是最後一個。舊版 Codex 寫下的 `models_cache.json` 可能還沒有列出 6.2 模型。
 - agy：Gemini 4 Hydrogen（`gemini-4-hydrogen-low|medium|high|xhigh`）在 High 與 XHigh 時視為尖端主核，Low 與 Medium 會警告。Orchestrator (Carbon)（`gemini-pro-orchestrator`）與 Orchestrator (Argon)（`gemini-pro-orchestrator-argon`）視為尖端模型；兩者內部已分工規劃與執行，本外掛的子代理派工會疊加其上。Orchestrator (Carbon) 在 `exit_plan_mode` 後交給內部執行者，hook 收到的 `modelName` 是 `gemini-flash-worker-agy`，外掛接受且不發非尖端警告；實測中 Orchestrator (Argon) 全程維持自己的 id。`flash` 與 `flash_lite` 子代理層級由伺服器端解析，CLI 日誌與 hook payload 都看不到實際模型，`flash` 是否已改指 Hydrogen 尚未驗證。`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon。agy 1.5.x 沒有列目錄、grep、glob、find 工具：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED。print 模式下，子代理寫入實際路徑不在 `/tmp` 下的檔案，即使有 `--mode accept-edits` 也會被軟拒絕，該子代理隨之取消；print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。1.5.7 的 headless 執行若未指定 `--mode`，預設為 Auto mode。
 <!-- END GENERATED: compat -->
 
@@ -142,7 +143,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.6)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.7)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -272,7 +273,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
-| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` 或 `Gemini 4 Carbon (High/Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon） / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
+| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` 或 `Gemini 4 Carbon (High/Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon） / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
 | **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
 | **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。agy 1.5 起偵察子代理只有 `read_file`（沒有搜尋、列目錄與 shell 工具），請給它確切路徑，搜尋與 git 檢查交給 worker。 |
 
@@ -484,7 +485,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | 環境變數 | 預設值 | 功能說明 |
 | :--- | :--- | :--- |
 | `*_MITOSIS_PIN_SETTINGS` | `0` | 設為 `1` 時，Session 啟動時自動把設定檔改寫為指定的主核尖端模型。 |
-| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.1-sol` | 啟用自動綁定時的目標模型（依平台預設）。 |
+| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.2-sol` | 啟用自動綁定時的目標模型（依平台預設）。 |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | 設為 `1` 可關閉所有非尖端主模型的警告。 |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | 設為 `0` 時 Claude Code 端完全不改寫 `Agent` 呼叫。 |
 | `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | 設為 `1` 時，另外釘定未指定模型的 Claude Code 內建 agent：`Explore` 使用 scout 的模型與 effort，`general-purpose` 當作未指定型別的呼叫處理。`Plan` 與其他內建型別不動。`Explore` 在 36 次封存的查詢實跑中兩組都答對 90/90，費用中位數是繼承組的 51%，但兩組都碰到滿分上限，提示詞也強制委派，所以不宣稱通用的節省幅度，詳見 [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md)。`general-purpose` 未量測。在一台機器上，2026-10-23 至 2026-11-04 期間，未釘定的內建 agent 約占子代理花費的 30%。開啟後 `Explore` 以 haiku 執行，但不會取得 scout 的 Bash 白名單，其停止事件不會阻擋也不會升級；SendMessage 守衛仍然適用。`Explore` 的唯讀限制來自 Claude Code 自身對該 agent 的工具清單，並非本外掛。未釘定的花費一律會回報（`mitosis-cost-report.py --fleet` 在列上標示 `unpinned`；doctor 在 `claude.heartbeat.builtin` 顯示內建 agent 停止次數）。 |

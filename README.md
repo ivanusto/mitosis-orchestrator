@@ -91,7 +91,7 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 
 | Provider | Supported Primary Orchestrator Models | Auto-Filtered Small Tiers (Blocked as Primary) |
 | :--- | :--- | :--- |
-| **OpenAI** (Codex CLI / API) | **`gpt-6.1-sol`**, **`gpt-5.6-sol`**, `gpt-5.6-terra`, `gpt-6.1-terra`, `gpt-6-astra`, `o1`, `o3`, `o4` | `gpt-5.6-luna`, `gpt-6-luna`, `gpt-5.4-mini`, `o4-mini`, `o3-mini`, `gpt-4.1-mini` |
+| **OpenAI** (Codex CLI / API) | **`gpt-6.2-sol`**, `gpt-6.2-astra`, `gpt-6.1-sol`, **`gpt-5.6-sol`**, `gpt-5.6-terra`, `gpt-6.1-terra`, `gpt-6-astra`, `o1`, `o3`, `o4` | `gpt-5.6-luna`, `gpt-6-luna`, `gpt-5.4-mini`, `o4-mini`, `o3-mini`, `gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`** (Claude Fable 5.2), **`opus`** (Claude Opus 5.5), `sonnet` (Claude Sonnet 5.5) | `haiku` (Claude Haiku 5.5, `claude-haiku-*`) |
 | **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini 4 Carbon (High / Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon), `Gemini 4 Hydrogen (High / XHigh)`, `Orchestrator (Carbon / Argon)` (agy 1.5.7+), `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano`, `Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`, `Grok 4`, `grok-3`, `grok-4`, `grok-3-thinking` | `grok-3-mini`, `grok-3-mini-fast` |
@@ -130,10 +130,11 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 | Platform | Verified version | Verified on | Method |
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | headless smoke and interactive background-agent run with claude-fable-5-2 as primary |
-| Codex CLI | 0.166.0 | 2026-11-05 | installed plugin run after hook review |
+| Codex CLI | 0.169.1 | 2026-11-18 | installed plugin run with gpt-6.2-sol as primary (scout and worker spawn) and gpt-6.2-astra as primary |
 | agy | 1.5.7 | 2026-11-13 | headless /orchestrate runs with gemini-4-hydrogen-high, gemini-pro-orchestrator and gemini-pro-orchestrator-argon as primary |
 
 - Claude Code: The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.
+- Codex CLI: GPT-6.2 ships only Astra (`gpt-6.2-astra`) and Sol (`gpt-6.2-sol`); both are frontier primaries and the default primary is now `gpt-6.2-sol`. There is no 6.2 Terra or Luna, so the worker stays on `gpt-6.1-terra` and the scout on `gpt-6-luna`. The 6.2 API rejects reasoning effort `none`; the plugin pins `low` and `medium` only. A child rollout records the parent model in its first `turn_context` and the pinned model in the last one, which is the one pin verification reads. `models_cache.json` written by an older Codex may not list the 6.2 models yet.
 - agy: Gemini 4 Hydrogen (`gemini-4-hydrogen-low|medium|high|xhigh`) is a frontier primary at High and XHigh; Low and Medium are warned about. Orchestrator (Carbon) (`gemini-pro-orchestrator`) and Orchestrator (Argon) (`gemini-pro-orchestrator-argon`) are accepted; they already split planning and execution internally, so subagent dispatch stacks on top. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor that hook payloads report as `gemini-flash-worker-agy`, which is accepted without the non-frontier warning; Orchestrator (Argon) kept its own id in the verified run. The `flash` and `flash_lite` subagent tiers are resolved server side and neither the CLI log nor hook payloads show the concrete model, so whether `flash` now means Hydrogen is unverified. Gemini 4 Carbon is listed by `agy models` only under ADC sign-in. agy 1.5.x has no list, grep, glob or find tool: the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed. Print mode soft-denies a subagent's file write outside a real `/tmp` path even under `--mode accept-edits`, which cancels that subagent; Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. 1.5.7 headless runs start in Auto mode unless `--mode` is given.
 <!-- END GENERATED: compat -->
 
@@ -142,7 +143,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.6)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.7)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -273,7 +274,7 @@ Provides the structured `/orchestrate` workflow:
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon) / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.1-sol`** / `gpt-5.6-sol` / `gpt-6-astra` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
+| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon) / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
 | **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
 | **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). On agy 1.5+ the scout has only `read_file` (no search, listing or shell), so give it exact paths and send searches and git checks to the worker. |
 
@@ -478,7 +479,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | Environment Variable | Default | Description |
 | :--- | :--- | :--- |
 | `*_MITOSIS_PIN_SETTINGS` | `0` | Set to `1` to automatically rewrite settings to the target frontier model at session start. |
-| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.1-sol` | Target frontier model name when pinning (per platform default shown). |
+| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.2-sol` | Target frontier model name when pinning (per platform default shown). |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | Set to `1` to silence all primary-model warnings. |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | Set to `0` to stop rewriting `Agent` calls in Claude Code entirely. |
 | `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | Set to `1` to also pin Claude Code built-in agents without an explicit model: `Explore` gets the scout model and effort, `general-purpose` is routed like an untyped call. `Plan` and other built-ins are untouched. On 36 sealed lookup runs `Explore` scored 90 of 90 in both arms at 51% of the median cost, but both arms hit the ceiling and the prompt forced delegation, so no general saving is claimed: see [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md). `general-purpose` was not measured. On one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. With the flag on, `Explore` runs on haiku but does NOT get the scout Bash allowlist, and its stops do not block or escalate; the SendMessage guard does apply. `Explore`'s read-only limit comes from Claude Code's own tool list for that agent, not from this plugin. Unpinned spend is always reported (`mitosis-cost-report.py --fleet` marks rows `unpinned`; the doctor shows built-in stop counts in `claude.heartbeat.builtin`). |

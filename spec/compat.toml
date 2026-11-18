@@ -13,11 +13,13 @@ note = "The Agent tool now lists `fork` and `web-fetch` as built-in types; both 
 note_zh = "Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。"
 
 [codex]
-verified = "0.166.0"
-verified_on = "2026-11-05"
-method = "installed plugin run after hook review"
-method_zh = "完成 hook review 後以已安裝外掛實跑"
-fixtures = "0.166.0"
+verified = "0.169.1"
+verified_on = "2026-11-18"
+method = "installed plugin run with gpt-6.2-sol as primary (scout and worker spawn) and gpt-6.2-astra as primary"
+method_zh = "以 gpt-6.2-sol 為主核實跑已安裝外掛（派出偵察與執行子代理），並以 gpt-6.2-astra 為主核實跑"
+fixtures = "0.169.1"
+note = "GPT-6.2 ships only Astra (`gpt-6.2-astra`) and Sol (`gpt-6.2-sol`); both are frontier primaries and the default primary is now `gpt-6.2-sol`. There is no 6.2 Terra or Luna, so the worker stays on `gpt-6.1-terra` and the scout on `gpt-6-luna`. The 6.2 API rejects reasoning effort `none`; the plugin pins `low` and `medium` only. A child rollout records the parent model in its first `turn_context` and the pinned model in the last one, which is the one pin verification reads. `models_cache.json` written by an older Codex may not list the 6.2 models yet."
+note_zh = "GPT-6.2 只有 Astra（`gpt-6.2-astra`）與 Sol（`gpt-6.2-sol`），兩者都視為尖端主核，預設主核改為 `gpt-6.2-sol`。6.2 沒有 Terra 與 Luna，執行子代理維持 `gpt-6.1-terra`、偵察子代理維持 `gpt-6-luna`。6.2 的 API 拒絕推理等級 `none`；本外掛只釘定 `low` 與 `medium`。子代理 rollout 的第一個 `turn_context` 記錄主核模型、最後一個記錄釘定模型，釘定驗證讀的是最後一個。舊版 Codex 寫下的 `models_cache.json` 可能還沒有列出 6.2 模型。"
 
 [agy]
 verified = "1.5.7"
