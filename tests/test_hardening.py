@@ -207,7 +207,7 @@ class TestFrontierSegments(unittest.TestCase):
                 self.assertFalse(eo.is_frontier_tier(name))
 
     def test_current_frontier_names(self):
-        for name in ("claude-opus-5-5", "claude-fable-5-1", "gpt-6.1-sol", "qwen3-235b-a22b", "deepseek-v4", "fable"):
+        for name in ("claude-opus-5-5", "claude-fable-5-1", "gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra", "qwen3-235b-a22b", "deepseek-v4", "fable"):
             with self.subTest(name=name):
                 self.assertTrue(eo.is_frontier_tier(name))
 

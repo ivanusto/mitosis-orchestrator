@@ -514,7 +514,7 @@ def payloads(platform: str, ctx: Ctx, tag: str) -> List[Tuple[str, str, str, Any
         return [("scout", "Agent", "", validate_claude, json.dumps(p, ensure_ascii=False))]
     if platform == "codex":
         base = {"session_id": sid, "transcript_path": "/nonexistent/rollout.jsonl", "cwd": str(ctx.tmp), "hook_event_name": "PreToolUse",
-                "model": "gpt-6.1-sol", "permission_mode": "bypassPermissions", "turn_id": "doctor-turn"}
+                "model": "gpt-6.2-sol", "permission_mode": "bypassPermissions", "turn_id": "doctor-turn"}
         opaque = dict(base, tool_name="collaborationspawn_agent",
                       tool_input={"task_name": "probe", "fork_turns": "none", "message": OPAQUE})
         text = dict(base, session_id=sid + "-t", tool_name="collaborationspawn_agent",

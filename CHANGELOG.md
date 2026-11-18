@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.7.7 - 2026-11-18
+
+GPT-6.2 model update. OpenAI released GPT-6.2 Astra (`gpt-6.2-astra`, US$8 / 0.40 / 40 per million input / cached input / output tokens) and Sol (`gpt-6.2-sol`, US$2 / 0.10 / 10, the same price as GPT-6.1 Sol) on 2026-11-17. There is no 6.2 Terra or Luna.
+
+**After updating.** On Codex, run `python3 scripts/setup-codex.py` and `codex plugin add mitosis-orchestrator@mitosis-orchestrator`, open Codex once and accept the hook review, then run `python3 scripts/mitosis-doctor.py --platform codex`. The primary model in your own `~/.codex/config.toml` is not changed by the plugin; set `model = "gpt-6.2-sol"` there if you want the new default. On Claude Code, start a new session.
+
+### Changed
+- **Codex default primary is now `gpt-6.2-sol`** (was `gpt-6.1-sol`). It is used when a payload carries no model and as the target of `CODEX_MITOSIS_PIN_SETTINGS=1`. Reason: same price as 6.1 Sol, and in a 7-task agent benchmark (Codex CLI 0.169.1, effort medium, 3 runs per task, file system isolated) 6.2 Sol passed 21/21 against 18/21 for 6.1 Sol; it used about 39% more tokens (API-equivalent US$0.84 against US$0.54). 6.2 Astra also passed 21/21 at US$1.75, so it is listed as an option for the hardest tasks rather than the default.
+- Model lists in both READMEs, `rules/AGENTS.md` and the `/orchestrate` skill name `gpt-6.2-sol` and `gpt-6.2-astra`; `gpt-6.1-sol` and `gpt-6-astra` stay supported.
+- Subagent pins are unchanged: worker `gpt-6.1-terra` (medium), scout `gpt-6-luna` (low). The 6.2 API rejects effort `none`, which the plugin never sets.
+- Frontier detection needed no change: both 6.2 models were already accepted.
+- `scripts/sanitize-payloads.py` keeps `astra` model names (they became `__STR__` before).
+
+### Tests
+- New fixtures `tests/fixtures/payloads/codex/0.169.1/` (`spawn-worker-scout` with a `gpt-6.2-sol` primary, `astra-primary`). Shape diff against 0.166.0: no payload key added or removed by the CLI. `spec/compat.toml` now records Codex 0.169.1.
+- Live run on Codex 0.169.1: `gpt-6.2-sol` primary spawned an explorer and a worker; the children ran on `gpt-6-luna` and `gpt-6.1-terra` (`pin_verified`), both reports passed the four-header check, the scout's `python3` command was refused by the allowlist, 5/5 project tests passed. A `gpt-6.2-astra` primary ran SessionStart, UserPromptSubmit and Stop with no non-frontier warning.
+- Unit tests for the new default, for both 6.2 names as frontier primaries without a warning, and for the sanitizer keeping them.
+
 ## 2.7.6 - 2026-11-13
 
 Based on a real agy 1.5.7 harness task (read `vllm-startup.log`, find the root cause, write `answer.md`, Gemini 4 Hydrogen High as primary). Pure agy passed 3/3 in 302-482 s. With the plugin loaded, 3/3 never wrote `answer.md` and were cut off by the 900 s print timeout. Nothing to do after updating except start a new agy session.

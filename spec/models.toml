@@ -14,7 +14,7 @@ model = "sonnet"
 effort = "medium"
 
 [codex]
-primary = "gpt-6.1-sol"
+primary = "gpt-6.2-sol"
 
 [codex.scout]
 model = "gpt-6-luna"
