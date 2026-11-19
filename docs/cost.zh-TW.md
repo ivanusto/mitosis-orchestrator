@@ -52,6 +52,18 @@ Mitosis 只釘定子細胞（scout 用 `haiku`、worker 用 `sonnet`），主核
 
 **訂閱方案（Pro / Max）。** 訂閱不按 token 計費，但用量上限同樣依模型階層加權，方向一致，所以 `fable` 主核消耗上限的速度明顯快於 `opus`。上述判斷原則不變；下方報表仍能告訴你是哪個模型在吃額度。
 
+### agy（Gemini）主核
+
+量測日期 2026-11-19（agy 1.5.11，7 項循序任務各跑 3 次，未載入外掛；成本為 agy 回報的 token 乘以牌價，屬 token 等值）。API 牌價（每百萬 token）：
+
+| 模型 | 輸入 | 快取讀取 | 輸出（含思考） | 免費額度 |
+| :--- | ---: | ---: | ---: | :--- |
+| Gemini 4 Neon | 3.00 | 0.15 | 15.00 | 無 |
+| Gemini 4 Hydrogen | 1.50 | 0.075 | 7.50 | 有 |
+| Gemini 4 Carbon | 2.00（12/1 起 4.00） | 0.10（12/1 起 0.20） | 10.00（12/1 起 20.00） | 不適用 |
+
+Neon High 花費 US$7.85（21/21），Hydrogen High 為 US$2.10（21/21），約 3.7 倍，但牌價只差 2 倍。原因在隱含快取：Hydrogen 的輸入有 83.4% 命中快取，Neon High 只有 46.0%；在最長的日誌診斷任務 03 上為 89% 對 39%，其中一次 Neon 執行曾連續 7 步 cache_read=0，輸入從 47K 增至 89K（並非壓縮對話）。短任務兩者都約 60%。代理迴圈每一步都會重送不斷變長的上下文，命中率較低就會把 2 倍牌價再放大。XHigh（US$22.24、命中率 15.7%、19/21）與 Orchestrator (Neon)（US$21.75、命中率 26.9%、20/21）在循序工作上的花費約為 Neon High 的 3 倍。限制：每格 n=3，快取命中率可能反映上市首日的伺服器狀態。詳見 [README](../README.zh-TW.md) 與 [cyberq.tw 文章](https://cyberq.tw/2026/11/19/real-world-testing-with-gemini-4-neon/)。
+
 ### 實際量測：`scripts/mitosis-cost-report.py`
 
 只用標準函式庫的腳本，讀取 Claude Code transcript（`~/.claude/projects/<專案>/<session>.jsonl` 與 `<session>/subagents/agent-*.jsonl`），依訊息 id 去除串流重複的用量記錄，按模型彙總 token，區分主核與子代理，並以內建價目表估算美元（`--prices file.json` 可覆寫）。快取寫入對主核採 1 小時費率、對子代理採 5 分鐘費率（`--primary-cache-ttl` / `--subagent-cache-ttl`），在已驗證的 session 上能精確重現 Claude Code 自己的費用數字（`claude -p --output-format json`）：

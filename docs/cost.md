@@ -52,6 +52,18 @@ That is about a 2x difference on the primary alone; the scout and worker bill is
 
 **Subscription plans (Pro / Max).** These are not billed per token, but their usage limits are weighted by model tier in the same direction, so a `fable` primary drains the limit noticeably faster than `opus`. The decision rule above is unchanged; the report below still tells you which model is consuming the budget.
 
+### agy (Gemini) primaries
+
+Measured 2026-11-19 (agy 1.5.11, 7 sequential tasks x 3 runs, no plugin loaded; cost is agy-reported tokens x list price, a token-equivalent). API list prices per MTok:
+
+| Model | Input | Cache read | Output (incl. thinking) | Free tier |
+| :--- | ---: | ---: | ---: | :--- |
+| Gemini 4 Neon | 3.00 | 0.15 | 15.00 | No |
+| Gemini 4 Hydrogen | 1.50 | 0.075 | 7.50 | Yes |
+| Gemini 4 Carbon | 2.00 (4.00 from 12/1) | 0.10 (0.20 from 12/1) | 10.00 (20.00 from 12/1) | n/a |
+
+Neon High cost US$7.85 for 21/21 against US$2.10 for Hydrogen High (21/21), about 3.7x, although the list price is only 2x. The reason is the implicit cache: Hydrogen hit 83.4% of input in the cache and Neon High 46.0%; on the long log-triage task 03 it was 89% against 39%, and one Neon run had 7 consecutive steps with cache_read=0 while input grew from 47K to 89K (not compaction). Short tasks were about 60% for both. In an agent loop every step resends a growing context, so a lower hit rate multiplies the 2x price. XHigh (US$22.24, 15.7% hit, 19/21) and Orchestrator (Neon) (US$21.75, 26.9% hit, 20/21) cost about 3x Neon High for sequential work. Limits: n=3 per cell, cache rates may reflect launch-day server state. Details: [README](../README.md) and the [cyberq.tw article](https://cyberq.tw/2026/11/19/real-world-testing-with-gemini-4-neon/).
+
 ### Measure it: `scripts/mitosis-cost-report.py`
 
 A standard-library script that reads Claude Code transcripts (`~/.claude/projects/<project>/<session>.jsonl` plus `<session>/subagents/agent-*.jsonl`), de-duplicates streamed usage records by message id, aggregates tokens per model, splits primary from subagents, and estimates USD from a built-in price table (`--prices file.json` overrides it). Cache writes are priced at the 1-hour rate for the primary and the 5-minute rate for subagents (`--primary-cache-ttl` / `--subagent-cache-ttl`), which reproduces Claude Code's own cost accounting (`claude -p --output-format json`) to the cent on the sessions checked:

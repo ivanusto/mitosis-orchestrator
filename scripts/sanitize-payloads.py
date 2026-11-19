@@ -112,6 +112,7 @@ MODEL_FAMILY = frozenset((
 MODEL_WORDS = MODEL_FAMILY | frozenset((
     "preview", "latest", "high", "low", "medium", "minimal", "max", "xhigh", "thinking", "instruct", "chat", "exp",
     "experimental", "turbo", "image", "audio", "live", "tts",
+    "hydrogen", "neon", "orchestrator", "worker", "agy",
 ))
 _MODEL_NUM_RE = re.compile(r"^[A-Za-z]?[0-9]{1,8}[A-Za-z]{0,2}$")
 _MODEL_DATE_RE = re.compile(r"^20[0-9]{6}$")
@@ -128,7 +129,7 @@ def model_ok(value: str) -> bool:
         return False
     if " " in text:
         words = text.split(" ")
-        if len(words) > 6 or words[0].lower() not in ("gemini", "claude", "gpt"):
+        if len(words) > 6 or words[0].lower() not in ("gemini", "claude", "gpt", "orchestrator"):
             return False
         for word in words[1:]:
             inner = word[1:-1] if word.startswith("(") and word.endswith(")") else word

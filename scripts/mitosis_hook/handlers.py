@@ -54,6 +54,8 @@ from .models import (
     codex_policy_notice,
     is_frontier_tier,
     is_orchestrator_executor,
+    model_key,
+    primary_cost_advice,
     settings_path,
 )
 from .platforms.agy import (
@@ -161,7 +163,7 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
     elif status == "warn":
         note = (
             f"WARNING: {target_file} primary model is '{model or 'unset'}', not a frontier model. "
-            "Ask the user to switch to a supported frontier model (Gemini Argon/Carbon/Pro/Ultra, Gemini 4 Hydrogen High/XHigh, agy Orchestrator, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
+            "Ask the user to switch to a supported frontier model (Gemini Argon/Carbon/Neon/Pro/Ultra, Gemini 4 Hydrogen High/XHigh, agy Orchestrator, Claude Opus/Sonnet, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before orchestrating, "
             "or set CODEX_MITOSIS_ALLOW_NON_PRIMARY=1 / AGY_MITOSIS_ALLOW_NON_PRIMARY=1 / CLAUDE_MITOSIS_ALLOW_NON_PRIMARY=1 to silence this."
         )
     elif status == "silenced":
@@ -198,6 +200,16 @@ def handle_session_start(payload: Optional[Dict[str, Any]] = None) -> Dict[str, 
                 "additionalContext": f"[Mitosis Orchestrator Active] {note} {claude_policy_notice()}",
             }
         }
+    # agy SessionStart carries the live modelName (agy 1.5.0+); settings.json may name another model
+    # when `--model` is used, so the advisory goes by the live model when there is one.
+    live = str(p.get("modelName") or "").strip()
+    advised_model = live or (model if status in ("ok", "pinned") else "")
+    advice = primary_cost_advice(advised_model) if advised_model else None
+    if advice:
+        state = load_state(p)
+        state["primary_advised"] = model_key(advised_model)
+        save_state(p, state)
+        note = f"{note} {advice}"
     return {
         "injectSteps": [
             {"systemMessage": {"systemMessage": f"[Mitosis Orchestrator Active] {note} {POLICY_NOTICE}"}}
@@ -310,6 +322,13 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         and not is_codex_payload(payload)
         and not is_claude_code_payload(payload)
     )
+    if agy and not agy_executor:
+        # Once per conversation and model (SessionStart may already have advised on settings.json's model).
+        advice = primary_cost_advice(model_name)
+        if advice and state.get("primary_advised") != model_key(model_name):
+            state["primary_advised"] = model_key(model_name)
+            save_state(payload, state)
+            agy_steps.append({"ephemeralMessage": advice})
     if not model_name or is_frontier_tier(model_name) or agy_executor or _env_flag(
         "CODEX_MITOSIS_ALLOW_NON_PRIMARY",
         "CLAUDE_MITOSIS_ALLOW_NON_PRIMARY",
@@ -331,7 +350,7 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     warn_text = (
         f"[Mitosis Orchestrator] The active session model is '{model_name}', which is "
         "not a frontier model. Tell the user to switch Model Selection to "
-        "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Carbon/Pro/Ultra, Gemini 4 Hydrogen High/XHigh, agy Orchestrator, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
+        "a supported frontier model (Claude Opus/Sonnet, Gemini Argon/Carbon/Neon/Pro/Ultra, Gemini 4 Hydrogen High/XHigh, agy Orchestrator, xAI Grok, OpenAI GPT/o-series, DeepSeek, Qwen) before continuing orchestration work."
     )
     if is_codex_hook_payload(payload):
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": warn_text}}

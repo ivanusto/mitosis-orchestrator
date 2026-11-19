@@ -93,12 +93,12 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.2-sol`**、`gpt-6.2-astra`、`gpt-6.1-sol`、**`gpt-5.6-sol`**、`gpt-5.6-terra`、`gpt-6.1-terra`、`gpt-6-astra`、`o1`、`o3`、`o4` | `gpt-5.6-luna`、`gpt-6-luna`、`gpt-5.4-mini`、`o4-mini`、`o3-mini`、`gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`**（Claude Fable 5.2）、**`opus`**（Claude Opus 5.5）、`sonnet`（Claude Sonnet 5.5） | `haiku`（Claude Haiku 5.5、`claude-haiku-*`） |
-| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon）、`Gemini 4 Hydrogen (High / XHigh)`、`Orchestrator (Carbon / Argon)`（agy 1.5.7 以上）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano`、`Gemini 4 Hydrogen (Low / Medium)` |
+| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`、`Gemini 4 Carbon (High / Medium)`（agy 1.5.5 以上，僅限 ADC 登入）、`Gemini 4 Neon (Low / Medium / High / XHigh)`（agy 1.5.11 以上）、`Gemini 4 Hydrogen (High / XHigh)`（預設 High）、`Orchestrator (Neon / Carbon / Argon)`（agy 1.5.7 以上）、`Gemini Pro`、`Gemini Ultra` | `gemini-3-flash`、`gemini-flash-lite`、`gemini-nano`、`Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`、`Grok 4`、`grok-3`、`grok-4`、`grok-3-thinking` | `grok-3-mini`、`grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`、`DeepSeek-V3`、`deepseek-reasoner`、`deepseek-chat` | `deepseek-lite` |
 | **Alibaba Qwen** | `Qwen Max`、`Qwen Plus`、`Qwen 2.5 / 3`、`QwQ`（`qwq-32b`） | `qwen-lite`、`qwen-vl-lite` |
 
-> `Orchestrator (Carbon)` 與 `Orchestrator (Argon)`（agy 1.5.7 以上）本身已在內部分工：由 Carbon 或 Argon 負責規劃，Hydrogen 負責執行。本外掛的子代理派工（`flash-worker` / `flash-lite-scout`）是疊加在其上。Gemini 4 Hydrogen 只有 High、XHigh（Extra High）或未指定等級時才視為尖端模型，Low 與 Medium 視為小型模型。Orchestrator (Carbon) 在規劃結束（`exit_plan_mode`）後交給內部執行者，hook 收到的 `modelName` 會變成 `gemini-flash-worker-agy`，本外掛視為 Orchestrator 的一部分，不發非尖端警告。
+> agy 的預設綁定目標與建議值改為 `Gemini 4 Hydrogen (High)`（原為 Argon）。Gemini 4 Neon 與 Carbon 相同，任何等級（Low、Medium、High、XHigh）都視為尖端模型；Orchestrator (Neon)（`gemini-pro-orchestrator-neon`）由 Neon 規劃，再交給內部執行者。`Orchestrator (Neon)`、`Orchestrator (Carbon)` 與 `Orchestrator (Argon)`（agy 1.5.7 以上）本身已在內部分工：由 Neon、Carbon 或 Argon 負責規劃，Hydrogen 負責執行。本外掛的子代理派工（`flash-worker` / `flash-lite-scout`）是疊加在其上。Gemini 4 Hydrogen 只有 High、XHigh（Extra High）或未指定等級時才視為尖端模型，Low 與 Medium 視為小型模型。Orchestrator (Carbon) 在規劃結束（`exit_plan_mode`）後交給內部執行者，hook 收到的 `modelName` 會變成 `gemini-flash-worker-agy`，本外掛視為 Orchestrator 的一部分，不發非尖端警告。
 
 > [!NOTE]
 > 內建邊界過濾器（`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`）排除 `mini`、`flash`、`lite`、`haiku`、`nano`、`luna`、`spark` 輕量模型，同時確保 `gemini` 不會誤判。
@@ -113,6 +113,31 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 - 快速模式對每一類 token 以 2 倍計費；`mitosis-cost-report.py` 會讀取對話紀錄的 `usage.speed` 並據以計價。
 - 在 Fable 5.1 上量測的 session 中，主核占總費用 70% 到 85%，因此主核模型與 effort 是最大的成本控制桿。
 - 價格、示例試算、成本報表與子細胞調整，見 [docs/cost.zh-TW.md](./docs/cost.zh-TW.md)。
+
+---
+
+## agy 主核怎麼選：Neon、Hydrogen、XHigh 與 Orchestrator
+
+數據來自 [cyberq.tw 2026-11-19 的實測文章](https://cyberq.tw/2026/11/19/real-world-testing-with-gemini-4-neon/)：agy 1.5.11 無頭模式，以 bwrap 隔離檔案系統，每次執行重建全新的 `AGY_HOME`，harness-bench 7 項循序單一目錄任務，各跑 3 次，上限 900 秒，未載入任何使用者外掛。成本為 agy 回報的 token 乘以 API 標準牌價，屬 token 等值，並非實際帳單。
+
+| 組別 | 通過 | 總耗時 | Token | Token 等值成本 | 快取命中率 |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| Neon High | 21/21 | 1,923.6 秒 | 4.09M | US$7.85 | 46.0% |
+| Neon XHigh | 19/21 | 4,313.0 秒 | 7.98M | US$22.24 | 15.7% |
+| Orchestrator (Neon) | 20/21 | 3,649.2 秒 | 9.10M | US$21.75 | 26.9% |
+| Hydrogen High | 21/21 | 1,421.3 秒 | 5.13M | US$2.10 | 83.4% |
+
+- 排除耗時最長的日誌診斷任務 03 之後，各任務中位數加總為：Hydrogen 160.7 秒、Neon High 290.0 秒（1.8 倍）、Orchestrator 370.3 秒、XHigh 607.1 秒；成本為 Neon High US$1.88 對 Hydrogen US$0.82。
+- 任務 03 的隱含快取命中率為 Neon High 39% 對 Hydrogen 89%（其中一次 Neon 執行曾連續 7 步 cache_read=0，輸入從 47K 增至 89K，並非壓縮對話所致）；短任務兩者都約 60%。
+- API 牌價（每百萬 token，輸入／快取讀取／輸出含思考）：Neon 3.00／0.15／15.00；Hydrogen 1.50／0.075／7.50；Carbon 在 11/30 前為 2.00／0.10／10.00，12/1 起為 4.00／0.20／20.00。Neon 沒有免費額度，Hydrogen 有。
+
+建議：
+
+- 使用 API 金鑰者：以 Hydrogen High 作為主核，遇到困難的問題診斷或重構時改用 Neon High。
+- Pro／Ultra 訂閱使用者：使用 Neon High。
+- 循序、單執行緒的寫程式工作，不要預設使用 XHigh 或 Orchestrator。Orchestrator 本身已在內部分工，外掛派工會疊加其上。自 2.7.8 起，外掛會為此加上一行提示（`AGY_MITOSIS_PRIMARY_ADVICE=0` 可關閉）。
+
+限制：每格 n=3、單一作者、成本為 token 等值、快取命中率可能反映上市首日的伺服器狀態、Carbon 未在相同條件下量測，且這些執行並未載入本外掛。
 
 ---
 
@@ -131,11 +156,11 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | 以 claude-fable-5-2 為主核實跑 headless smoke 與互動背景代理 |
 | Codex CLI | 0.169.1 | 2026-11-18 | 以 gpt-6.2-sol 為主核實跑已安裝外掛（派出偵察與執行子代理），並以 gpt-6.2-astra 為主核實跑 |
-| agy | 1.5.7 | 2026-11-13 | 以 gemini-4-hydrogen-high、gemini-pro-orchestrator 與 gemini-pro-orchestrator-argon 為主核做 headless /orchestrate 實跑 |
+| agy | 1.5.12 | 2026-11-19 | 以 gemini-4-neon-high 與 gemini-pro-orchestrator-neon 為主核做 headless /orchestrate 實跑，並在安裝外掛的隔離環境以 Neon High 跑 harness-bench 第 03 題 |
 
 - Claude Code：Agent 工具現在內建 `fork` 與 `web-fetch` 兩種類型，兩者都不釘定。`--model fable` 會解析為 `claude-fable-5-2`。
 - Codex CLI：GPT-6.2 只有 Astra（`gpt-6.2-astra`）與 Sol（`gpt-6.2-sol`），兩者都視為尖端主核，預設主核改為 `gpt-6.2-sol`。6.2 沒有 Terra 與 Luna，執行子代理維持 `gpt-6.1-terra`、偵察子代理維持 `gpt-6-luna`。6.2 的 API 拒絕推理等級 `none`；本外掛只釘定 `low` 與 `medium`。子代理 rollout 的第一個 `turn_context` 記錄主核模型、最後一個記錄釘定模型，釘定驗證讀的是最後一個。舊版 Codex 寫下的 `models_cache.json` 可能還沒有列出 6.2 模型。
-- agy：Gemini 4 Hydrogen（`gemini-4-hydrogen-low|medium|high|xhigh`）在 High 與 XHigh 時視為尖端主核，Low 與 Medium 會警告。Orchestrator (Carbon)（`gemini-pro-orchestrator`）與 Orchestrator (Argon)（`gemini-pro-orchestrator-argon`）視為尖端模型；兩者內部已分工規劃與執行，本外掛的子代理派工會疊加其上。Orchestrator (Carbon) 在 `exit_plan_mode` 後交給內部執行者，hook 收到的 `modelName` 是 `gemini-flash-worker-agy`，外掛接受且不發非尖端警告；實測中 Orchestrator (Argon) 全程維持自己的 id。`flash` 與 `flash_lite` 子代理層級由伺服器端解析，CLI 日誌與 hook payload 都看不到實際模型，`flash` 是否已改指 Hydrogen 尚未驗證。`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon。agy 1.5.x 沒有列目錄、grep、glob、find 工具：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED。print 模式下，子代理寫入實際路徑不在 `/tmp` 下的檔案，即使有 `--mode accept-edits` 也會被軟拒絕，該子代理隨之取消；print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。1.5.7 的 headless 執行若未指定 `--mode`，預設為 Auto mode。
+- agy：Gemini 4 Neon（`gemini-4-neon-low|medium|high|xhigh`，agy 1.5.11 以上）比照 Carbon，各等級都視為尖端主核。Orchestrator (Neon)（`gemini-pro-orchestrator-neon`）由 Neon 規劃，與 Carbon 相同，執行時交給 `gemini-flash-worker-agy`。agy 預設主核改為 Gemini 4 Hydrogen (High)。XHigh 等級與 Orchestrator 主核會收到一次成本提醒（`AGY_MITOSIS_PRIMARY_ADVICE=0` 關閉）；agy SessionStart payload 帶有當下的 `modelName`，提醒以它為準，不看 settings.json。Gemini 4 Hydrogen（`gemini-4-hydrogen-low|medium|high|xhigh`）在 High 與 XHigh 時視為尖端主核，Low 與 Medium 會警告。Orchestrator (Carbon)（`gemini-pro-orchestrator`）與 Orchestrator (Argon)（`gemini-pro-orchestrator-argon`）視為尖端模型；兩者內部已分工規劃與執行，本外掛的子代理派工會疊加其上。Orchestrator (Carbon) 在 `exit_plan_mode` 後交給內部執行者，hook 收到的 `modelName` 是 `gemini-flash-worker-agy`，外掛接受且不發非尖端警告；實測中 Orchestrator (Argon) 全程維持自己的 id。`flash` 與 `flash_lite` 子代理層級由伺服器端解析，CLI 日誌與 hook payload 都看不到實際模型，`flash` 是否已改指 Hydrogen 尚未驗證。`agy models` 只在 ADC 登入時列出 Gemini 4 Carbon。agy 1.5.x 沒有列目錄、grep、glob、find 工具：偵察子代理只拿到 `read_file` 與 `send_message`，只讀指名路徑，需要搜尋時回報 BLOCKED。print 模式下，子代理寫入實際路徑不在 `/tmp` 下的檔案，即使有 `--mode accept-edits` 也會被軟拒絕，該子代理隨之取消；print 模式不理會 hook 的 `permissionOverrides`，`allow` 與 `ask` 都一樣。1.5.7 以後的 headless 執行若未指定 `--mode`，預設為 Auto mode。
 <!-- END GENERATED: compat -->
 
 ### 平台一：Google Antigravity (`agy` 1.4 以上)
@@ -143,7 +168,7 @@ Mitosis Orchestrator 在三大平台都支援尖端推理模型擔任主核，�
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.7)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.8)
 ```
 
 也可以直接 clone 到全域外掛目錄，`agy` 會自動載入該目錄下的每個外掛：
@@ -273,7 +298,7 @@ NOTES: <一句話說明發現，或最多 10 行 `- ` 清單；若 BLOCKED/FAILE
 
 | 層級 | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | 角色定位與職責範圍 |
 | :--- | :--- | :--- | :--- | :--- |
-| **主核架構師 (Master Nucleus)** | `Gemini 4 Argon (High/Medium)` 或 `Gemini 4 Carbon (High/Medium)`（agy 1.5.5 以上，僅限 ADC 登入；預設仍為 Argon） / 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
+| **主核架構師 (Master Nucleus)** | **`Gemini 4 Hydrogen (High)`**（預設）/ `Gemini 4 Neon (High)` / `Gemini 4 Argon (High/Medium)` / `Gemini 4 Carbon (High/Medium)`（僅限 ADC 登入）/ 尖端模型 | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | 系統架構設計、多步驟任務拆解、跨模組重構、複雜邏輯與資安把關、向使用者釐清需求與最終彙整。 |
 | **執行子代理 (Worker)** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) 或 `--profile mitosis-worker` | 跨檔案探索、呼叫圖追蹤、撰寫與執行單元/整合測試、允許清單內的局部修改（`workspace-write`）。 |
 | **偵察子代理 (Scout)** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) 或 `--profile mitosis-scout` | 快速檔案與符號查找、`grep`/`glob` 搜尋、`git status`/`git log` 檢查、Log 切片檢視與輕量摘要（`read-only`）。agy 1.5 起偵察子代理只有 `read_file`（沒有搜尋、列目錄與 shell 工具），請給它確切路徑，搜尋與 git 檢查交給 worker。 |
 
@@ -485,7 +510,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | 環境變數 | 預設值 | 功能說明 |
 | :--- | :--- | :--- |
 | `*_MITOSIS_PIN_SETTINGS` | `0` | 設為 `1` 時，Session 啟動時自動把設定檔改寫為指定的主核尖端模型。 |
-| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.2-sol` | 啟用自動綁定時的目標模型（依平台預設）。 |
+| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Hydrogen (High)` · `opus` · `gpt-6.2-sol` | 啟用自動綁定時的目標模型（依平台預設）。 |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | 設為 `1` 可關閉所有非尖端主模型的警告。 |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | 設為 `0` 時 Claude Code 端完全不改寫 `Agent` 呼叫。 |
 | `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | 設為 `1` 時，另外釘定未指定模型的 Claude Code 內建 agent：`Explore` 使用 scout 的模型與 effort，`general-purpose` 當作未指定型別的呼叫處理。`Plan` 與其他內建型別不動。`Explore` 在 36 次封存的查詢實跑中兩組都答對 90/90，費用中位數是繼承組的 51%，但兩組都碰到滿分上限，提示詞也強制委派，所以不宣稱通用的節省幅度，詳見 [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md)。`general-purpose` 未量測。在一台機器上，2026-10-23 至 2026-11-04 期間，未釘定的內建 agent 約占子代理花費的 30%。開啟後 `Explore` 以 haiku 執行，但不會取得 scout 的 Bash 白名單，其停止事件不會阻擋也不會升級；SendMessage 守衛仍然適用。`Explore` 的唯讀限制來自 Claude Code 自身對該 agent 的工具清單，並非本外掛。未釘定的花費一律會回報（`mitosis-cost-report.py --fleet` 在列上標示 `unpinned`；doctor 在 `claude.heartbeat.builtin` 顯示內建 agent 停止次數）。 |
@@ -503,6 +528,7 @@ v9（80 個提示詞，於 commit 4ec78be 封存）每個版本以獨立程序�
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise`（預設，未知值亦同）不阻擋，每種情況每回合附一次建議；`enforce` 恢復單回合修改上限與「修改後跑測試」的拒絕；`off` 停用預算。 |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | 設為 `1` 時允許主代理直接讀取 `.log` 與 `transcript.jsonl`。 |
 | `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | 主代理可直接讀取不超過此大小的一般 `.log` 或 transcript 檔（情境整潔守衛的例外）。設為 `0` 則停用例外。 |
+| `AGY_MITOSIS_PRIMARY_ADVICE` | `1` | 僅適用 agy。設為 `0` 可關閉單行提示：當主核為 XHigh（Extra High）等級或 Orchestrator 模型時，建議改用 High 等級（SessionStart 一次，PreInvocation 每個對話一次）。此機制不會封鎖派工。 |
 | `AGY_MITOSIS_TURN_NUDGE_SECONDS` | `300` | 僅適用 agy。使用者送出請求後經過此秒數，若該請求期間已派出過子代理，hook 會提醒尖端模型立即以現有證據產出交付物，每個請求只提醒一次。設為 `0` 則停用，無效值使用預設值。此機制不會封鎖任何操作。 |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | 設為 `1` 時停用快捷修改預算（等同 `*_MITOSIS_FASTPATH_MODE=off`，且不追蹤）。 |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | 設為 `0` 時，不再比對釘定的模型與子代理實際執行的模型。 |

@@ -57,7 +57,7 @@ stop
 
 Environment variables:
     AGY_MITOSIS_PIN_SETTINGS=1          opt in to rewriting settings.json at session start
-    AGY_MITOSIS_PRIMARY_MODEL=<name>    target model when pinning (default: Gemini 4 Argon (High))
+    AGY_MITOSIS_PRIMARY_MODEL=<name>    target model when pinning (default: Gemini 4 Hydrogen (High))
     AGY_MITOSIS_ALLOW_NON_PRIMARY=1     silence all primary-model warnings
     AGY_ALLOW_NON_MITOSIS_PRIMARY=1     alias to silence all primary-model warnings
     AGY_ANTIGRAVITY_SETTINGS=<path>     override the settings.json location (tests)
@@ -177,6 +177,8 @@ from mitosis_hook.models import (  # noqa: F401,E402
     is_frontier_tier,
     is_mitosis_tier,
     is_orchestrator_executor,
+    model_key,
+    primary_cost_advice,
     settings_path,
     valid_codex_model,
 )

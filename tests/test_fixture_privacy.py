@@ -411,6 +411,10 @@ class TestSanitizer(unittest.TestCase):
     def test_model_names_of_known_families_survive(self):
         for name in ("haiku", "gpt-5.6-terra", "claude-haiku-5-5", "claude-haiku-4-5-20251001", "gemini-3.8-flash-low", "flash_lite", "o3-mini", "Gemini 4 Argon (High)", "Gemini 4 Carbon (High)", "gemini-4-carbon-high", "gpt-6.2-astra", "gpt-6.2-sol"):
             self.assertTrue(san.model_ok(name), name)
+        for name in ("gemini-4-hydrogen-high", "gemini-4-neon-high", "Gemini 4 Neon (XHigh)", "Gemini 4 Hydrogen (High)", "gemini-pro-orchestrator-neon", "Orchestrator (Neon)", "gemini-flash-worker-agy"):
+            self.assertTrue(san.model_ok(name), name)
+        for name in ("/home/alice/neon", "neon", "worker-agy", "gemini-neon-alice", "Gemini 4 Neon Alice", "gemini-4-neon-high/../x"):
+            self.assertFalse(san.model_ok(name), name)
         for name in ("Acme payroll export", "gpt-0912345678", "gpt 5 Alice", "gAAAAABq2ZqgkxWOcFgr1V5", "", "claude-acme-payroll"):
             self.assertFalse(san.model_ok(name), name)
 

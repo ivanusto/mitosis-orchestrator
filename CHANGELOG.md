@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.7.8 - 2026-11-19
+
+Gemini 4 Neon support and agy primary guidance. Google released Gemini 4 Neon on 2026-11-18; agy 1.5.12 lists `gemini-4-neon-low|medium|high|xhigh` and `gemini-pro-orchestrator-neon`. Before this release every Neon primary got the non-frontier warning on each turn.
+
+**After updating.** On agy, start a new session. On Codex, run `python3 scripts/setup-codex.py` and `codex plugin add mitosis-orchestrator@mitosis-orchestrator`, open Codex once and accept the hook review (any plugin file change requires it), then run `python3 scripts/mitosis-doctor.py --platform codex`. On Claude Code, start a new session. Claude Code and Codex behaviour is unchanged.
+
+### Added
+- **Gemini 4 Neon is a frontier primary at every level** (Low, Medium, High, XHigh), like Carbon, since Neon is derived from Carbon. `Orchestrator (Neon)` (`gemini-pro-orchestrator-neon`) plans with Neon and hands execution to the internal executor `gemini-flash-worker-agy`, which is already exempt from the non-frontier warning.
+- **agy primary advice.** When the primary is an XHigh / Extra High level or an Orchestrator model, SessionStart (and once per conversation in PreInvocation) adds a one-line note recommending the High level for sequential work. It never blocks dispatch; `AGY_MITOSIS_PRIMARY_ADVICE=0` silences it.
+
+### Changed
+- The agy default primary (pin target and suggestion) is now `Gemini 4 Hydrogen (High)` (was `Gemini 4 Argon (High)`).
+- The advisory goes by the live `modelName` that agy SessionStart payloads carry, so headless `--model` runs are judged by the model actually in use rather than the one in `settings.json`; the non-frontier check itself is unchanged.
+- `scripts/sanitize-payloads.py` keeps Gemini 4 Hydrogen, Neon, Orchestrator and `gemini-flash-worker-agy` model names (they became `__STR__` before).
+- compat: agy verified on 1.5.12; new fixtures `tests/fixtures/payloads/agy/1.5.12/{neon-high-primary,orchestrator-neon-primary}.jsonl`.
+
+### Docs
+- New README section "Choosing the Primary Model on agy: Neon, Hydrogen, XHigh and Orchestrator" (both languages) and an "agy (Gemini) primaries" subsection in `docs/cost.md`, with the 2026-11-19 measurements ([article](https://cyberq.tw/2026/11/19/real-world-testing-with-gemini-4-neon/)): Neon High 21/21 at US$7.85 against Hydrogen High 21/21 at US$2.10 (cache hit 46.0% against 83.4%); XHigh 19/21 and Orchestrator (Neon) 20/21 each cost about US$22. n=3 per cell, token-equivalent cost, plugin not loaded in those runs.
+- `CONTRIBUTING.md`: agy keeps full conversations in `AGY_HOME/brain/`, so benchmark runs must rebuild `AGY_HOME` from a template, and file system isolation keeps agents from finding answers in local files.
+
 ## 2.7.7 - 2026-11-18
 
 GPT-6.2 model update. OpenAI released GPT-6.2 Astra (`gpt-6.2-astra`, US$8 / 0.40 / 40 per million input / cached input / output tokens) and Sol (`gpt-6.2-sol`, US$2 / 0.10 / 10, the same price as GPT-6.1 Sol) on 2026-11-17. There is no 6.2 Terra or Luna.

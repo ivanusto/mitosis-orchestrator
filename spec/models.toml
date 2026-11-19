@@ -27,7 +27,7 @@ effort = "medium"
 sandbox = "workspace-write"
 
 [agy]
-primary = "Gemini 4 Argon (High)"
+primary = "Gemini 4 Hydrogen (High)"
 
 [agy.scout]
 model = "flash_lite"

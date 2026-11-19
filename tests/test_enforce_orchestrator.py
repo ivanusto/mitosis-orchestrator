@@ -628,6 +628,88 @@ class TestPrimaryModelGuard(HookBase):
                 res = eo.handle_session_start({})
                 self.assertEqual("WARNING" in json.dumps(res), warned, json.dumps(res))
 
+    def test_neon_tiers_are_frontier_at_every_level(self):
+        for name in (
+            "gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-neon-xhigh",
+            "gemini-4-neon", "Gemini 4 Neon (High)", "Gemini 4 Neon (XHigh)",
+            "gemini-pro-orchestrator-neon", "Orchestrator (Neon)",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(eo.is_frontier_tier(name), name)
+
+    def test_neon_primary_is_not_warned(self):
+        for model in ("gemini-4-neon-low", "gemini-4-neon-high", "gemini-pro-orchestrator-neon"):
+            with self.subTest(pre=model):
+                res = eo.handle_pre_invocation(dict(self.payload, modelName=model, invocationNum=2))
+                self.assertNotIn("not a frontier model", json.dumps(res))
+        for model in ("Gemini 4 Neon (High)", "Gemini 4 Neon (XHigh)", "Orchestrator (Neon)"):
+            with self.subTest(settings=model):
+                self._settings(model)
+                self.assertNotIn("WARNING", json.dumps(eo.handle_session_start(dict(self.payload))))
+
+    def test_primary_cost_advice_selection(self):
+        for name in (
+            "gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)", "gemini-4-hydrogen-xhigh",
+            "Gemini 4 Hydrogen (Extra High)", "gemini-pro-orchestrator", "gemini-pro-orchestrator-neon",
+            "gemini-pro-orchestrator-argon", "Orchestrator (Neon)", "Orchestrator (Carbon)",
+        ):
+            with self.subTest(advised=name):
+                self.assertTrue(eo.primary_cost_advice(name), name)
+        for name in (
+            "gemini-4-neon-high", "gemini-4-neon-medium", "gemini-4-neon-low", "gemini-4-hydrogen-high",
+            "gemini-flash-worker-agy", "gemini-3.8-flash-high", "haiku", "", None,
+        ):
+            with self.subTest(plain=name):
+                self.assertIsNone(eo.primary_cost_advice(name), name)
+
+    def test_primary_cost_advice_env_off_switch(self):
+        os.environ["AGY_MITOSIS_PRIMARY_ADVICE"] = "0"
+        self.assertIsNone(eo.primary_cost_advice("gemini-4-neon-xhigh"))
+        start, pre = self._start_and_pre("Gemini 4 Neon (XHigh)", "gemini-4-neon-xhigh")
+        self.assertNotIn("XHigh primary", json.dumps(start))
+        self.assertNotIn("XHigh primary", json.dumps(pre))
+
+    def _start_and_pre(self, settings_model, live_model):
+        self._settings(settings_model)
+        start = eo.handle_session_start(dict(self.payload, modelName=live_model))
+        pre = eo.handle_pre_invocation(dict(self.payload, modelName=live_model, invocationNum=2))
+        return start, pre
+
+    def test_advice_once_per_model_across_session_start_and_pre_invocation(self):
+        start, pre = self._start_and_pre("Gemini 4 Neon (XHigh)", "gemini-4-neon-xhigh")
+        self.assertEqual(json.dumps(start).count("XHigh primary"), 1, json.dumps(start))
+        self.assertNotIn("XHigh primary", json.dumps(pre))
+        self.assertEqual(eo.model_key("Gemini 4 Neon (XHigh)"), eo.model_key("gemini-4-neon-xhigh"))
+        # A different advised model is announced once, then not again.
+        other = dict(self.payload, modelName="gemini-pro-orchestrator-neon", invocationNum=3)
+        first = eo.handle_pre_invocation(other)
+        self.assertEqual(json.dumps(first).count("Orchestrator primary"), 1, json.dumps(first))
+        second = eo.handle_pre_invocation(dict(other, invocationNum=4))
+        self.assertNotIn("Orchestrator primary", json.dumps(second))
+
+    def test_session_start_advice_uses_settings_without_live_model(self):
+        self._settings("Gemini 4 Neon (XHigh)")
+        bare = {k: v for k, v in self.payload.items() if k != "modelName"}
+        start = eo.handle_session_start(bare)
+        self.assertEqual(json.dumps(start).count("XHigh primary"), 1, json.dumps(start))
+
+    def test_session_start_advice_follows_live_model_over_settings(self):
+        # agy 1.5.12 headless `--model`: settings.json still names another model.
+        self._settings("Gemini 4 Carbon (Medium)")
+        live = dict(self.payload, modelName="gemini-pro-orchestrator-neon")
+        start = eo.handle_session_start(dict(live))
+        self.assertEqual(json.dumps(start).count("Orchestrator primary"), 1, json.dumps(start))
+        pre = eo.handle_pre_invocation(dict(live, invocationNum=0))
+        self.assertNotIn("Orchestrator primary", json.dumps(pre))
+        self._settings("Gemini 4 Neon (XHigh)")
+        calm = eo.handle_session_start(dict(self.payload, modelName="gemini-4-neon-high"))
+        self.assertNotIn("primary. In an isolated agy benchmark", json.dumps(calm))
+
+    def test_agy_default_primary_is_hydrogen_high(self):
+        self.assertEqual(eo.DEFAULT_PRIMARY_MODEL, "Gemini 4 Hydrogen (High)")
+        spec = tomllib.loads((Path(__file__).resolve().parent.parent / "spec" / "models.toml").read_text(encoding="utf-8"))
+        self.assertEqual(spec["agy"]["primary"], "Gemini 4 Hydrogen (High)")
+
     def test_session_start_pins_when_opted_in_argon_legacy(self):
         path = self._settings("gemini-3-flash")
         os.environ["AGY_ARGON_PIN_SETTINGS"] = "1"
@@ -1090,6 +1172,26 @@ class ClaudeHookBase(unittest.TestCase):
         p = dict(self.payload, tool_name=name, tool_input=input_args)
         p.update(extra)
         return p
+
+
+class TestPrimaryAdviceIsAgyOnly(ClaudeHookBase):
+    ADVICE = "primary. In an isolated agy benchmark"
+
+    def test_claude_code_never_gets_the_advice(self):
+        for model in ("claude-xhigh-orchestrator", "opus-xhigh", "gemini-4-neon-xhigh"):
+            with self.subTest(model=model):
+                p = dict(self.payload, hook_event_name="SessionStart", model=model)
+                self.assertNotIn(self.ADVICE, json.dumps(eo.handle_session_start(p)))
+                pre = dict(self.payload, hook_event_name="UserPromptSubmit", model=model, prompt="hi")
+                self.assertNotIn(self.ADVICE, json.dumps(eo.handle_pre_invocation(pre)))
+
+    def test_codex_never_gets_the_advice(self):
+        for model in ("gpt-6.2-xhigh", "gpt-6.2-orchestrator"):
+            with self.subTest(model=model):
+                p = {"thread_id": "thr_1", "model": model, "hook_event_name": "SessionStart", "artifactDirectoryPath": str(self.artifact_dir)}
+                self.assertNotIn(self.ADVICE, json.dumps(eo.handle_session_start(p)))
+                pre = {"thread_id": "thr_1", "model": model, "modelName": model, "artifactDirectoryPath": str(self.artifact_dir), "invocationNum": 1}
+                self.assertNotIn(self.ADVICE, json.dumps(eo.handle_pre_invocation(pre)))
 
 
 class TestClaudeCodePayloadDetection(unittest.TestCase):

@@ -17,6 +17,10 @@ vermin -t=3.8- --no-tips scripts
 agy plugin validate . --strict
 ```
 
+## Testing on agy
+
+agy stores full conversations in `AGY_HOME` under `brain/`. For repeated benchmark runs, rebuild `AGY_HOME` from a template before each run, or a later run can read an earlier run's answer. Isolate the file system as well (for example a bwrap tmpfs over the home directory), so agents cannot find answers in local files either.
+
 ## Single source
 
 Models, prices, report wording and agent files are generated from `spec/` by `scripts/sync-generated.py`. Edit `spec/` and run `python3 scripts/sync-generated.py`; never edit the generated files by hand. `--check` fails when anything is stale.

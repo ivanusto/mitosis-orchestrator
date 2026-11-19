@@ -93,12 +93,12 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 | :--- | :--- | :--- |
 | **OpenAI** (Codex CLI / API) | **`gpt-6.2-sol`**, `gpt-6.2-astra`, `gpt-6.1-sol`, **`gpt-5.6-sol`**, `gpt-5.6-terra`, `gpt-6.1-terra`, `gpt-6-astra`, `o1`, `o3`, `o4` | `gpt-5.6-luna`, `gpt-6-luna`, `gpt-5.4-mini`, `o4-mini`, `o3-mini`, `gpt-4.1-mini` |
 | **Anthropic** (Claude Code) | **`fable`** (Claude Fable 5.2), **`opus`** (Claude Opus 5.5), `sonnet` (Claude Sonnet 5.5) | `haiku` (Claude Haiku 5.5, `claude-haiku-*`) |
-| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini 4 Carbon (High / Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon), `Gemini 4 Hydrogen (High / XHigh)`, `Orchestrator (Carbon / Argon)` (agy 1.5.7+), `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano`, `Gemini 4 Hydrogen (Low / Medium)` |
+| **Google Gemini** (Antigravity `agy`) | `Gemini 4 Argon (High / Medium)`, `Gemini 4 Carbon (High / Medium)` (agy 1.5.5+, ADC sign-in only), `Gemini 4 Neon (Low / Medium / High / XHigh)` (agy 1.5.11+), `Gemini 4 Hydrogen (High / XHigh)` (default: High), `Orchestrator (Neon / Carbon / Argon)` (agy 1.5.7+), `Gemini Pro`, `Gemini Ultra` | `gemini-3-flash`, `gemini-flash-lite`, `gemini-nano`, `Gemini 4 Hydrogen (Low / Medium)` |
 | **xAI** | `Grok 3`, `Grok 4`, `grok-3`, `grok-4`, `grok-3-thinking` | `grok-3-mini`, `grok-3-mini-fast` |
 | **DeepSeek** | `DeepSeek-R1`, `DeepSeek-V3`, `deepseek-reasoner`, `deepseek-chat` | `deepseek-lite` |
 | **Alibaba Qwen** | `Qwen Max`, `Qwen Plus`, `Qwen 2.5 / 3`, `QwQ` (`qwq-32b`) | `qwen-lite`, `qwen-vl-lite` |
 
-> `Orchestrator (Carbon)` and `Orchestrator (Argon)` (agy 1.5.7+) already split work internally: Carbon or Argon plans and Hydrogen executes. This plugin's subagent dispatch (`flash-worker` / `flash-lite-scout`) stacks on top of that. Gemini 4 Hydrogen is accepted as a primary only at High, XHigh (Extra High) or without a level; Low and Medium are treated as small tiers. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor whose hook `modelName` is `gemini-flash-worker-agy`; this plugin treats it as part of Orchestrator and does not emit the non-frontier warning.
+> The default agy pin target and suggestion is now `Gemini 4 Hydrogen (High)` (was Argon). Gemini 4 Neon is a frontier primary at every level (Low, Medium, High, XHigh), like Carbon, and Orchestrator (Neon) (`gemini-pro-orchestrator-neon`) plans with Neon and hands execution to the internal executor. `Orchestrator (Neon)`, `Orchestrator (Carbon)` and `Orchestrator (Argon)` (agy 1.5.7+) already split work internally: Neon, Carbon or Argon plans and Hydrogen executes. This plugin's subagent dispatch (`flash-worker` / `flash-lite-scout`) stacks on top of that. Gemini 4 Hydrogen is accepted as a primary only at High, XHigh (Extra High) or without a level; Low and Medium are treated as small tiers. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor whose hook `modelName` is `gemini-flash-worker-agy`; this plugin treats it as part of Orchestrator and does not emit the non-frontier warning.
 
 > [!NOTE]
 > Boundary-aware regex filtering (`(?<![a-z0-9])(flash|lite|mini|nano|haiku|luna|spark)(?![a-z0-9])`) rejects lightweight variants across hyphen, space, or underscore naming conventions while never false-matching `gemini`.
@@ -113,6 +113,31 @@ Mitosis Orchestrator is vendor-agnostic at the primary tier across all 3 platfor
 - Fast mode bills every token category at 2x; `mitosis-cost-report.py` reads `usage.speed` from the transcript and prices those turns accordingly.
 - The primary is 70% to 85% of the spend in the sessions measured on Fable 5.1, so the primary model and its effort are the biggest cost lever.
 - Prices, a worked example, the cost report and daughter-cell tuning: [docs/cost.md](./docs/cost.md).
+
+---
+
+## Choosing the Primary Model on agy: Neon, Hydrogen, XHigh and Orchestrator
+
+Measured in [the cyberq.tw article of 2026-11-19](https://cyberq.tw/2026/11/19/real-world-testing-with-gemini-4-neon/): agy 1.5.11 headless, file system isolated with bwrap, a fresh `AGY_HOME` per run, harness-bench 7 sequential single-directory tasks x 3 runs, 900 s cap, no user plugins loaded. Cost is agy-reported tokens x API standard list price, a token-equivalent and not a bill.
+
+| Group | Pass | Total wall clock | Tokens | Token-equivalent cost | Cache hit |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| Neon High | 21/21 | 1,923.6 s | 4.09M | US$7.85 | 46.0% |
+| Neon XHigh | 19/21 | 4,313.0 s | 7.98M | US$22.24 | 15.7% |
+| Orchestrator (Neon) | 20/21 | 3,649.2 s | 9.10M | US$21.75 | 26.9% |
+| Hydrogen High | 21/21 | 1,421.3 s | 5.13M | US$2.10 | 83.4% |
+
+- Excluding the long log-triage task 03, per-task median sums were Hydrogen 160.7 s, Neon High 290.0 s (1.8x), Orchestrator 370.3 s and XHigh 607.1 s; cost was Neon High US$1.88 against Hydrogen US$0.82.
+- On task 03 the implicit cache hit rate was Neon High 39% against Hydrogen 89% (one Neon run had 7 consecutive steps with cache_read=0 while input grew from 47K to 89K, not compaction); short tasks were about 60% for both.
+- API list prices per MTok (input / cache read / output incl. thinking): Neon 3.00 / 0.15 / 15.00; Hydrogen 1.50 / 0.075 / 7.50; Carbon 2.00 / 0.10 / 10.00 until 11/30 and 4.00 / 0.20 / 20.00 from 12/1. Neon has no free tier; Hydrogen has one.
+
+Recommendation:
+
+- API-key users: Hydrogen High as the primary; switch to Neon High for hard triage or refactoring.
+- Pro / Ultra subscription users: Neon High.
+- Do not default to XHigh or Orchestrator for sequential single-thread coding work. Orchestrator already splits work internally, and plugin dispatch stacks on top. From 2.7.8 the plugin adds a one-line note for this (`AGY_MITOSIS_PRIMARY_ADVICE=0` silences it).
+
+Limits: n=3 per cell, one author, token-equivalent cost, cache rates may reflect launch-day server state, Carbon was not measured under the same conditions, and these runs did not load this plugin.
 
 ---
 
@@ -131,11 +156,11 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 | --- | --- | --- | --- |
 | Claude Code | 2.1.322 | 2026-11-10 | headless smoke and interactive background-agent run with claude-fable-5-2 as primary |
 | Codex CLI | 0.169.1 | 2026-11-18 | installed plugin run with gpt-6.2-sol as primary (scout and worker spawn) and gpt-6.2-astra as primary |
-| agy | 1.5.7 | 2026-11-13 | headless /orchestrate runs with gemini-4-hydrogen-high, gemini-pro-orchestrator and gemini-pro-orchestrator-argon as primary |
+| agy | 1.5.12 | 2026-11-19 | headless /orchestrate runs with gemini-4-neon-high and gemini-pro-orchestrator-neon as primary, plus harness-bench task 03 with the plugin installed (Neon High, filesystem-isolated) |
 
 - Claude Code: The Agent tool now lists `fork` and `web-fetch` as built-in types; both are left unpinned. `--model fable` resolves to `claude-fable-5-2`.
 - Codex CLI: GPT-6.2 ships only Astra (`gpt-6.2-astra`) and Sol (`gpt-6.2-sol`); both are frontier primaries and the default primary is now `gpt-6.2-sol`. There is no 6.2 Terra or Luna, so the worker stays on `gpt-6.1-terra` and the scout on `gpt-6-luna`. The 6.2 API rejects reasoning effort `none`; the plugin pins `low` and `medium` only. A child rollout records the parent model in its first `turn_context` and the pinned model in the last one, which is the one pin verification reads. `models_cache.json` written by an older Codex may not list the 6.2 models yet.
-- agy: Gemini 4 Hydrogen (`gemini-4-hydrogen-low|medium|high|xhigh`) is a frontier primary at High and XHigh; Low and Medium are warned about. Orchestrator (Carbon) (`gemini-pro-orchestrator`) and Orchestrator (Argon) (`gemini-pro-orchestrator-argon`) are accepted; they already split planning and execution internally, so subagent dispatch stacks on top. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor that hook payloads report as `gemini-flash-worker-agy`, which is accepted without the non-frontier warning; Orchestrator (Argon) kept its own id in the verified run. The `flash` and `flash_lite` subagent tiers are resolved server side and neither the CLI log nor hook payloads show the concrete model, so whether `flash` now means Hydrogen is unverified. Gemini 4 Carbon is listed by `agy models` only under ADC sign-in. agy 1.5.x has no list, grep, glob or find tool: the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed. Print mode soft-denies a subagent's file write outside a real `/tmp` path even under `--mode accept-edits`, which cancels that subagent; Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. 1.5.7 headless runs start in Auto mode unless `--mode` is given.
+- agy: Gemini 4 Neon (`gemini-4-neon-low|medium|high|xhigh`, agy 1.5.11+) is a frontier primary at every level, like Carbon. Orchestrator (Neon) (`gemini-pro-orchestrator-neon`) plans with Neon and, as with Carbon, hands execution to `gemini-flash-worker-agy`. The default agy primary is now Gemini 4 Hydrogen (High). XHigh levels and Orchestrator primaries get a one-time cost advisory (`AGY_MITOSIS_PRIMARY_ADVICE=0` silences it); agy SessionStart payloads carry the live `modelName`, which the advisory prefers over settings.json. Gemini 4 Hydrogen (`gemini-4-hydrogen-low|medium|high|xhigh`) is a frontier primary at High and XHigh; Low and Medium are warned about. Orchestrator (Carbon) (`gemini-pro-orchestrator`) and Orchestrator (Argon) (`gemini-pro-orchestrator-argon`) are accepted; they already split planning and execution internally, so subagent dispatch stacks on top. After `exit_plan_mode`, Orchestrator (Carbon) hands execution to an internal executor that hook payloads report as `gemini-flash-worker-agy`, which is accepted without the non-frontier warning; Orchestrator (Argon) kept its own id in the verified run. The `flash` and `flash_lite` subagent tiers are resolved server side and neither the CLI log nor hook payloads show the concrete model, so whether `flash` now means Hydrogen is unverified. Gemini 4 Carbon is listed by `agy models` only under ADC sign-in. agy 1.5.x has no list, grep, glob or find tool: the scout receives only `read_file` and `send_message`, so it reads named paths and reports BLOCKED when a search is needed. Print mode soft-denies a subagent's file write outside a real `/tmp` path even under `--mode accept-edits`, which cancels that subagent; Print mode ignores hook `permissionOverrides` under decision `allow` and `ask`. 1.5.7 and later headless runs start in Auto mode unless `--mode` is given.
 <!-- END GENERATED: compat -->
 
 ### 1. Google Antigravity (`agy` 1.4+)
@@ -143,7 +168,7 @@ The CLI versions this plugin release was actually verified on. A newer CLI is un
 ```bash
 git clone https://github.com/ivanusto/mitosis-orchestrator.git ~/mitosis-orchestrator
 agy plugin install ~/mitosis-orchestrator
-agy plugin list            # mitosis-orchestrator (enabled, 2.7.7)
+agy plugin list            # mitosis-orchestrator (enabled, 2.7.8)
 ```
 
 Alternatively clone straight into the global plugin directory; `agy` loads every directory under it automatically:
@@ -274,7 +299,7 @@ Provides the structured `/orchestrate` workflow:
 
 | Tier | Google Antigravity (`agy`) | Anthropic Claude Code | OpenAI Codex CLI | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
-| **Primary Master Nucleus** | `Gemini 4 Argon (High/Medium)` or `Gemini 4 Carbon (High/Medium)` (agy 1.5.5+, ADC sign-in only; default stays Argon) / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
+| **Primary Master Nucleus** | **`Gemini 4 Hydrogen (High)`** (default) / `Gemini 4 Neon (High)` / `Gemini 4 Argon (High/Medium)` / `Gemini 4 Carbon (High/Medium)` (ADC sign-in only) / Frontier | `fable` / `opus` / `sonnet` | **`gpt-6.2-sol`** / `gpt-6.2-astra` / `gpt-6.1-sol` / `gpt-5.6-sol` / `o3` | System architecture, multi-step planning, cross-cutting refactors, security/concurrency review, user clarification, and final synthesis. |
 | **Execution Worker** | `flash` via [`flash-worker`](./agents/flash-worker/agent.md) | `sonnet` via [`mitosis-orchestrator:flash-worker`](./claude-agents/flash-worker.md) | **`gpt-6.1-terra`** via [`worker`](./codex-agents/worker.toml) / [`flash-worker`](./codex-agents/flash-worker.toml) or `--profile mitosis-worker` | Multi-file codebase exploration, call-graph tracing, web/documentation research, writing & running tests, and scoped code edits within an explicit allowlist (`workspace-write`). |
 | **Reconnaissance Scout** | `flash_lite` via [`flash-lite-scout`](./agents/flash-lite-scout/agent.md) | `haiku` via [`mitosis-orchestrator:flash-lite-scout`](./claude-agents/flash-lite-scout.md) | **`gpt-6-luna`** via [`explorer`](./codex-agents/explorer.toml) / [`flash-lite-scout`](./codex-agents/flash-lite-scout.toml) or `--profile mitosis-scout` | Single-hop read-only lookups: file/symbol location, `grep`/`glob` searches, `git status`/`git log`, log tail slicing, and single-file inspection (`read-only`). On agy 1.5+ the scout has only `read_file` (no search, listing or shell), so give it exact paths and send searches and git checks to the worker. |
 
@@ -479,7 +504,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | Environment Variable | Default | Description |
 | :--- | :--- | :--- |
 | `*_MITOSIS_PIN_SETTINGS` | `0` | Set to `1` to automatically rewrite settings to the target frontier model at session start. |
-| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Argon (High)` · `opus` · `gpt-6.2-sol` | Target frontier model name when pinning (per platform default shown). |
+| `*_MITOSIS_PRIMARY_MODEL` | `Gemini 4 Hydrogen (High)` · `opus` · `gpt-6.2-sol` | Target frontier model name when pinning (per platform default shown). |
 | `AGY_ALLOW_NON_MITOSIS_PRIMARY` / `*_MITOSIS_ALLOW_NON_PRIMARY` | `0` | Set to `1` to silence all primary-model warnings. |
 | `CLAUDE_MITOSIS_PIN_SUBAGENTS` | `1` | Set to `0` to stop rewriting `Agent` calls in Claude Code entirely. |
 | `CLAUDE_MITOSIS_PIN_BUILTINS` | `0` | Set to `1` to also pin Claude Code built-in agents without an explicit model: `Explore` gets the scout model and effort, `general-purpose` is routed like an untyped call. `Plan` and other built-ins are untouched. On 36 sealed lookup runs `Explore` scored 90 of 90 in both arms at 51% of the median cost, but both arms hit the ceiling and the prompt forced delegation, so no general saving is claimed: see [`evals/builtin-pin/RESULTS.md`](./evals/builtin-pin/RESULTS.md). `general-purpose` was not measured. On one machine from 2026-10-23 to 2026-11-04, unpinned built-ins were about 30% of subagent spend. With the flag on, `Explore` runs on haiku but does NOT get the scout Bash allowlist, and its stops do not block or escalate; the SendMessage guard does apply. `Explore`'s read-only limit comes from Claude Code's own tool list for that agent, not from this plugin. Unpinned spend is always reported (`mitosis-cost-report.py --fleet` marks rows `unpinned`; the doctor shows built-in stop counts in `claude.heartbeat.builtin`). |
@@ -497,6 +522,7 @@ Every variable is accepted with the `AGY_MITOSIS_*`, `CLAUDE_MITOSIS_*`, or `COD
 | `*_MITOSIS_FASTPATH_MODE` | `advise` | `advise` (default, any unknown value) never blocks and adds advice once per kind per turn; `enforce` restores the denials for the edit limit and edit-then-test; `off` disables the budget. |
 | `*_MITOSIS_ALLOW_DIRECT_LOGS` | `0` | Set to `1` to allow the primary agent to inspect `.log` and `transcript.jsonl` files directly. |
 | `*_MITOSIS_SMALL_LOG_BYTES` | `16384` | Regular `.log` or transcript files up to this size may be read directly by the primary (Context Hygiene exemption). `0` disables it. |
+| `AGY_MITOSIS_PRIMARY_ADVICE` | `1` | agy only. Set to `0` to silence the one-line note that recommends the High level when the primary is an XHigh / Extra High level or an Orchestrator model (SessionStart, and once per conversation in PreInvocation). It never blocks dispatch. |
 | `AGY_MITOSIS_TURN_NUDGE_SECONDS` | `300` | agy only. Seconds after a user request before the hook adds one reminder to write the deliverable now, sent once per request and only if a subagent was dispatched during that request. `0` disables it; an invalid value uses the default. It never blocks. |
 | `*_MITOSIS_ALLOW_DIRECT_FASTPATH` | `0` | Set to `1` to turn the fast-path budget off (same as `*_MITOSIS_FASTPATH_MODE=off`, no tracking). |
 | `CLAUDE_MITOSIS_VERIFY_PIN` · `CODEX_MITOSIS_VERIFY_PIN` | `1` | Set to `0` to stop comparing the pinned model with the model the subagent actually ran on. |
